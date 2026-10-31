@@ -27,6 +27,22 @@ RELAUNCH = (
     b'\xf4'                          # halt: hlt
 ).ljust(0x1000, b'\0') + struct.pack('<II', 1, 0) + b'\\Device\\CdRom0;default.xbe'
 
+# The dashboard going to Xbox Live's pages (xboxdash.xbe on C:): with no
+# launch data page, it leaves one naming xodash\xonlinedash.xbe and
+# quick-reboots; booted again with a page, it halts.
+DASH_HOP = RELAUNCH[:0x1000] + struct.pack('<II', 0, 0) + b'\\Device\\Harddisk0\\Partition2\\xodash;xonlinedash.xbe'
+
+# Xbox Live's pages going back to the dashboard's main menu: a launch data
+# page asking for the dashboard (LDT_LAUNCH_DASHBOARD, reason 0: the main
+# menu, no path), then a quick reboot.
+DASH_BACK = (
+    b'\xa1\x04\x0f\x01\x00'          # mov eax, [thunk 1]: &LaunchDataPage
+    b'\xc7\x00\x00\x20\x01\x00'      # mov dword [eax], 0x12000: the page below
+    b'\x6a\x02'                      # push 2: ReturnFirmwareQuickReboot
+    b'\xff\x15\x00\x0f\x01\x00'      # call [thunk 0]: HalReturnToFirmware
+    b'\xeb\xfe'                      # jmp $
+).ljust(0x1000, b'\0') + struct.pack('<II', 1, 0)
+
 # A title that reads the console's language (ExQueryNonVolatileSetting, which
 # logs the EEPROM's video flags, AV region and language), then halts.
 SETTINGS = (
@@ -103,6 +119,30 @@ def cycles(command, env, n, expect=None):
           f'KiB, VmRSS {first[3]} to {last[3]} KiB')
 
 
+def xbe_of(image):
+    """The default.xbe of a disc() image, as a file on the console disk."""
+    return image.read_bytes()[34 * 2048:]
+
+
+def run_without(command, markers, absent, env=None):
+    """run(), and none of absent in the output."""
+    result = subprocess.run([str(x) for x in command], env=env, capture_output=True, text=True, timeout=15)
+    out = result.stdout + result.stderr
+    missing = [m for m in markers if m not in out]
+    found = [m for m in absent if m in out]
+    if result.returncode or missing or found:
+        print(out[-4000:])
+        raise SystemExit(f'FAIL: {command}: exit {result.returncode}, missing {missing!r}, unexpected {found!r}')
+    print(f'PASS: {Path(command[0]).name} {list(map(str, command[1:]))}: without {list(absent)!r}')
+
+
+def account(area, sector, gamertag, domain):
+    """An online account in the config area's sector, where the app reads it."""
+    base = sector * 512
+    area[base + 0x18:base + 0x28] = gamertag.encode().ljust(16, b'\0')
+    area[base + 0x30:base + 0x44] = domain.encode().ljust(20, b'\0')
+
+
 def dynamic_exports(path):
     """The defined global and weak symbols in an ELF64 object's .dynsym."""
     data = Path(path).read_bytes()
@@ -146,7 +186,8 @@ def main():
     if stray or len(exports) < 25:
         raise SystemExit(f'FAIL: {args.core.name} exports {len(exports)} symbols; not libretro: {stray[:10]}')
     print(f'PASS: {args.core.name} exports only retro_* ({len(exports)})')
-    run([args.harness, args.core], 0, ('core: hakuX', 'extensions iso|chd, need_fullpath 1, block_extract 1',
+    run([args.harness, args.core], 0, ('core: hakuX', 'no game: supported',
+                                       'extensions iso|chd, need_fullpath 1, block_extract 1',
                                        'av: 59.940060 fps, 48000 Hz', 'serialize size: 0', 'unloaded without a game',
                                        'option: hakux_render_scale (Render Scale), default 2',
                                        'option: hakux_crop_overscan (Crop Overscan), default enabled',
@@ -306,6 +347,81 @@ def main():
             ('names no IPv4 address (insignia.example)', 'DNS 46.101.64.175', 'nat: started', 'ran 30 frames'),
             dict(os.environ, HARNESS_OPTIONS='hakux_network=insignia'))
         dns.unlink()
+        # A game on Insignia names the console's Insignia accounts (the config
+        # area's, as the app reads them), or with none says where to make one.
+        insignia = dict(os.environ, HARNESS_OPTIONS='hakux_network=insignia')
+        run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
+            ('network: no Insignia account on this console', 'message: No Insignia account on this console yet',
+             'ran 30 frames'), insignia)
+        config = root / 'saves' / 'hdd' / 'raw-partition0.bin'
+        before = config.read_bytes() if config.exists() else None
+        area = bytearray((before or b'').ljust(16 * 512, b'\0'))
+        account(area, 8, 'hakuX Tester', 'insignia.live')
+        account(area, 9, 'Elsewhere', 'xboxlive.com')
+        account(area, 10, 'Second', 'INSIGNIA.LIVE')
+        config.write_bytes(area)
+        run_without([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'],
+                    ('network: Insignia accounts on this console: hakuX Tester, Second', 'ran 30 frames'),
+                    ('No Insignia account', 'Elsewhere'), insignia)
+        if before is None:
+            config.unlink()
+        else:
+            config.write_bytes(before)
+        # No content (RetroArch's Start Core): the dashboard boots from the
+        # console disk's C: drive, the tray empty; refused, saying where its
+        # files go, until it is there.
+        c_drive = root / 'saves' / 'hdd' / 'Partition2'
+        run([args.harness, args.core, '-', 60, root / 'saves'], 3,
+            ("The Xbox dashboard isn't installed: copy its files (xboxdash.xbe and its folders) to", 'load: refused'))
+        (c_drive / 'XBOXDASH.XBE').write_bytes(xbe_of(root / 'halt.iso'))     # found in any case
+        run([args.harness, args.core, '-', 600, root / 'saves'], 0,
+            ('loaded the dashboard (no content)', 'message: Xbox Live in the dashboard needs Network set to Xbox Live '
+             '(Insignia)', 'guest executed HLT', 'the core asked to shut down', 'unload: the core stopped in'))
+        (c_drive / 'XBOXDASH.XBE').unlink()
+        # Its Xbox Live on Insignia, with no account: none said for a game.
+        (c_drive / 'xboxdash.xbe').write_bytes(xbe_of(root / 'spin.iso'))
+        run_without([args.harness, args.core, '-', 30, root / 'saves'],
+                    ('network: Xbox Live through Insignia', 'network: no Insignia account on this console',
+                     'ran 30 frames'), ('No Insignia account', 'needs Network set'), insignia)
+        # Reset, RetroArch's video driver rebuilt and five loads in one process
+        # boot the dashboard again, with no disc to open.
+        vk = dict(os.environ, HARNESS_VULKAN='1')
+        run([args.harness, args.core, '-', 60, root / 'saves'], 0,
+            ('reset at frame 20', 'reset: the core stopped in', 'ran 60 frames'), dict(vk, HARNESS_RESET_AT='20'))
+        run([args.harness, args.core, '-', 60, root / 'saves'], 0,
+            ('video driver rebuilt at frame 20', 'message: RetroArch rebuilt its video driver: the dashboard starts '
+             'again', 'ran 60 frames'), dict(vk, HARNESS_REINIT_AT='20'))
+        cycles([args.harness, args.core, '-', 30, root / 'saves'], vk, 5, 'loaded the dashboard (no content)')
+        # A game after the dashboard in one process boots its disc's XBE (the
+        # dashboard's spins), and the dashboard after a game its own.
+        run([args.harness, args.core, '-', 300, root / 'saves'], 0,
+            ('loaded the dashboard (no content)', 'then: ', 'guest executed HLT', 'the core asked to shut down'),
+            dict(os.environ, HARNESS_THEN=str(root / 'halt.iso')))
+        run([args.harness, args.core, root / 'halt.iso', 300, root / 'saves'], 0,
+            ('guest executed HLT', 'then: -', 'loaded the dashboard (no content)', 'ran 300 frames'),
+            dict(os.environ, HARNESS_THEN='-'))
+        # The dashboard to Xbox Live's pages (xodash\xonlinedash.xbe) and back
+        # to its main menu, which boots it again rather than closing; in the
+        # process, then with the way before M2 (RetroArch started again on the
+        # core). A title asking for the main menu still closes.
+        disc(root / 'hop.iso', DASH_HOP, imports=(49, 164))
+        disc(root / 'back.iso', DASH_BACK, imports=(49, 164))
+        (c_drive / 'xboxdash.xbe').write_bytes(xbe_of(root / 'hop.iso'))
+        (c_drive / 'xodash').mkdir(exist_ok=True)
+        (c_drive / 'xodash' / 'xonlinedash.xbe').write_bytes(xbe_of(root / 'back.iso'))
+        hops = ('relaunch into \\Device\\Harddisk0\\Partition2\\xodash\\xonlinedash.xbe',
+                'relaunch: \\Device\\Harddisk0\\Partition2\\xodash\\xonlinedash.xbe',
+                'relaunch into \\Device\\Harddisk0\\Partition2\\xboxdash.xbe',
+                'relaunch: \\Device\\Harddisk0\\Partition2\\xboxdash.xbe', 'guest executed HLT')
+        run([args.harness, args.core, '-', 600, root / 'saves'], 0,
+            hops + ("relaunch: the dashboard boots again in RetroArch's process", 'unload: the core stopped in'))
+        run([args.harness, args.core, '-', 600, root / 'saves'], 0,
+            hops + ('relaunch: starting RetroArch again for the dashboard', 'ending the process'), old)
+        if (root / 'saves' / 'relaunch.bin').exists():
+            raise SystemExit("FAIL: the dashboard's relaunch left its launch data page")
+        run([args.harness, args.core, root / 'back.iso', 600, root / 'saves'], 0,
+            ('title returned to the firmware (routine 2', 'the core asked to shut down'))
+        print("PASS: the dashboard booted with no content, through its relaunches")
         # The audio resampler option reaches the APU before it starts: sinc by
         # default, linear when chosen
         run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,

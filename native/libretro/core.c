@@ -13,6 +13,10 @@
  * the devices hold off, the guest's time leaves the pause out), and the next
  * retro_run resumes it.
  *
+ * Started with no content (RetroArch's Start Core), the core boots the Xbox
+ * dashboard from the console disk's C: drive with the tray empty, as the
+ * app's Dashboard does: Insignia's accounts are made there.
+ *
  * Unloading, a reset, a title's relaunch or RetroArch letting its Vulkan
  * context go stops the core in RetroArch's process (stop_core, M2): the
  * guest, its devices, then all of it freed and reset, so that another game,
@@ -54,6 +58,7 @@
 #endif
 
 #define GAP_NS (3 * NC_LR_FRAME_NS)   /* no retro_run this long: paused */
+#define DASH_MARK "hakux:dashboard"   /* HAKUX_RELAUNCH for the dashboard (the app's Dashboard.URI) */
 
 static retro_environment_t g_env;
 static retro_video_refresh_t g_video;
@@ -68,6 +73,8 @@ static bool g_started;
 static const char *g_fail;         /* nc_lr_fail's: the content stops */
 static bool g_shutdown_sent;
 static char g_game[PATH_MAX];      /* the content's real path */
+static bool g_dash;                /* no content: the dashboard boots, no disc */
+static bool g_armed;               /* prepared to boot (prepare_boot); a stop disarms */
 static char g_hdd[PATH_MAX], g_cache[PATH_MAX];    /* the save directory's (data_dirs) */
 static pthread_t g_core_thread, g_gap_thread;
 static int g_gap_quit;             /* stop_core */
@@ -116,6 +123,17 @@ static void on_fault(int sig, siginfo_t *info, void *ctx)
 bool nc_lr_env(unsigned cmd, void *data)
 {
     return g_env && g_env(cmd, data);
+}
+
+bool nc_lr_dashboard(void)
+{
+    return g_dash;
+}
+
+static void message(const char *text, unsigned frames)
+{
+    const struct retro_message msg = {text, frames};
+    g_env(RETRO_ENVIRONMENT_SET_MESSAGE, (void *)&msg);
 }
 
 void nc_lr_fail(const char *why)
@@ -220,7 +238,7 @@ RETRO_API unsigned retro_api_version(void)
 RETRO_API void retro_set_environment(retro_environment_t cb)
 {
     g_env = cb;
-    bool no_game = false;
+    bool no_game = true;            /* Start Core: the dashboard */
     cb(RETRO_ENVIRONMENT_SET_SUPPORT_NO_GAME, &no_game);
     nc_lr_options_declare(cb);
 }
@@ -299,11 +317,26 @@ RETRO_API void retro_reset(void)
     boot_again("reset", false);
 }
 
+/* The dashboard's XBE on the console disk's C: drive (<hdd>/Partition2,
+ * names in any case); where its files go said when it isn't there. */
+static bool dashboard_installed(void)
+{
+    char host[512];
+    nc_io_set_hdd_root(g_hdd);
+    if (nc_io_host_file(NC_DASHBOARD_PATH, host, sizeof(host))) {
+        return true;
+    }
+    static char text[PATH_MAX + 128];
+    snprintf(text, sizeof(text), "The Xbox dashboard isn't installed: copy its files (xboxdash.xbe and its folders) "
+             "to %s/Partition2", g_hdd);
+    message(text, 600);
+    nc_log("hakuX-libretro", "%s", text);
+    return false;
+}
+
 RETRO_API bool retro_load_game(const struct retro_game_info *game)
 {
-    if (!game || !game->path) {
-        return false;
-    }
+    const bool dash = !game || !game->path || !*game->path;     /* Start Core */
     enum retro_pixel_format fmt = RETRO_PIXEL_FORMAT_XRGB8888;
     if (!g_env(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &fmt)) {
         nc_log("hakuX-libretro", "the frontend has no XRGB8888");
@@ -312,20 +345,28 @@ RETRO_API bool retro_load_game(const struct retro_game_info *game)
     if (!data_dirs(g_hdd, g_cache, sizeof(g_hdd))) {
         return false;
     }
-    g_disc_fd = open(game->path, O_RDONLY | O_CLOEXEC);
-    if (g_disc_fd < 0) {
-        nc_log("hakuX-libretro", "%s: %s", game->path, strerror(errno));
-        return false;
+    if (dash) {
+        if (!dashboard_installed()) {
+            return false;
+        }
+        g_game[0] = 0;
+    } else {
+        g_disc_fd = open(game->path, O_RDONLY | O_CLOEXEC);
+        if (g_disc_fd < 0) {
+            nc_log("hakuX-libretro", "%s: %s", game->path, strerror(errno));
+            return false;
+        }
+        if (!realpath(game->path, g_game)) {
+            snprintf(g_game, sizeof(g_game), "%s", game->path);
+        }
     }
-    if (!realpath(game->path, g_game)) {
-        snprintf(g_game, sizeof(g_game), "%s", game->path);
-    }
+    g_dash = dash;
     /* RetroArch started again for this game's relaunch (relaunch, where the
      * core couldn't stop): boot the XBE it named. */
     bool again = false;
     if (end_process()) {
         const char *e = getenv("HAKUX_RELAUNCH");
-        again = e && !strcmp(e, g_game);
+        again = e && !strcmp(e, dash ? DASH_MARK : g_game);
         unsetenv("HAKUX_RELAUNCH");
     }
     nc_lr_input_describe(g_env);
@@ -336,7 +377,7 @@ RETRO_API bool retro_load_game(const struct retro_game_info *game)
     if (__atomic_load_n(&g_fail, __ATOMIC_ACQUIRE)) {
         return false;
     }
-    nc_log("hakuX-libretro", "loaded %s; data in %s", game->path, g_hdd);
+    nc_log("hakuX-libretro", "loaded %s; data in %s", dash ? "the dashboard (no content)" : game->path, g_hdd);
     return vulkan || nc_lr_start();
 }
 
@@ -345,12 +386,11 @@ bool nc_lr_start(void)
     if (g_started) {
         return true;
     }
-    if (g_disc_fd < 0 && g_game[0]) {
+    if (!g_armed && (g_game[0] || g_dash)) {
         /* stopped with the game loaded: RetroArch rebuilt its video driver
          * (context_destroy, then context_reset on its new device) */
-        static const struct retro_message msg = {"RetroArch rebuilt its video driver: the game starts again",
-                                                 300};
-        g_env(RETRO_ENVIRONMENT_SET_MESSAGE, (void *)&msg);
+        message(g_dash ? "RetroArch rebuilt its video driver: the dashboard starts again"
+                       : "RetroArch rebuilt its video driver: the game starts again", 300);
         return boot_again("video driver rebuilt", false);
     }
     g_started = true;
@@ -408,6 +448,7 @@ static void handlers_restore(void)
 static void prepare_boot(bool relaunch)
 {
     nc_core_set_relaunch(relaunch);
+    nc_core_set_dashboard(g_dash);      /* no disc: C:\xboxdash.xbe */
     nc_io_set_hdd_root(g_hdd);
     nc_hle_set_mode("replace");
     nc_hle_set_base_path(g_cache);
@@ -415,6 +456,7 @@ static void prepare_boot(bool relaunch)
     nc_dev_nv2a_display_period(NC_LR_FRAME_NS);    /* retro_run's: the vblank locks one to one */
     nc_hle_set_pipeline_options(true, true);   /* the app's defaults */
     handlers_install();
+    g_armed = true;
 }
 
 /* The core stops in RetroArch's process (M2). In PortareOS's build
@@ -541,6 +583,7 @@ static void stop_core(const char *why)
     }
     handlers_restore();
     g_disc_fd = -1;                 /* the core's: closed with the disc */
+    g_armed = false;
     __atomic_store_n(&g_core_state, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&g_fail, NULL, __ATOMIC_RELEASE);
     g_started = false;
@@ -552,13 +595,14 @@ static void stop_core(const char *why)
     nc_log("hakuX-libretro", "%s: the core stopped in %.0f ms", why, (double)(now_ns() - t0) / 1e6);
 }
 
-/* Stopped, then the same game booted again in the process: a reset, or a
- * title's relaunch into the XBE its launch data page names. */
+/* Stopped, then the same game (or the dashboard, with no disc) booted again
+ * in the process: a reset, or a title's relaunch into the XBE its launch
+ * data page names. */
 static bool boot_again(const char *why, bool relaunch)
 {
     stop_core(why);
-    g_disc_fd = open(g_game, O_RDONLY | O_CLOEXEC);
-    if (g_disc_fd < 0) {
+    g_disc_fd = g_dash ? -1 : open(g_game, O_RDONLY | O_CLOEXEC);
+    if (g_disc_fd < 0 && !g_dash) {
         nc_log("hakuX-libretro", "%s: %s: %s", why, g_game, strerror(errno));
         nc_lr_fail("the game's file can't be opened again");
         return false;
@@ -593,16 +637,24 @@ static void close_on_exec(void)
 /* A title's XLaunchNewImage (kernel.relaunch; the launch data page is in
  * relaunch.bin, beside the console disk): the core cannot boot again in this
  * process, so RetroArch starts again in its place, on the same command line,
- * with HAKUX_RELAUNCH naming the game. Its load boots the XBE the page names,
- * as Android's activity does with "relaunch". The process stays the same one
- * to its parent (runemu.sh), so the game does not go back to the launcher.
- * Returns if RetroArch can't start again for the game. */
+ * with HAKUX_RELAUNCH naming the game (DASH_MARK for the dashboard, started
+ * with no content: the command line names this core). Its load boots the XBE
+ * the page names, as Android's activity does with "relaunch". The process
+ * stays the same one to its parent (runemu.sh), so the game does not go back
+ * to the launcher. Returns if RetroArch can't start again for the game. */
 static void relaunch(void)
 {
     static char cmd[64 * 1024];
     static char *argv[1024];
     static char mark[PATH_MAX + 32];
+    static char want[PATH_MAX];
     extern char **environ;
+    Dl_info self;
+    if (!g_dash) {
+        snprintf(want, sizeof(want), "%s", g_game);
+    } else if (!dladdr((void *)retro_init, &self) || !self.dli_fname || !realpath(self.dli_fname, want)) {
+        want[0] = 0;
+    }
     const int fd = open("/proc/self/cmdline", O_RDONLY | O_CLOEXEC);
     size_t n = 0;
     if (fd >= 0) {
@@ -617,11 +669,12 @@ static void relaunch(void)
     for (size_t i = 0; i < n && argc < sizeof(argv) / sizeof(*argv) - 1; i += strlen(cmd + i) + 1) {
         char real[PATH_MAX];
         argv[argc++] = cmd + i;
-        on_game = on_game || (realpath(cmd + i, real) && !strcmp(real, g_game));
+        on_game = on_game || (*want && realpath(cmd + i, real) && !strcmp(real, want));
     }
     argv[argc] = NULL;
     if (!on_game) {
-        nc_log("hakuX-libretro", "relaunch: RetroArch was not started on the game; it can't start again for it");
+        nc_log("hakuX-libretro", "relaunch: RetroArch was not started on the %s; it can't start again for it",
+               g_dash ? "core" : "game");
         return;
     }
     size_t ne = 0;
@@ -638,9 +691,9 @@ static void relaunch(void)
             envp[m++] = environ[i];
         }
     }
-    snprintf(mark, sizeof(mark), "HAKUX_RELAUNCH=%s", g_game);
+    snprintf(mark, sizeof(mark), "HAKUX_RELAUNCH=%s", g_dash ? DASH_MARK : g_game);
     envp[m] = mark;
-    nc_log("hakuX-libretro", "relaunch: starting RetroArch again for %s", g_game);
+    nc_log("hakuX-libretro", "relaunch: starting RetroArch again for %s", g_dash ? "the dashboard" : g_game);
     fflush(NULL);
     close_on_exec();
     sigset_t none;
@@ -680,6 +733,8 @@ RETRO_API void retro_unload_game(void)
     nc_lr_video_reset();
     nc_lr_vk_reset();
     g_game[0] = 0;
+    g_dash = false;
+    g_armed = false;
 }
 
 /* HAKUX_LR_STATS=1: every 10 s, how long retro_run takes RetroArch's thread
@@ -727,7 +782,7 @@ RETRO_API void retro_run(void)
      * the XBE its launch data page names, in the process. */
     if (__atomic_load_n(&g_core_state, __ATOMIC_ACQUIRE) < 0 && g_core.kernel.relaunch && can_stop() &&
         !__atomic_load_n(&g_fail, __ATOMIC_ACQUIRE)) {
-        nc_log("hakuX-libretro", "relaunch: the game boots again in RetroArch's process");
+        nc_log("hakuX-libretro", "relaunch: the %s boots again in RetroArch's process", g_dash ? "dashboard" : "game");
         boot_again("relaunch", true);
         return;
     }

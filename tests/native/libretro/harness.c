@@ -4,7 +4,8 @@
  *   libretro-harness <core.so> [<disc image> <frames> <save directory>]
  *
  * Loads the core as RetroArch does (dlopen, every retro_* symbol), reports
- * its system and AV info, and with a disc loads it and calls retro_run at
+ * its system and AV info, and with a disc loads it ("-": no content, as
+ * RetroArch's Start Core loads the core) and calls retro_run at
  * the core's rate, checking that each call hands over exactly one video
  * frame. Core options are the core's defaults, or HARNESS_OPTIONS's
  * ("key=value;..."), and from the 30th call HARNESS_OPTIONS_LATER's, as
@@ -14,7 +15,9 @@
  * retro_unload_game (which with HAKUX_LR_STOP=0 in PortareOS's build ends
  * the process, or after a title's relaunch starts the harness again, as it
  * would RetroArch). HARNESS_LOAD_AGAIN: the core is opened again after it and
- * a second game loaded, as RetroArch would.
+ * a second game loaded, as RetroArch would. HARNESS_THEN=<disc image or ->:
+ * after it, the core opened again and that one played for as many frames, as
+ * RetroArch plays the next game.
  *
  * HARNESS_VULKAN=1: the core renders on a Vulkan device the harness's
  * frontend (vk.c) negotiates with it, as RetroArch does, without a window.
@@ -170,9 +173,11 @@ static bool environment(unsigned cmd, void *data)
         printf("controller info: %u ports, %s: %s\n", n, same == n ? "each" : "port 1", types);
         return true;
     }
+    case RETRO_ENVIRONMENT_SET_SUPPORT_NO_GAME:
+        printf("no game: %s\n", *(const bool *)data ? "supported" : "not supported");
+        return true;
     case RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS:
     case RETRO_ENVIRONMENT_SET_GEOMETRY:
-    case RETRO_ENVIRONMENT_SET_SUPPORT_NO_GAME:
         return true;
     case RETRO_ENVIRONMENT_SHUTDOWN:
         g_shutdown = true;
@@ -535,14 +540,15 @@ int main(int argc, char **argv)
         printf("unloaded without a game\n");
         return 0;
     }
-    const struct retro_game_info game = {.path = argv[2]};
+    const struct retro_game_info disc = {.path = argv[2]};
+    const struct retro_game_info *game = strcmp(argv[2], "-") ? &disc : NULL;     /* "-": Start Core */
     const long frames = atol(argv[3]);
     const int cycles = getenv("HARNESS_CYCLES") ? atoi(getenv("HARNESS_CYCLES")) : 1;
     for (int c = 0; c < cycles; c++) {
         if (c > 0 && !open_core()) {
             return 1;
         }
-        const int r = play(&game, frames);
+        const int r = play(game, frames);
         if (r) {
             close_core();
             return r;
@@ -572,12 +578,26 @@ int main(int argc, char **argv)
     if (cycles <= 1) {
         close_core();
     }
+    const char *then = getenv("HARNESS_THEN");
+    if (then) {                             /* the next game played, the core opened again */
+        const struct retro_game_info next = {.path = then};
+        printf("then: %s\n", then);
+        fflush(stdout);
+        if (!open_core()) {
+            return 1;
+        }
+        const int r = play(strcmp(then, "-") ? &next : NULL, frames);
+        close_core();
+        if (r) {
+            return r;
+        }
+    }
     if (getenv("HARNESS_LOAD_AGAIN")) {     /* a second game, as RetroArch loads one: the core opened again */
         fflush(stdout);
         if (!open_core()) {
             return 1;
         }
-        printf("load again: %s\n", p_retro_load_game(&game) ? "loaded" : "refused");
+        printf("load again: %s\n", p_retro_load_game(game) ? "loaded" : "refused");
         close_core();
     }
     return 0;
