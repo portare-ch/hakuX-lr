@@ -195,6 +195,11 @@ void nc_lr_options_apply(void)
 
     const int language = g_applied[OPT_LANGUAGE] ? g_applied[OPT_LANGUAGE] : auto_language();
     nc_kernel_set_language(language);
+    /* console drive timing, always on as in upstream's release app (its
+     * switches are in debug builds only): a disc or hard disk read takes at
+     * least the console's drives' time; Morrowind froze leaving a building
+     * when its loads were instant (NC_DEVTIME tunes it) */
+    nc_io_set_device_time(true);
 
     const char *region = g_defs[OPT_REGION].values[g_applied[OPT_REGION]].value;
     nc_kernel_set_av_region(!strcmp(region, "ntsc-m")   ? NC_AV_REGION_NTSC_M

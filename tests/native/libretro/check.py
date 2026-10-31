@@ -275,7 +275,7 @@ def main():
         # network's broadcast, with the consoles lan-peers.txt in the save
         # directory names (comments, commas, spaces and lines).
         run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
-            ('network off', 'network off: the NIC has no link', 'ran 30 frames'))
+            ('network off', 'network off: the NIC has no link', 'console timing on', 'ran 30 frames'))
         peers = root / 'saves' / 'lan-peers.txt'
         peers.write_text('# other consoles\n127.0.0.1:43077, 10.0.0.5\n\n10.0.0.6  # over a VPN\n')
         run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
