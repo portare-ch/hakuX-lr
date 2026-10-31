@@ -4,6 +4,7 @@ import argparse
 import os
 from pathlib import Path
 import re
+import socket
 import struct
 import subprocess
 import sys
@@ -191,7 +192,7 @@ def main():
         # its place and boots the XBE the launch data page names.
         disc(root / 'relaunch.iso', RELAUNCH, imports=(49, 164))
         run([args.harness, args.core, root / 'relaunch.iso', 600, root / 'saves'], 0,
-            ('relaunch into \\default.xbe', 'relaunch: starting RetroArch again',
+            ('relaunch into \\Device\\CdRom0\\default.xbe', 'relaunch: starting RetroArch again',
              'relaunch: \\Device\\CdRom0\\default.xbe', 'guest executed HLT', 'ending the process'), old)
         if (root / 'saves' / 'relaunch.bin').exists():
             raise SystemExit('FAIL: the relaunch left its launch data page')
@@ -258,9 +259,15 @@ def main():
         for network, marker in (
                 ('net=lan lanport=43075 lanbcast=127.0.0.1', 'lan: started'),
                 ('net=kai kai=127.0.0.1:43076', 'kai: started'),
-                ('net=nat', "nat: couldn't start")):
+                ('net=nat', 'nat: started')):
             cycles([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'],
                    dict(os.environ, NC_NET=network), 5, marker)
+        # a backend that fails to start (LAN's port taken, without
+        # SO_REUSEADDR here) releases what it made
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as busy:
+            busy.bind(('0.0.0.0', 43079))
+            cycles([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'],
+                   dict(os.environ, NC_NET='net=lan lanport=43079 lanbcast=127.0.0.1'), 5, "lan: couldn't start")
         cycles([args.harness, args.core, root / 'halt.iso', 60, root / 'saves'],
                dict(os.environ, NC_NET='net=lan lanport=43075 lanbcast=127.0.0.1', NC_BOOT_FAIL_AT='disc'),
                5, 'boot: failing after disc')
@@ -315,7 +322,7 @@ def main():
              'message: RetroArch rebuilt its video driver: the game starts again', 'ran 60 frames'),
             dict(os.environ, HARNESS_VULKAN='1', HARNESS_REINIT_AT='20'))
         run([args.harness, args.core, root / 'relaunch.iso', 600, root / 'saves'], 0,
-            ('relaunch into \\default.xbe', 'relaunch: the game boots again in RetroArch\'s process',
+            ('relaunch into \\Device\\CdRom0\\default.xbe', 'relaunch: the game boots again in RetroArch\'s process',
              'relaunch: the core stopped in', 'relaunch: \\Device\\CdRom0\\default.xbe', 'guest executed HLT',
              'unload: the core stopped in'))
         if (root / 'saves' / 'relaunch.bin').exists():
