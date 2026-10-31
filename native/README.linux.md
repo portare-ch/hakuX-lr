@@ -128,7 +128,7 @@ except Crop Overscan and Rumble, which update immediately:
 | `hakux_language` | `auto` (RetroArch's), `english`, `japanese`, `german`, `french`, `spanish`, `italian`, `korean`, `chinese`, `portuguese` | `auto` |
 | `hakux_video_region` | `auto` (the game's region), `ntsc-m`, `ntsc-j`, `pal` | `auto` |
 | `hakux_rumble` | `disabled`, `enabled` (controller vibration) | `disabled` |
-| `hakux_network` | `disabled` (no cable), `lan` (system link) | `disabled` |
+| `hakux_network` | `disabled` (no cable), `lan` (system link), `insignia` (Xbox Live through Insignia via NAT) | `disabled` |
 | `hakux_audio_resampler` | `sinc` (higher quality, 32-tap filter using ARM NEON), `linear` (less CPU, softer high frequencies; fallback on non-ARM64 builds) | `sinc` |
 | `hakux_audio_processing` | `fast` (dry mix), `dsp` (Xbox effects and stereo downmix; experimental) | `dsp` with JIT, otherwise `fast` |
 
@@ -143,6 +143,14 @@ broadcast-capable interface if needed. Add peers beyond broadcast range to
 commas, spaces or newlines; `#` starts a comment. If two devices share a
 console identity, RetroArch warns and generates a new serial number and
 MAC address on the next game start. Existing saves remain valid.
+
+Insignia mode uses upstream's NAT backend (`native/net/nat.c`, libslirp).
+The console gets 10.0.2.15 via DHCP and uses Insignia's DNS server,
+46.101.64.175. If your provider blocks that server, put an insigniaDNS
+server's address in `insignia-dns.txt` in the save directory, using the same
+format as `lan-peers.txt`. Only the first address is used. The core can't
+boot the Xbox dashboard, so Insignia accounts can't be created or recovered
+from RetroArch yet.
 
 PAL60 is always enabled; 480p, 720p and 1080i are disabled. Use RetroArch's
 shaders for filters such as FXAA and **Core provided** for the core's 4:3 or

@@ -36,6 +36,7 @@ core first, copy its libraries there, then build the APK.
 | `adrenotools` | 8fae8ce, with `tools/native/adrenotools-kgsl-context-priority.patch` applied (`git apply`): the KGSL draw context priority hook |
 | `root/subprojects/nv2a_vsh_cpu` | 561fe80 |
 | `libchdr` (optional: CHD images) | 47d7941 |
+| `libslirp` | 4.7.0 (26be815b), unmodified: the network's NAT (`native/net/nat.c`) |
 
 ## Steps
 

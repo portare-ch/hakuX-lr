@@ -9,6 +9,7 @@
     "root/subprojects/nv2a_vsh_cpu": {"url": "https://github.com/abaire/nv2a_vsh_cpu.git", "commit": "561fe80da57a881f89000256b459440c0178a7ce"},
     "SDL3": {"url": "https://github.com/libsdl-org/SDL.git", "commit": "fa2c02bb6e21974a89ea9824bc53c9932abe5f9c"},
     "libchdr": {"url": "https://github.com/rtissera/libchdr.git", "commit": "47d794151b2b64f6aba60304e6480f4f5a2bc24b"},
+    "libslirp": {"url": "https://gitlab.freedesktop.org/slirp/libslirp.git", "commit": "26be815b86e8d49add8c9a8b320239b9594ff03d"},
     "dsp56300": {"url": "https://github.com/xemu-project/dsp56300.git", "commit": "bde7c233a447d32d558c48cb4438e1425fe0bbcc"}
   },
   "fex_submodules": {

@@ -34,6 +34,9 @@ void nc_mods_install(NcDisc *disc);
 /* The core stopped: the patches remembered, the cheats and the per-boot
  * state dropped (the manifest, the front end's, stays). */
 void nc_mods_reset(void);
+/* The patches of [$u\...] sections (a title update's XBE, a host file) over
+ * len bytes read at off of the host file host. */
+void nc_mods_host_patch(const char *host, uint64_t off, void *buf, size_t len);
 /* Once the title's XBE is in memory and its CPU made: where the cheats
  * write (the XBE's executable sections drop translations they change). */
 void nc_mods_bind(NcVm *vm, struct NcCpu *cpu, const HleXbeInfo *xbe);

@@ -5,6 +5,7 @@
  * is dirty.c's, the GPU device's interrupts and display timing dev/nv2a.c's.
  */
 #include "native/hle/hle_native.h"
+#include "native/dev/dev.h"
 
 #include "hw/xbox/hle/host.h"
 
@@ -27,6 +28,14 @@ void nc_hle_host_init(NcKernel *k, NcVm *vm, NcCpu *cpu)
     g_cpu = cpu;
 }
 
+/* The guest CPU's thread alone counts its holds; RDTSC leaves out what the
+ * kernel's time does (nc_ke_hold_end), the APU's sample count not (it
+ * played on). Within a pause (its work storing into guest memory) a hold
+ * has nothing to do. */
+static unsigned g_holds;
+static bool g_hold_on;
+static uint64_t g_hold_c0;
+
 void nc_hle_host_reset(void)
 {
     memset(&nc_hle_regs, 0, sizeof(nc_hle_regs));
@@ -34,6 +43,9 @@ void nc_hle_host_reset(void)
     g_cpu = NULL;
     g_flush = false;
     g_flushes = 0;
+    g_holds = 0;                /* discard holds interrupted by stop; nc_ke_reset clears their timing */
+    g_hold_on = false;
+    g_hold_c0 = 0;
     nc_hle_dirty_reset();
 }
 
@@ -48,6 +60,27 @@ void hle_host_kick(void)
 {
     if (g_cpu) {
         nc_cpu_request_interrupt(g_cpu); /* leave the JIT at the next block */
+    }
+}
+
+void hle_host_guest_hold(bool on)
+{
+    if (!g_cpu || !nc_irq_cpu_thread()) {
+        return;
+    }
+    if (on) {
+        if (g_holds++ == 0 && (g_hold_on = nc_ke_hold_begin())) {
+            g_hold_c0 = nc_cpu_host_cycles();
+        }
+    } else if (g_holds && --g_holds == 0 && g_hold_on) {
+        g_hold_on = false;
+        const uint64_t cycles = nc_cpu_host_cycles() - g_hold_c0;
+        uint64_t held;
+        const uint64_t out = nc_ke_hold_end(&held);
+        if (out && held) {
+            nc_cpu_cycle_offset_add(g_cpu, (uint64_t)((unsigned __int128)cycles * out / held));
+            nc_dev_apu_time_held(out);
+        }
     }
 }
 

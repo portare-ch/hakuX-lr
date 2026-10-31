@@ -79,7 +79,11 @@ typedef struct HlePshKey {
     uint8_t vol;                        /* stages whose texture is a volume (bits 0-3):
                                            2D-coordinate modes fetch it in 3D, as the NV2A
                                            (LLE): PROJECT2D at r = 0, bump-env at the
-                                           coordinates' r */
+                                           coordinates' r; HLE_PSH_RECT: the stage the
+                                           push block's fog.w names has its linear
+                                           texture kept to its own size, part of a
+                                           larger surface (ff.h HLE_NVRECT_GLSL); bits
+                                           5-7 free */
     uint8_t wbuf;                       /* W-buffering: depth = vW (HLE_WBUF_*_GLSL) */
     uint8_t fbfetch;                    /* stages (bits 0-3) whose texture is the colour
                                            target drawn into: its pixel, read as the
@@ -129,6 +133,7 @@ typedef struct HlePshKey {
                                            the range, else a fragment outside it rejected
                                            (0 for every other draw: no split key) */
 } HlePshKey;
+#define HLE_PSH_RECT 0x10u              /* HlePshKey.vol: a linear texture kept to its size */
 
 /* The stage (2 or 3) whose DOT_ZW replaces the fragment's depth, 0 none. It
  * needs the previous stage's dot product: not on stage 0 or 1. */
