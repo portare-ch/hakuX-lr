@@ -363,12 +363,17 @@ void nc_net_start(void)
 {
     nc_net_stop();
     /* nc_net_wait_rx's deadline is CLOCK_MONOTONIC's: the condition's clock too
-     * (with CLOCK_REALTIME's it was long past, and the NIC's thread spun) */
-    pthread_condattr_t attr;
-    pthread_condattr_init(&attr);
-    pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
-    pthread_cond_init(&g_net.rx_cond, &attr);
-    pthread_condattr_destroy(&attr);
+     * (with CLOCK_REALTIME's it was long past, and the NIC's thread spun);
+     * made once, as the core boots again in this process */
+    static bool rx_cond_made;
+    if (!rx_cond_made) {
+        pthread_condattr_t attr;
+        pthread_condattr_init(&attr);
+        pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
+        pthread_cond_init(&g_net.rx_cond, &attr);
+        pthread_condattr_destroy(&attr);
+        rx_cond_made = true;
+    }
     /* debug: NC_NET="option option ..." over the app's (via debug.hakux.env) */
     const char *env = getenv("NC_NET");
     if (env) {

@@ -310,10 +310,11 @@ uint64_t nc_ke_host_ns(uint64_t guest_ns);  /* native/kernel/ke.c */
 static struct {
     pthread_mutex_t mu;
     pthread_cond_t cv;
-    pthread_once_t once;
+    bool started, quit;             /* the thread, joined by nc_dev_nv2a_stop */
+    pthread_t th;
     bool rearm;                     /* ALARM_0 written (or a savestate's): due again */
     uint64_t due;                   /* guest ns; 0: none */
-} g_alarm = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, PTHREAD_ONCE_INIT, false, 0};
+} g_alarm = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER};
 
 /* When the time's low word, at now, next reaches alarm */
 static uint64_t alarm_due(uint32_t alarm, uint64_t now)
@@ -326,12 +327,13 @@ static void *ptimer_thread(void *arg)
 {
     nc_pause_register("ptimer");
     pthread_mutex_lock(&g_alarm.mu);
-    for (;;) {
+    while (!g_alarm.quit) {
         if (nc_paused()) {
             pthread_mutex_unlock(&g_alarm.mu);
             nc_pause_wait();
             pthread_mutex_lock(&g_alarm.mu);
             g_alarm.rearm = true;           /* a savestate's clock and alarm, maybe */
+            continue;                       /* nc_dev_nv2a_stop's quit, maybe */
         }
         const uint64_t now = nc_ke_now_ns();
         if (g_alarm.rearm) {
@@ -350,20 +352,26 @@ static void *ptimer_thread(void *arg)
         const struct timespec ts = {(time_t)(until / 1000000000ull), (long)(until % 1000000000ull)};
         pthread_cond_timedwait(&g_alarm.cv, &g_alarm.mu, &ts);
     }
+    pthread_mutex_unlock(&g_alarm.mu);
     return NULL;
 }
 
+/* The ptimer thread, once a boot (g_alarm.mu held): its condition on the
+ * monotonic clock, as the deadlines (no thread waits on it yet) */
 static void ptimer_start(void)
 {
-    pthread_condattr_t ca;
-    pthread_condattr_init(&ca);
-    pthread_condattr_setclock(&ca, CLOCK_MONOTONIC);
-    pthread_cond_destroy(&g_alarm.cv);
-    pthread_cond_init(&g_alarm.cv, &ca);
-    pthread_condattr_destroy(&ca);
-    pthread_t t;
-    pthread_create(&t, NULL, ptimer_thread, NULL);
-    pthread_detach(t);
+    static bool cv_mono;
+    if (!cv_mono) {
+        pthread_condattr_t ca;
+        pthread_condattr_init(&ca);
+        pthread_condattr_setclock(&ca, CLOCK_MONOTONIC);
+        pthread_cond_destroy(&g_alarm.cv);
+        pthread_cond_init(&g_alarm.cv, &ca);
+        pthread_condattr_destroy(&ca);
+        cv_mono = true;
+    }
+    g_alarm.quit = false;
+    g_alarm.started = pthread_create(&g_alarm.th, NULL, ptimer_thread, NULL) == 0;
     nc_log("hakuX-native", "nv2a: PTIMER alarm in use (alarm %08x, interrupt %s)", ld(NV_PTIMER_ALARM_0),
            ld(NV_PTIMER_INTR_EN_0) & PTIMER_ALARM ? "on" : "off");
 }
@@ -371,8 +379,10 @@ static void ptimer_start(void)
 /* ALARM_0 written, or restored */
 static void alarm_set(void)
 {
-    pthread_once(&g_alarm.once, ptimer_start);
     pthread_mutex_lock(&g_alarm.mu);
+    if (!g_alarm.started) {
+        ptimer_start();
+    }
     g_alarm.rearm = true;
     pthread_cond_signal(&g_alarm.cv);
     pthread_mutex_unlock(&g_alarm.mu);
@@ -829,6 +839,16 @@ void nc_dev_nv2a_stop(void)
         pthread_join(g_vbt.th, NULL);   /* within a frame: it sleeps until the next vblank */
         g_vbt.started = false;
     }
+    pthread_mutex_lock(&g_alarm.mu);
+    const bool ptimer = g_alarm.started;
+    g_alarm.quit = true;
+    pthread_cond_signal(&g_alarm.cv);
+    pthread_mutex_unlock(&g_alarm.mu);
+    if (ptimer) {
+        pthread_join(g_alarm.th, NULL); /* at once: it waits on g_alarm.cv, or the pause (lifted) */
+    }
+    g_alarm.started = g_alarm.quit = g_alarm.rearm = false;
+    g_alarm.due = 0;
 }
 
 

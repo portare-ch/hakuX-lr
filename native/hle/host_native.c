@@ -28,6 +28,14 @@ void nc_hle_host_init(NcKernel *k, NcVm *vm, NcCpu *cpu)
     g_cpu = cpu;
 }
 
+/* The guest CPU's thread alone counts its holds; RDTSC leaves out what the
+ * kernel's time does (nc_ke_hold_end), the APU's sample count not (it
+ * played on). Within a pause (its work storing into guest memory) a hold
+ * has nothing to do. */
+static unsigned g_holds;
+static bool g_hold_on;
+static uint64_t g_hold_c0;
+
 void nc_hle_host_reset(void)
 {
     memset(&nc_hle_regs, 0, sizeof(nc_hle_regs));
@@ -35,6 +43,9 @@ void nc_hle_host_reset(void)
     g_cpu = NULL;
     g_flush = false;
     g_flushes = 0;
+    g_holds = 0;                /* a hold the stop cut short (nc_ke_reset: the time's) */
+    g_hold_on = false;
+    g_hold_c0 = 0;
     nc_hle_dirty_reset();
 }
 
@@ -51,14 +62,6 @@ void hle_host_kick(void)
         nc_cpu_request_interrupt(g_cpu); /* leave the JIT at the next block */
     }
 }
-
-/* The guest CPU's thread alone counts its holds; RDTSC leaves out what the
- * kernel's time does (nc_ke_hold_end), the APU's sample count not (it
- * played on). Within a pause (its work storing into guest memory) a hold
- * has nothing to do. */
-static unsigned g_holds;
-static bool g_hold_on;
-static uint64_t g_hold_c0;
 
 void hle_host_guest_hold(bool on)
 {

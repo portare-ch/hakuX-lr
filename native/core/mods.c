@@ -714,6 +714,11 @@ void nc_mods_reset(void)
     memset(g_logged, 0, sizeof(g_logged));
     free_patches(&g_mp, &g_nmp);
     free_patches(&g_saved, &g_nsaved);
+    for (unsigned i = 0; i < g_nhp; i++) {
+        free(g_hp[i].bytes);            /* a title update's: nc_mods_install adds them again */
+    }
+    memset(g_hp, 0, sizeof(g_hp));
+    g_nhp = 0;
     g_have_saved = false;
     g_xbe_last[0] = 0;
     g_xbe_ok = false;

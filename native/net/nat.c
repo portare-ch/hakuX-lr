@@ -220,9 +220,20 @@ static void nat_poll(struct pollfd *fds, int n)
     g_nat.overflow = 0;
 }
 
+/* After the network's thread has joined (nc_net_stop): the stack, its host
+ * sockets and timers gone, for the next boot's nat_init */
+static void nat_close(void)
+{
+    if (g_nat.slirp) {
+        slirp_cleanup(g_nat.slirp);
+    }
+    memset(&g_nat, 0, sizeof(g_nat));
+}
+
 const NcNetBackend nc_net_nat = {
     .name = "nat",
     .init = nat_init,
+    .close = nat_close,
     .input = nat_input,
     .fill = nat_fill,
     .poll = nat_poll,
