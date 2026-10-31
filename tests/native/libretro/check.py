@@ -74,7 +74,11 @@ def cycles(command, env, n, expect=None):
     first may leave FEX's allocator a heap for the frontend's thread, once:
     nc_cpu_destroy runs there). The signal handlers after each, as before
     the core. expect: a line each cycle logs."""
-    result = subprocess.run([str(x) for x in command], env=dict(env, HARNESS_CYCLES=str(n)), capture_output=True,
+    # glibc retains worker-thread malloc arenas after the threads exit. A
+    # new arena after cycle two reserves 64 MiB and looks like a VmSize leak.
+    # Keep one arena from process startup; retain both memory growth limits.
+    result = subprocess.run([str(x) for x in command],
+                            env=dict(env, HARNESS_CYCLES=str(n), MALLOC_ARENA_MAX='1'), capture_output=True,
                             text=True, timeout=300)
     rows = [tuple(int(v) for v in m) for m in re.findall(
         r'cycle \d+: (\d+) threads, (\d+) descriptors, VmSize (\d+) KiB, VmRSS (\d+) KiB', result.stdout)]
