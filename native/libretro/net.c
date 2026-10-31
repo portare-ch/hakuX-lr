@@ -127,25 +127,24 @@ static void lan_peers(char *out, size_t n)
  * the app's AppPrefs.INSIGNIA_DNS */
 #define INSIGNIA_DNS "46.101.64.175"
 
-/* The console's DNS servers for Insignia, as dns= takes them (IP[,IP]):
- * insignia-dns.txt's first two addresses, else Insignia's own. */
+/* The console's DNS server for Insignia, as dns= takes it: insignia-dns.txt's
+ * first word, else Insignia's own. One: the NAT backend gives the console
+ * only dns[0] (nat_init). */
 static void insignia_dns(char *out, size_t n)
 {
-    char list[64];
-    save_dir_list("insignia-dns.txt", 2, list, sizeof(list));
-    /* only addresses: a word that isn't one would leave the console none */
+    char first[64];
+    save_dir_list("insignia-dns.txt", 1, first, sizeof(first));
+    /* only an address: a word that isn't one would leave the console none */
     struct in_addr a;
-    char first[INET_ADDRSTRLEN + 1];
-    snprintf(first, sizeof(first), "%.*s", (int)strcspn(list, ","), list);
-    const char *second = strchr(list, ',');
-    if (!*list || inet_pton(AF_INET, first, &a) != 1 || (second && inet_pton(AF_INET, second + 1, &a) != 1)) {
-        if (*list) {
-            nc_log("hakuX-libretro", "network: insignia-dns.txt names no IPv4 address (%s): Insignia's DNS server", list);
+    if (!*first || inet_pton(AF_INET, first, &a) != 1) {
+        if (*first) {
+            nc_log("hakuX-libretro", "network: insignia-dns.txt names no IPv4 address (%s): Insignia's DNS server",
+                   first);
         }
         snprintf(out, n, "%s", INSIGNIA_DNS);
         return;
     }
-    snprintf(out, n, "%s", list);
+    snprintf(out, n, "%s", first);
 }
 
 void nc_lr_net_apply(const char *mode)

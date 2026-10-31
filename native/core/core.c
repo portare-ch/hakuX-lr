@@ -118,6 +118,7 @@ bool nc_core_boot(NcCore *c, int disc_fd)
 {
     memset(c, 0, sizeof(*c));
     c->disc.fd = -1;
+    c->xbe.fd = -1;
     /* NC_RAM_MB=128 (debug kit size): a dev switch for memory investigations. */
     const char *mb = getenv("NC_RAM_MB");
     const uint32_t ram = mb && atoi(mb) == 128 ? 128u << 20 : NC_RAM_RETAIL;
@@ -523,6 +524,9 @@ void nc_core_destroy(NcCore *c)
     nc_cpu_destroy(c->cpu);
     c->cpu = NULL;
     nc_kernel_destroy(&c->kernel);
+    if (c->xbe.fd >= 0) {
+        close(c->xbe.fd);               /* a hard disk XBE's (nc_xbe_load) */
+    }
     nc_disc_close(&c->disc);
     nc_vm_destroy(&c->vm);
     nc_mmio_reset();
@@ -531,6 +535,7 @@ void nc_core_destroy(NcCore *c)
     nc_hle_native_reset();
     memset(c, 0, sizeof(*c));
     c->disc.fd = -1;
+    c->xbe.fd = -1;
     c->vm.ram_fd = -1;
     g_boot = NULL;
     g_loaded = false;

@@ -284,8 +284,9 @@ def main():
             dict(os.environ, HARNESS_OPTIONS='hakux_network=lan'))
         peers.unlink()
         # Xbox Live (Insignia): NAT with Insignia's DNS server, or the first
-        # two addresses insignia-dns.txt in the save directory names (an
-        # insigniaDNS server), never a word that isn't one
+        # address insignia-dns.txt in the save directory names (an
+        # insigniaDNS server; NAT gives the console one), never a word that
+        # isn't one
         run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
             ('network insignia', 'Xbox Live through Insignia (NAT), DNS 46.101.64.175',
              'nat: libslirp 4.7.0, 10.0.2.0/24, DNS 46.101.64.175', 'nat: started', 'ran 30 frames'),
@@ -293,8 +294,8 @@ def main():
         dns = root / 'saves' / 'insignia-dns.txt'
         dns.write_text('# insigniaDNS at home\n192.168.1.20, 192.168.1.21\n192.168.1.22\n')
         run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
-            ('DNS 192.168.1.20,192.168.1.21 (insignia-dns.txt)', 'DNS 192.168.1.20', 'nat: started',
-             'ran 30 frames'),
+            ('DNS 192.168.1.20 (insignia-dns.txt)', 'nat: libslirp 4.7.0, 10.0.2.0/24, DNS 192.168.1.20',
+             'nat: started', 'ran 30 frames'),
             dict(os.environ, HARNESS_OPTIONS='hakux_network=insignia'))
         dns.write_text('insignia.example\n')
         run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
@@ -357,6 +358,15 @@ def main():
                    dict(os.environ, NC_BOOT_FAIL_AT=stage), 5, f'boot: failing after {stage}')
         cycles([args.harness, args.core, root / 'halt.iso', 60, root / 'saves'],
                dict(os.environ, NC_BOOT_FAIL_AT='hle', HARNESS_VULKAN='1'), 5, 'boot: failing after hle')
+        # A title update boots from its host file (the disc XBE's, title
+        # ffff0001): its descriptor is closed with the boot, run or failed.
+        update = root / 'saves' / 'hdd' / 'Partition1' / 'TDATA' / 'ffff0001' / '$u' / 'default.xbe'
+        update.parent.mkdir(parents=True, exist_ok=True)
+        update.write_bytes((root / 'halt.iso').read_bytes()[34 * 2048:])
+        cycles([args.harness, args.core, root / 'halt.iso', 60, root / 'saves'], os.environ, 5, 'title update: ')
+        cycles([args.harness, args.core, root / 'halt.iso', 60, root / 'saves'],
+               dict(os.environ, NC_BOOT_FAIL_AT='xbe'), 5, 'boot: failing after xbe')
+        update.unlink()
         # PortareOS's build: a stop that outlasts its watchdog (here any: 1 ms)
         # ends the process. Outside it the stop waits, and HAKUX_LR_STOP=0
         # changes nothing.
