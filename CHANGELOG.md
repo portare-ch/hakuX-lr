@@ -1,5 +1,56 @@
 # Changelog
 
+## linux-v0.14.0 (PortareOS)
+
+Brings upstream hakuX 1.3.0's game fixes to RetroArch and adds an experimental
+Xbox Live (Insignia) network option.
+
+### What's new
+
+- **Xbox Live (Insignia)** — Choose **Quick Menu → Core Options → Network →
+  Xbox Live (Insignia)**, then restart the game. Register the console first
+  with Insignia's Setup Assistant. If your provider blocks Insignia's DNS
+  server, put an insigniaDNS server's IPv4 address in `insignia-dns.txt` in
+  the save directory. Only the first address is used; a missing or invalid
+  address falls back to Insignia's default DNS server.
+- **Console drive timing** — Disc and hard-disk reads now take a little
+  time, activating upstream's fix for Morrowind freezing when leaving a
+  building.
+- **Graphics and memory handling** — Imports upstream's render-target
+  coherence fixes while retaining the fork's allocation checks, CHD
+  support, graphics features and DSP audio.
+- **Restarts** — Cleans up the new timer, networking and title-update
+  resources when closing, resetting or switching games. Fixes a network
+  receive wait that could keep most of a CPU core busy.
+
+### Game fixes from upstream
+
+- **Fable: The Lost Chapters** — Fixes black or noisy faces and arms.
+- **Morrowind** — Fixes the inventory character's red background, black
+  band and ghost copies after loading.
+- **Halo 2** — Fixes striped fog and the light-blue view around the scope.
+- **Munch's Oddysee** — Removes the dark box around character shadows.
+- **Project Zero II (PAL), Amped 2, Burnout 2, Def Jam: Fight for NY and
+  Soldier of Fortune II** — Fixes startup, loading and intro failures.
+- **Double-S.T.E.A.L: The Second Clash and Touge R** — Fixes scene startup
+  and black-screen rendering problems.
+
+The Linux build, automated regression tests, package verification, generated
+Vulkan shaders and save-state schema checks passed. These upstream game
+fixes have not been verified on the Nova for this release. Insignia sign-in
+and Setup Assistant registration remain untested.
+[Implementation and validation](https://github.com/portare-ch/hakuX-lr/pull/53).
+
+### Current limitations
+
+- The Xbox dashboard cannot be booted from RetroArch yet. Creating or
+  recovering an Insignia account requires the dashboard.
+- Save states are not yet available.
+- XLink Kai and a general-purpose Internet (NAT) option are unavailable in
+  RetroArch; NAT is used by the Insignia option.
+- CD CHDs and CHDs that require a parent image are unsupported. Use `chdman createdvd`.
+- NBA Inside Drive 2003 has blank saved player textures because GPU readback is incomplete.
+
 ## linux-v0.13.0 (PortareOS)
 
 Xbox reverb and other DSP effects now play through stereo output, enabled by
