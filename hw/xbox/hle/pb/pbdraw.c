@@ -4218,7 +4218,10 @@ static bool coh_display(const PbObj *o)
 
 static bool coh_managed(const PbObj *o, uint32_t *len)
 {
-    return coh_len(o, len) && !coh_display(o) && (!o->d.pitch || (*len > WRITEBACK_MAX && !o->cpu_used));
+    /* never one past its block: its landing would cover memory not the
+     * target's (coh_len still has it, so coh_forget drops its guard) */
+    return coh_len(o, len) && !coh_display(o) && (!o->d.pitch || (*len > WRITEBACK_MAX && !o->cpu_used)) &&
+           !past_block(&o->d);
 }
 
 /* Any thread: [pa, pa + len) as it is now (CohSnap) */

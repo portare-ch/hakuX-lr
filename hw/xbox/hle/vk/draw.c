@@ -3950,14 +3950,17 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         }
         /* the first stage that samples a 2D image through samp() (as psh.c
          * generates it) whose linear texture is part of a larger surface:
-         * its texel coordinates kept to the texture's own size */
+         * its texel coordinates kept to the texture's own size. Not a
+         * convolution's PROJECT2D (sampk), nor DOT_ZW or BRDF past stage 1
+         * (depth only; the texture read directly): no samp() there. */
         for (unsigned st = 0; st < 4 && !rect; st++) {
             const unsigned m = (k.pk.tex_modes >> (5 * st)) & 0x1F;
             const bool v = (k.pk.vol >> st) & 1;
-            const bool samp2d = m == HLE_PST_DOT_ST || m == HLE_PST_BRDF || m == HLE_PST_DOT_ZW ||
+            const bool conv = (k.pk.conv >> (2 * st)) & 3;
+            const bool samp2d = m == HLE_PST_DOT_ST || ((m == HLE_PST_BRDF || m == HLE_PST_DOT_ZW) && st < 2) ||
                                 m > HLE_PST_DOT_RFLCT_SPEC_CONST ||
-                                ((m == HLE_PST_PROJECT2D || m == HLE_PST_BUMPENVMAP ||
-                                  m == HLE_PST_BUMPENVMAP_LUM) && !v) ||
+                                (m == HLE_PST_PROJECT2D && !v && !conv) ||
+                                ((m == HLE_PST_BUMPENVMAP || m == HLE_PST_BUMPENVMAP_LUM) && !v) ||
                                 ((m == HLE_PST_DPNDNT_AR || m == HLE_PST_DPNDNT_GB) && !st);
             if (samp2d && !((k.pk.shadow >> st) & 1) && !((k.pk.fbfetch >> st) & 1) &&
                 (pc.tex[st] & 0xFFFFu)) {
