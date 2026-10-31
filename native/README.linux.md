@@ -128,7 +128,7 @@ except Crop Overscan and Rumble, which update immediately:
 | `hakux_language` | `auto` (RetroArch's), `english`, `japanese`, `german`, `french`, `spanish`, `italian`, `korean`, `chinese`, `portuguese` | `auto` |
 | `hakux_video_region` | `auto` (the game's region), `ntsc-m`, `ntsc-j`, `pal` | `auto` |
 | `hakux_rumble` | `disabled`, `enabled` (controller vibration) | `disabled` |
-| `hakux_network` | `disabled` (no cable), `lan` (system link), `insignia` (Xbox Live through Insignia: NAT) | `disabled` |
+| `hakux_network` | `disabled` (no cable), `lan` (system link), `insignia` (Xbox Live through Insignia via NAT) | `disabled` |
 | `hakux_audio_resampler` | `sinc` (higher quality, 32-tap filter using ARM NEON), `linear` (less CPU, softer high frequencies; fallback on non-ARM64 builds) | `sinc` |
 | `hakux_audio_processing` | `fast` (dry mix), `dsp` (Xbox effects and stereo downmix; experimental) | `dsp` with JIT, otherwise `fast` |
 
@@ -144,13 +144,13 @@ commas, spaces or newlines; `#` starts a comment. If two devices share a
 console identity, RetroArch warns and generates a new serial number and
 MAC address on the next game start. Existing saves remain valid.
 
-Insignia mode uses upstream's NAT backend (`native/net/nat.c`, libslirp):
-the console gets 10.0.2.15 by DHCP and Insignia's DNS server,
-46.101.64.175. To use another one (an insigniaDNS server, where the provider
-blocks Insignia's), put its address in `insignia-dns.txt` in the save
-directory, in the same format as `lan-peers.txt`; the first two addresses
-count. The core can't boot the Xbox dashboard, so Insignia accounts can't
-be made or recovered from RetroArch yet.
+Insignia mode uses upstream's NAT backend (`native/net/nat.c`, libslirp).
+The console gets 10.0.2.15 via DHCP and uses Insignia's DNS server,
+46.101.64.175. If your provider blocks that server, put an insigniaDNS
+server's address in `insignia-dns.txt` in the save directory, using the same
+format as `lan-peers.txt`. Only the first address is used. The core can't
+boot the Xbox dashboard, so Insignia accounts can't be created or recovered
+from RetroArch yet.
 
 PAL60 is always enabled; 480p, 720p and 1080i are disabled. Use RetroArch's
 shaders for filters such as FXAA and **Core provided** for the core's 4:3 or

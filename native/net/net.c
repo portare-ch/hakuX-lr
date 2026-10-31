@@ -362,9 +362,9 @@ static void *net_thread(void *arg)
 void nc_net_start(void)
 {
     nc_net_stop();
-    /* nc_net_wait_rx's deadline is CLOCK_MONOTONIC's: the condition's clock too
-     * (with CLOCK_REALTIME's it was long past, and the NIC's thread spun);
-     * made once, as the core boots again in this process */
+    /* Match the condition's clock to nc_net_wait_rx's CLOCK_MONOTONIC deadline.
+     * With CLOCK_REALTIME, the deadline was already past and the NIC thread spun.
+     * Initialise once because the core can boot again in this process. */
     static bool rx_cond_made;
     if (!rx_cond_made) {
         pthread_condattr_t attr;

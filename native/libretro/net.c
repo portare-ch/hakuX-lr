@@ -1,15 +1,15 @@
 /*
  * hakuX native core — the libretro core's network (native/net), the Network
  * option: off, LAN (system link with the consoles on this network) or Xbox
- * Live through Insignia (the Internet through NAT, Insignia's DNS server the
- * console's, as the app's "Xbox Live: Insignia" connection). LAN broadcasts
- * on the interface the default route leaves by, and also reaches the
- * consoles named in lan-peers.txt in the save directory (another subnet, a
- * VPN's far end). Insignia's DNS server can be another (insigniaDNS on this
- * network, where the provider blocks Insignia's) in insignia-dns.txt there.
- * A console heard with this one's identity (the hard disk copied from one
- * device to the other) is said, and this one gets its own as the game starts
- * next, as the app's "New identity" does.
+ * Live through Insignia (NAT with Insignia's DNS server, matching the app's
+ * "Xbox Live: Insignia" connection). LAN broadcasts on the default route's
+ * interface and reaches consoles listed in lan-peers.txt in the save
+ * directory, including peers on another subnet or across a VPN. Use
+ * insignia-dns.txt in that directory to select another DNS server, such as
+ * insigniaDNS on the local network, if the provider blocks Insignia's server.
+ * If another console has the same identity (for example, after copying its
+ * hard disk), warn and request a new identity for this console on the next
+ * game start, as the app's "New identity" does.
  */
 #include "native/libretro/libretro_int.h"
 #include "native/kernel/kernel.h"
@@ -85,9 +85,9 @@ static bool lan_bcast(char *out, size_t n, char *ifname, size_t ifn)
     return pick != NULL;
 }
 
-/* The words of <save directory>/<name>, joined by commas: one or more a
- * line, apart by commas or spaces, and # starts a comment; at most max of
- * them (0: any). "" without the file or a word in it. */
+/* Join words from <save directory>/<name> with commas. Input words are
+ * separated by commas or whitespace; # starts a comment. Read at most max
+ * words (0: no limit). Write an empty string if the file is missing or empty. */
 static void save_dir_list(const char *name, unsigned max, char *out, size_t n)
 {
     out[0] = 0;
@@ -116,25 +116,24 @@ static void save_dir_list(const char *name, unsigned max, char *out, size_t n)
     fclose(f);
 }
 
-/* The consoles named in lan-peers.txt, as lanpeers= takes them
- * (IP[:PORT],...). */
+/* Read consoles from lan-peers.txt in lanpeers= format (IP[:PORT],...). */
 static void lan_peers(char *out, size_t n)
 {
     save_dir_list("lan-peers.txt", 0, out, n);
 }
 
-/* Insignia's DNS server (insignia.live/connect), the console's primary, as
- * the app's AppPrefs.INSIGNIA_DNS */
+/* Insignia's primary DNS server (insignia.live/connect), matching the
+ * app's AppPrefs.INSIGNIA_DNS. */
 #define INSIGNIA_DNS "46.101.64.175"
 
-/* The console's DNS server for Insignia, as dns= takes it: insignia-dns.txt's
- * first word, else Insignia's own. One: the NAT backend gives the console
- * only dns[0] (nat_init). */
+/* Use the first word in insignia-dns.txt as the DNS address for dns=, falling
+ * back to Insignia's server if it is missing or invalid. Only one server is
+ * used: the NAT backend gives the console dns[0] (nat_init). */
 static void insignia_dns(char *out, size_t n)
 {
     char first[64];
     save_dir_list("insignia-dns.txt", 1, first, sizeof(first));
-    /* only an address: a word that isn't one would leave the console none */
+    /* Require an IPv4 address; an invalid value would leave the console without DNS. */
     struct in_addr a;
     if (!*first || inet_pton(AF_INET, first, &a) != 1) {
         if (*first) {

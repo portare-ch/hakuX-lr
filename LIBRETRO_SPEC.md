@@ -328,12 +328,13 @@ Options (`options.c`): only what the emulator backs.
   (normal, widescreen, letterbox), language (auto: RetroArch's) and video
   region (auto: the game's; NTSC-M, NTSC-J, PAL). PAL60 is always set, as
   RetroArch runs at 59.94 Hz; 480p, 720p and 1080i stay off.
-- The network (`net.c`): off (no cable); LAN, upstream's system link
-  backend, on the default route's interface's broadcast and with the
-  consoles `lan-peers.txt` in the save directory names; or Xbox Live
-  through Insignia, upstream's NAT backend with Insignia's DNS server or
-  the addresses `insignia-dns.txt` in the save directory names. XLink Kai
-  is not offered yet, nor the dashboard Insignia's accounts are made in.
+- The network (`net.c`): off (no cable); LAN, using upstream's system link
+  backend with broadcasts on the default route's interface and peers listed
+  in `lan-peers.txt` in the save directory; or Xbox Live through Insignia,
+  using upstream's NAT backend with Insignia's DNS server or the first
+  address in `insignia-dns.txt` in the save directory. XLink Kai and the
+  Xbox dashboard, needed to create or recover Insignia accounts, are not
+  available yet.
 
 All but the crop are read before the console boots, so a change takes effect
 when the game starts next, and RetroArch shows a message saying so. The crop

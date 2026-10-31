@@ -199,10 +199,10 @@ void nc_lr_options_apply(void)
 
     const int language = g_applied[OPT_LANGUAGE] ? g_applied[OPT_LANGUAGE] : auto_language();
     nc_kernel_set_language(language);
-    /* console drive timing, always on as in upstream's release app (its
-     * switches are in debug builds only): a disc or hard disk read takes at
-     * least the console's drives' time; Morrowind froze leaving a building
-     * when its loads were instant (NC_DEVTIME tunes it) */
+    /* Always emulate console drive timing, as upstream's release app does
+     * (only debug builds can toggle it). Disc and hard disk reads take at
+     * least as long as on the console; instant loads froze Morrowind when
+     * leaving a building. NC_DEVTIME tunes the timing. */
     nc_io_set_device_time(true);
 
     const char *region = g_defs[OPT_REGION].values[g_applied[OPT_REGION]].value;

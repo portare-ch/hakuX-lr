@@ -43,7 +43,7 @@ void nc_hle_host_reset(void)
     g_cpu = NULL;
     g_flush = false;
     g_flushes = 0;
-    g_holds = 0;                /* a hold the stop cut short (nc_ke_reset: the time's) */
+    g_holds = 0;                /* discard holds interrupted by stop; nc_ke_reset clears their timing */
     g_hold_on = false;
     g_hold_c0 = 0;
     nc_hle_dirty_reset();

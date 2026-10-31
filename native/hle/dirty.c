@@ -82,7 +82,7 @@ static void freed(uint32_t pa, uint32_t len)
 void nc_hle_dirty_reset(void)
 {
     g_vm = NULL;                /* nc_vm_destroy cleared the hooks */
-    free(g_hdirty);             /* nc_hle_dirty_init makes the next boot's */
+    free(g_hdirty);             /* nc_hle_dirty_init allocates a new map on the next boot */
     g_hdirty = NULL;
 }
 

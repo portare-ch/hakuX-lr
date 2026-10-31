@@ -125,10 +125,10 @@ varies; other games may have bugs or fail to start.
   or `IP:PORT`. XLink Kai is unavailable in RetroArch.
 - **Xbox Live (Insignia):** set **Network** to **Xbox Live (Insignia)** and
   restart the game to connect to [Insignia](https://insignia.live), the
-  revival of the original Xbox Live, through the Internet. Register the
-  console first by running Insignia's Setup Assistant as a game. Making or
-  recovering an account needs the Xbox dashboard, which the RetroArch core
-  can't start yet. If your provider blocks Insignia's DNS server, run
+  revival of the original Xbox Live service. Register the console first
+  by running Insignia's Setup Assistant as a game. Creating or recovering
+  an account requires the Xbox dashboard, which the RetroArch core can't
+  boot yet. If your provider blocks Insignia's DNS server, run
   insigniaDNS on another computer and put its address in `insignia-dns.txt`
   in the save directory (`/storage/saves/xbox/insignia-dns.txt` on
   PortareOS).

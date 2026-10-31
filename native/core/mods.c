@@ -715,7 +715,7 @@ void nc_mods_reset(void)
     free_patches(&g_mp, &g_nmp);
     free_patches(&g_saved, &g_nsaved);
     for (unsigned i = 0; i < g_nhp; i++) {
-        free(g_hp[i].bytes);            /* a title update's: nc_mods_install adds them again */
+        free(g_hp[i].bytes);            /* title-update patches; nc_mods_install reloads them */
     }
     memset(g_hp, 0, sizeof(g_hp));
     g_nhp = 0;

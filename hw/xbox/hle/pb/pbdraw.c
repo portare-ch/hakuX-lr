@@ -779,7 +779,7 @@ static uint32_t object(uint32_t pa, uint32_t xfmt, uint32_t pitch, uint32_t w, u
                 x->after = 0;
                 x->id = s->id;
                 hle_fe_commit();
-                coh_forget(s);                  /* its guard, unless a target that stays shares it */
+                coh_forget(s);                  /* release its guard unless another target shares it */
                 memset(s, 0, sizeof(*s));       /* a free slot (evict_slot's first) */
             }
             continue;
@@ -4218,8 +4218,9 @@ static bool coh_display(const PbObj *o)
 
 static bool coh_managed(const PbObj *o, uint32_t *len)
 {
-    /* never one past its block: its landing would cover memory not the
-     * target's (coh_len still has it, so coh_forget drops its guard) */
+    /* Exclude targets extending past their block: writeback would overwrite
+     * memory beyond the allocation. coh_len still recognises them so coh_forget
+     * can release their guards. */
     return coh_len(o, len) && !coh_display(o) && (!o->d.pitch || (*len > WRITEBACK_MAX && !o->cpu_used)) &&
            !past_block(&o->d);
 }
@@ -5160,7 +5161,7 @@ void hle_pbd_reset(void)
     memset(&g_vbrace, 0, sizeof(g_vbrace));
     memset(g_recopied, 0, sizeof(g_recopied));
     sprog_free();
-    /* the coherence (its landings went with the timeline) and its notes */
+    /* Reset coherence state and bookkeeping after timeline teardown. */
     memset(&g_coh, 0, sizeof(g_coh));
     g_coh_shows = 0;
     memset(&g_coh_rows, 0, sizeof(g_coh_rows));

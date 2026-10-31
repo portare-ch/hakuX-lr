@@ -10,8 +10,8 @@
 
 #include "native/compat/glib/glib.h"
 
-/* GLib's glib.h has it (gbacktrace.h), and misc.c's fork_exec takes it from
- * there: bionic's headers brought it in anyway, glibc's don't */
+/* misc.c's fork_exec needs signal declarations, normally included by GLib's
+ * glib.h via gbacktrace.h. Bionic's headers include them indirectly; glibc's don't. */
 #include <signal.h>
 #include <stdio.h>
 #include <strings.h>

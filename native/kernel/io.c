@@ -2772,7 +2772,7 @@ void nc_io_stop(void)
     if (closer) {
         pthread_join(g_closer.th, NULL);    /* every queued sync and close done */
     }
-    __atomic_store_n(&g_reader.hurry, true, __ATOMIC_RELEASE);   /* no drive time left to wait */
+    __atomic_store_n(&g_reader.hurry, true, __ATOMIC_RELEASE);   /* skip drive delays for queued reads */
     pthread_mutex_lock(&g_reader.mu);
     const bool reader = g_reader.started;
     g_reader.quit = true;

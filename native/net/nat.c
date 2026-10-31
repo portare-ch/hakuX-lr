@@ -220,8 +220,8 @@ static void nat_poll(struct pollfd *fds, int n)
     g_nat.overflow = 0;
 }
 
-/* After the network's thread has joined (nc_net_stop): the stack, its host
- * sockets and timers gone, for the next boot's nat_init */
+/* After nc_net_stop joins the network thread, free the stack, host sockets
+ * and timers, ready for nat_init on the next boot. */
 static void nat_close(void)
 {
     if (g_nat.slirp) {

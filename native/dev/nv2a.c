@@ -310,7 +310,7 @@ uint64_t nc_ke_host_ns(uint64_t guest_ns);  /* native/kernel/ke.c */
 static struct {
     pthread_mutex_t mu;
     pthread_cond_t cv;
-    bool started, quit;             /* the thread, joined by nc_dev_nv2a_stop */
+    bool started, quit;             /* thread lifecycle; nc_dev_nv2a_stop joins it */
     pthread_t th;
     bool rearm;                     /* ALARM_0 written (or a savestate's): due again */
     uint64_t due;                   /* guest ns; 0: none */
@@ -333,7 +333,7 @@ static void *ptimer_thread(void *arg)
             nc_pause_wait();
             pthread_mutex_lock(&g_alarm.mu);
             g_alarm.rearm = true;           /* a savestate's clock and alarm, maybe */
-            continue;                       /* nc_dev_nv2a_stop's quit, maybe */
+            continue;                       /* recheck quit after nc_dev_nv2a_stop may have set it */
         }
         const uint64_t now = nc_ke_now_ns();
         if (g_alarm.rearm) {
@@ -356,8 +356,9 @@ static void *ptimer_thread(void *arg)
     return NULL;
 }
 
-/* The ptimer thread, once a boot (g_alarm.mu held): its condition on the
- * monotonic clock, as the deadlines (no thread waits on it yet) */
+/* Start the PTIMER thread once per boot with g_alarm.mu held. Initialise
+ * its condition once with the monotonic clock used by its deadlines,
+ * before any thread waits on it. */
 static void ptimer_start(void)
 {
     static bool cv_mono;
@@ -845,7 +846,7 @@ void nc_dev_nv2a_stop(void)
     pthread_cond_signal(&g_alarm.cv);
     pthread_mutex_unlock(&g_alarm.mu);
     if (ptimer) {
-        pthread_join(g_alarm.th, NULL); /* at once: it waits on g_alarm.cv, or the pause (lifted) */
+        pthread_join(g_alarm.th, NULL); /* wakes immediately: g_alarm.cv signalled, pause lifted */
     }
     g_alarm.started = g_alarm.quit = g_alarm.rearm = false;
     g_alarm.due = 0;

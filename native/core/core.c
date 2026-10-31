@@ -525,7 +525,7 @@ void nc_core_destroy(NcCore *c)
     c->cpu = NULL;
     nc_kernel_destroy(&c->kernel);
     if (c->xbe.fd >= 0) {
-        close(c->xbe.fd);               /* a hard disk XBE's (nc_xbe_load) */
+        close(c->xbe.fd);               /* hard-disk XBE descriptor opened by nc_xbe_load */
     }
     nc_disc_close(&c->disc);
     nc_vm_destroy(&c->vm);
