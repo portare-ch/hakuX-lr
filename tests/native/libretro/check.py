@@ -283,6 +283,24 @@ def main():
              '3 peers named', 'lan: started', 'ran 30 frames'),
             dict(os.environ, HARNESS_OPTIONS='hakux_network=lan'))
         peers.unlink()
+        # Xbox Live (Insignia): NAT with Insignia's DNS server, or the first
+        # two addresses insignia-dns.txt in the save directory names (an
+        # insigniaDNS server), never a word that isn't one
+        run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
+            ('network insignia', 'Xbox Live through Insignia (NAT), DNS 46.101.64.175',
+             'nat: libslirp 4.7.0, 10.0.2.0/24, DNS 46.101.64.175', 'nat: started', 'ran 30 frames'),
+            dict(os.environ, HARNESS_OPTIONS='hakux_network=insignia'))
+        dns = root / 'saves' / 'insignia-dns.txt'
+        dns.write_text('# insigniaDNS at home\n192.168.1.20, 192.168.1.21\n192.168.1.22\n')
+        run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
+            ('DNS 192.168.1.20,192.168.1.21 (insignia-dns.txt)', 'DNS 192.168.1.20', 'nat: started',
+             'ran 30 frames'),
+            dict(os.environ, HARNESS_OPTIONS='hakux_network=insignia'))
+        dns.write_text('insignia.example\n')
+        run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
+            ('names no IPv4 address (insignia.example)', 'DNS 46.101.64.175', 'nat: started', 'ran 30 frames'),
+            dict(os.environ, HARNESS_OPTIONS='hakux_network=insignia'))
+        dns.unlink()
         # The audio resampler option reaches the APU before it starts: sinc by
         # default, linear when chosen
         run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,

@@ -72,10 +72,14 @@ static struct retro_core_option_v2_definition g_defs[OPT_COUNT + 1] = {
         "disabled"},
     [OPT_NETWORK] = {
         "hakux_network", "Network", NULL,
-        "Enables system link over LAN. Turn it on on each device; discovery uses UDP port 3075. "
-        "For peers on another subnet or a VPN, add their addresses to lan-peers.txt in the save directory." NEXT,
+        "LAN enables system link: turn it on on each device; discovery uses UDP port 3075. "
+        "For peers on another subnet or a VPN, add their addresses to lan-peers.txt in the save directory. "
+        "Xbox Live (Insignia) connects to Insignia, the Xbox Live revival, through the Internet; register the "
+        "console with Insignia's Setup Assistant first. If your provider blocks Insignia's DNS server, put the "
+        "address of an insigniaDNS server in insignia-dns.txt in the save directory." NEXT,
         NULL, NULL,
-        {{"disabled", "Off (no cable)"}, {"lan", "LAN (system link)"}, {NULL, NULL}},
+        {{"disabled", "Off (no cable)"}, {"lan", "LAN (system link)"}, {"insignia", "Xbox Live (Insignia)"},
+         {NULL, NULL}},
         "disabled"},
     [OPT_RESAMPLER] = {
         "hakux_audio_resampler", "Audio Resampler", NULL,
@@ -207,8 +211,8 @@ void nc_lr_options_apply(void)
                             : !strcmp(region, "pal")    ? NC_AV_REGION_PAL_I
                                                         : 0);
 
-    const bool lan = !strcmp(g_defs[OPT_NETWORK].values[g_applied[OPT_NETWORK]].value, "lan");
-    nc_lr_net_apply(lan);
+    const char *network = g_defs[OPT_NETWORK].values[g_applied[OPT_NETWORK]].value;
+    nc_lr_net_apply(network);
     const bool sinc = !strcmp(g_defs[OPT_RESAMPLER].values[g_applied[OPT_RESAMPLER]].value, "sinc");
     nc_dev_apu_set_resampler(sinc);
     const bool dsp = !strcmp(g_defs[OPT_PROCESSING].values[g_applied[OPT_PROCESSING]].value, "dsp");
@@ -216,7 +220,7 @@ void nc_lr_options_apply(void)
     nc_log("hakuX-libretro", "options: render scale %dx, overscan %s, screen %s, language %d (%s), video region %s, "
            "rumble %s, network %s, resampler %s, audio processing %s", scale, crop ? "cropped" : "shown", format, language,
            g_defs[OPT_LANGUAGE].values[g_applied[OPT_LANGUAGE]].value, region, rumble ? "on" : "off",
-           lan ? "lan" : "off", sinc ? "sinc" : "linear", dsp ? "dsp" : "fast");
+           strcmp(network, "disabled") ? network : "off", sinc ? "sinc" : "linear", dsp ? "dsp" : "fast");
 }
 
 void nc_lr_options_run(void)

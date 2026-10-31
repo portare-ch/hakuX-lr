@@ -122,7 +122,16 @@ varies; other games may have bugs or fail to start.
   a VPN (Tailscale, ZeroTier), add their addresses to `lan-peers.txt`
   in the save directory
   (`/storage/saves/xbox/lan-peers.txt` on PortareOS): one per line, as `IP`
-  or `IP:PORT`. XLink Kai and Internet (NAT) are unavailable in RetroArch.
+  or `IP:PORT`. XLink Kai is unavailable in RetroArch.
+- **Xbox Live (Insignia):** set **Network** to **Xbox Live (Insignia)** and
+  restart the game to connect to [Insignia](https://insignia.live), the
+  revival of the original Xbox Live, through the Internet. Register the
+  console first by running Insignia's Setup Assistant as a game. Making or
+  recovering an account needs the Xbox dashboard, which the RetroArch core
+  can't start yet. If your provider blocks Insignia's DNS server, run
+  insigniaDNS on another computer and put its address in `insignia-dns.txt`
+  in the save directory (`/storage/saves/xbox/insignia-dns.txt` on
+  PortareOS).
 - **Saving:** save inside the game, as on an Xbox. On PortareOS, your saves
   live in `/storage/saves/xbox/hdd/`. Back up that folder to keep them when
   moving or reinstalling. RetroArch save states are not available.

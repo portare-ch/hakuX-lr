@@ -1,11 +1,15 @@
 /*
  * hakuX native core — the libretro core's network (native/net), the Network
- * option: off, or LAN (system link with the consoles on this network). LAN
- * broadcasts on the interface the default route leaves by, and also reaches
- * the consoles named in lan-peers.txt in the save directory (another subnet,
- * a VPN's far end). A console heard with this one's identity (the hard disk
- * copied from one device to the other) is said, and this one gets its own
- * as the game starts next, as the app's "New identity" does.
+ * option: off, LAN (system link with the consoles on this network) or Xbox
+ * Live through Insignia (the Internet through NAT, Insignia's DNS server the
+ * console's, as the app's "Xbox Live: Insignia" connection). LAN broadcasts
+ * on the interface the default route leaves by, and also reaches the
+ * consoles named in lan-peers.txt in the save directory (another subnet, a
+ * VPN's far end). Insignia's DNS server can be another (insigniaDNS on this
+ * network, where the provider blocks Insignia's) in insignia-dns.txt there.
+ * A console heard with this one's identity (the hard disk copied from one
+ * device to the other) is said, and this one gets its own as the game starts
+ * next, as the app's "New identity" does.
  */
 #include "native/libretro/libretro_int.h"
 #include "native/kernel/kernel.h"
@@ -81,10 +85,10 @@ static bool lan_bcast(char *out, size_t n, char *ifname, size_t ifn)
     return pick != NULL;
 }
 
-/* The consoles named in <save directory>/lan-peers.txt, as lanpeers= takes
- * them (IP[:PORT],...): one or more a line, apart by commas or spaces, and
- * # starts a comment. "" without the file or a name in it. */
-static void lan_peers(char *out, size_t n)
+/* The words of <save directory>/<name>, joined by commas: one or more a
+ * line, apart by commas or spaces, and # starts a comment; at most max of
+ * them (0: any). "" without the file or a word in it. */
+static void save_dir_list(const char *name, unsigned max, char *out, size_t n)
 {
     out[0] = 0;
     const char *root = NULL;
@@ -92,28 +96,72 @@ static void lan_peers(char *out, size_t n)
         return;
     }
     char p[PATH_MAX];
-    snprintf(p, sizeof(p), "%s/lan-peers.txt", root);
+    snprintf(p, sizeof(p), "%s/%s", root, name);
     FILE *f = fopen(p, "r");
     if (!f) {
         return;
     }
     char line[256];
     size_t len = 0;
+    unsigned words = 0;
     while (fgets(line, sizeof(line), f)) {
         line[strcspn(line, "#")] = 0;
         for (char *save = NULL, *t = strtok_r(line, ", \t\r\n", &save); t; t = strtok_r(NULL, ", \t\r\n", &save)) {
-            if (len + strlen(t) + 2 <= n) {
+            if ((!max || words < max) && len + strlen(t) + 2 <= n) {
                 len += (size_t)snprintf(out + len, n - len, "%s%s", len ? "," : "", t);
+                words++;
             }
         }
     }
     fclose(f);
 }
 
-void nc_lr_net_apply(bool lan)
+/* The consoles named in lan-peers.txt, as lanpeers= takes them
+ * (IP[:PORT],...). */
+static void lan_peers(char *out, size_t n)
+{
+    save_dir_list("lan-peers.txt", 0, out, n);
+}
+
+/* Insignia's DNS server (insignia.live/connect), the console's primary, as
+ * the app's AppPrefs.INSIGNIA_DNS */
+#define INSIGNIA_DNS "46.101.64.175"
+
+/* The console's DNS servers for Insignia, as dns= takes them (IP[,IP]):
+ * insignia-dns.txt's first two addresses, else Insignia's own. */
+static void insignia_dns(char *out, size_t n)
+{
+    char list[64];
+    save_dir_list("insignia-dns.txt", 2, list, sizeof(list));
+    /* only addresses: a word that isn't one would leave the console none */
+    struct in_addr a;
+    char first[INET_ADDRSTRLEN + 1];
+    snprintf(first, sizeof(first), "%.*s", (int)strcspn(list, ","), list);
+    const char *second = strchr(list, ',');
+    if (!*list || inet_pton(AF_INET, first, &a) != 1 || (second && inet_pton(AF_INET, second + 1, &a) != 1)) {
+        if (*list) {
+            nc_log("hakuX-libretro", "network: insignia-dns.txt names no IPv4 address (%s): Insignia's DNS server", list);
+        }
+        snprintf(out, n, "%s", INSIGNIA_DNS);
+        return;
+    }
+    snprintf(out, n, "%s", list);
+}
+
+void nc_lr_net_apply(const char *mode)
 {
     g_twin_told = false;
-    if (!lan) {
+    if (!strcmp(mode, "insignia")) {
+        char dns[64], arg[80];
+        insignia_dns(dns, sizeof(dns));
+        nc_net_option("net=nat");
+        snprintf(arg, sizeof(arg), "dns=%s", dns);
+        nc_net_option(arg);
+        nc_log("hakuX-libretro", "network: Xbox Live through Insignia (NAT), DNS %s%s", dns,
+               strcmp(dns, INSIGNIA_DNS) ? " (insignia-dns.txt)" : "");
+        return;
+    }
+    if (strcmp(mode, "lan")) {
         nc_net_option("net=off");
         return;
     }

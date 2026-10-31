@@ -70,11 +70,12 @@ void nc_lr_options_declare(retro_environment_t env);
 void nc_lr_options_apply(void);
 void nc_lr_options_run(void);
 
-/* net.c — the Network option before the boot (options.c): off, or LAN on
- * the local network's broadcast and with lan-peers.txt's consoles; a console
- * heard with this one's identity said, and a new one asked for the next
- * start (retro_run). */
-void nc_lr_net_apply(bool lan);
+/* net.c — the Network option before the boot (options.c), its value:
+ * "disabled" (off), "lan" (on the local network's broadcast and with
+ * lan-peers.txt's consoles) or "insignia" (NAT, Insignia's DNS or
+ * insignia-dns.txt's); a console heard with this one's identity said, and a
+ * new one asked for the next start (retro_run). */
+void nc_lr_net_apply(const char *mode);
 void nc_lr_net_run(void);
 
 /* vulkan.c — the renderer on RetroArch's Vulkan device, the guest booted in
