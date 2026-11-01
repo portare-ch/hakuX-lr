@@ -173,102 +173,43 @@ and `-L <core> --menu`. Confirm that restarts keep the save directory.
 
 ### Is it FEX? The same game under KVM
 
-On an x86-64 Linux machine, the core runs the game's code on the host CPU
-through KVM instead of translating it with FEX, while the kernel, devices
-and renderer stay the same (#56). If a game misbehaves on the Nova and
-works under KVM, the cause is on the CPU side. That doesn't yet mean FEX's
-translation: the machine, its memory ordering, its GPU driver and the timing
-are different too.
+Use an x86-64 Linux machine to compare the same game under KVM and under
+FEX on the Nova. KVM runs the game's code on the host CPU; the kernel,
+devices and renderer stay the same.
 
-**Requirements:** x86-64 Linux with `/dev/kvm`, TSC scaling and UMIP (on
-AMD, Zen 2 or newer; on Intel, KVM provides UMIP itself), and a Vulkan 1.3
-GPU. Without one of them the core logs which and starts no game. Apple's
-`container` on a Mac has no KVM: build there, run on Linux.
+**Requirements:** x86-64 Linux with `/dev/kvm`, TSC scaling, UMIP (AMD
+Zen 2 or newer; on Intel, KVM provides UMIP itself), and a Vulkan 1.3 GPU.
+Apple's `container` on a Mac can build it but cannot run KVM.
 
 **Setting up KVM:**
 
 1. **Turn virtualization on in the firmware.** In the BIOS/UEFI setup,
-   usually under Advanced or CPU Configuration: **Intel Virtualization
-   Technology** (VT-x, sometimes called VMX) on Intel, **SVM Mode** (AMD-V)
-   on AMD. Many desktop boards ship with it off. With it on,
-   `grep -c -w -E 'vmx|svm' /proc/cpuinfo` counts one per CPU thread on a
-   recent kernel; 0 means it is still off.
-2. **Load the KVM module for the CPU:** `sudo modprobe kvm_intel` on Intel,
-   `sudo modprobe kvm_amd` on AMD (it brings `kvm` with it). `lsmod | grep
-   kvm` lists both. If modprobe fails, `sudo dmesg | grep -i -E 'kvm|vmx|svm'`
-   says why; a message about the BIOS means step 1. Most distributions load
-   it at boot once virtualization is on; to be sure, put `kvm_intel` or
-   `kvm_amd` on a line of its own in `/etc/modules-load.d/kvm.conf`.
-3. **Give your user `/dev/kvm`.** `ls -l /dev/kvm` shows its group, usually
-   `kvm`: `sudo usermod -aG kvm $USER`, then log out and back in.
-4. **Check it.** `build/linux-x86_64/kvm-smoke` runs the backend's own
-   checks and ends with `PASS: 0 failed`. When the core can't use KVM, its log
-   says why, for example `hakuX-native-kvm: no guest CPU: /dev/kvm: Permission
-   denied` (step 3).
-
-Inside a virtual machine, the host has to pass virtualization through
-(nested virtualization: on by default for KVM on a recent Linux host;
-other hypervisors have a setting for it), then steps 2 to 4 apply inside it.
-CI's runner is such a machine.
-
-**Build:** `sh tools/native/linux-ci-x86_64.sh` builds and tests it; the
-core is `build/linux-x86_64/hakux_libretro.so`. The log's first lines say
-which guest CPU it got:
-
-```text
-hakuX-native-kvm: guest CPU: KVM, CPL 3 with IOPL 3, TSC 733333 kHz on a 2445427 kHz host
-```
+   enable **Intel Virtualization Technology** (VT-x) on Intel or
+   **SVM Mode** (AMD-V) on AMD.
+2. **Load the KVM module:** `sudo modprobe kvm_intel` on Intel or
+   `sudo modprobe kvm_amd` on AMD.
+3. **Give your user access to `/dev/kvm`.** Check its group with
+   `ls -l /dev/kvm`, usually `kvm`. Run `sudo usermod -aG kvm $USER`,
+   then log out and back in.
+4. **Build and check:** `sh tools/native/linux-ci-x86_64.sh` builds and
+   tests it. Run `build/linux-x86_64/kvm-smoke`; it should end with
+   `PASS: 0 failed`. The core is `build/linux-x86_64/hakux_libretro.so`.
 
 **Compare like with like:**
 
-1. The same disc image, core options and RetroArch settings on both.
-   Audio is the exception the options can't fully remove: the x86-64 build
-   always resamples linearly (sinc is NEON's) and has no DSP JIT, so its
-   **Audio Processing** defaults to **Fast**, where the Nova's is **DSP**.
-   For a sound problem, set **Audio Resampler** to **Linear** and **Audio
-   Processing** to **Fast** on the Nova as well, and check the problem is
-   still there before comparing.
-2. Carry the game's progress over as in-game saves: copy the `hdd/` folder of
-   RetroArch's save directory (`/storage/saves/xbox/hdd` on PortareOS) to the
-   other machine's. Savestates don't cross between FEX and KVM.
-3. Play the same scene on both, and note what differs: a crash and its
-   `hakuX-native-frontier` lines, a hang, wrong physics or logic, missing
-   or wrong graphics, sound.
-
-Headless, without RetroArch, the harness plays a game for a number of frames
-under KVM as on the Nova:
-
-```sh
-build/linux-x86_64/libretro-harness build/linux-x86_64/hakux_libretro.so game.chd 3600 saves
-```
+1. Use the same disc image, core options and RetroArch settings on both.
+   For sound problems, set **Audio Resampler** to **Linear** and
+   **Audio Processing** to **Fast** on the Nova, and check the problem
+   still occurs before comparing.
+2. Transfer progress using in-game saves: copy the `hdd/` folder from
+   RetroArch's save directory (`/storage/saves/xbox/hdd` on PortareOS) to
+   the other machine's. Savestates don't cross between FEX and KVM.
+3. Play the same scene on both and note what differs.
 
 **Reading a difference:**
 
-- **Works under KVM, fails under FEX:** first rule out what differs besides
-  the CPU (for sound, the audio settings above; for graphics, the GPU
-  driver). Then try FEX's switches on the Nova, set
-  in RetroArch's environment: `NC_FEX_X87=80` (the full 80-bit x87 instead
-  of FEX's reduced one), `NC_FEX_PC=0` (no x87 precision control),
-  `NC_FEX_AFP=0` (no ARM alternate floating point). If one fixes it, that's
-  where to look; if none does, narrow the scene down to a short piece of
-  guest code and compare FEX's result with the CPU's. `linux-smoke`
-  (`tests/native/linux/smoke.c`) runs the same guest code under either
-  backend, so a test written like it runs on both.
+- **Works under KVM, fails under FEX:** rule out audio settings and GPU
+  driver differences first. Then try FEX's switches on the Nova, set in
+  RetroArch's environment: `NC_FEX_X87=80`, `NC_FEX_PC=0`, `NC_FEX_AFP=0`.
 - **Fails on both:** it's the kernel, a device or the renderer.
-- **Fails under KVM only:** a KVM backend bug, or one of its differences
-  from an Xbox, below.
-
-**How KVM differs from an Xbox:**
-
-- The game runs at CPL 3 with IOPL 3: `CS` and `SS` have RPL 3 and `pushfd`
-  shows IOPL 3. Its system instructions reach the kernel as they do from
-  FEX.
-- CPUID leaf 7 reports UMIP, which KVM needs. Leaf 0 still says leaf 2 is
-  the highest.
-- A modern CPU: flags the manual leaves undefined can differ from a
-  Pentium III's.
-- No translation stalls: a bug that needs FEX's stalls won't show up.
-- A hooked address (`HAKUX_HLE_PROBE`) reads as `0xCC` to the game.
-
-`kvm-smoke` checks the backend itself: privilege, each system op, thread
-switches, MMIO and I/O, page faults, interrupts, the TSC and hooks.
+- **Fails under KVM only:** a KVM backend bug.
