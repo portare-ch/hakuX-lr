@@ -185,6 +185,32 @@ AMD, Zen 2 or newer; on Intel, KVM provides UMIP itself), and a Vulkan 1.3
 GPU. Without one of them the core logs which and starts no game. Apple's
 `container` on a Mac has no KVM: build there, run on Linux.
 
+**Setting up KVM:**
+
+1. **Turn virtualization on in the firmware.** In the BIOS/UEFI setup,
+   usually under Advanced or CPU Configuration: **Intel Virtualization
+   Technology** (VT-x, sometimes called VMX) on Intel, **SVM Mode** (AMD-V)
+   on AMD. Many desktop boards ship with it off. With it on,
+   `grep -c -w -E 'vmx|svm' /proc/cpuinfo` counts one per CPU thread on a
+   recent kernel; 0 means it is still off.
+2. **Load the KVM module for the CPU:** `sudo modprobe kvm_intel` on Intel,
+   `sudo modprobe kvm_amd` on AMD (it brings `kvm` with it). `lsmod | grep
+   kvm` lists both. If modprobe fails, `sudo dmesg | grep -i -E 'kvm|vmx|svm'`
+   says why; a message about the BIOS means step 1. Most distributions load
+   it at boot once virtualization is on; to be sure, put `kvm_intel` or
+   `kvm_amd` on a line of its own in `/etc/modules-load.d/kvm.conf`.
+3. **Give your user `/dev/kvm`.** `ls -l /dev/kvm` shows its group, usually
+   `kvm`: `sudo usermod -aG kvm $USER`, then log out and back in.
+4. **Check it.** `build/linux-x86_64/kvm-smoke` runs the backend's own
+   checks and ends with `PASS: 0 failed`. When the core can't use KVM, its log
+   says why, for example `hakuX-native-kvm: no guest CPU: /dev/kvm: Permission
+   denied` (step 3).
+
+Inside a virtual machine, the host has to pass virtualization through
+(nested virtualization: on by default for KVM on a recent Linux host;
+other hypervisors have a setting for it), then steps 2 to 4 apply inside it.
+CI's runner is such a machine.
+
 **Build:** `sh tools/native/linux-ci-x86_64.sh` builds and tests it; the
 core is `build/linux-x86_64/hakux_libretro.so`. The log's first lines say
 which guest CPU it got:
