@@ -6,9 +6,10 @@
  * - UPnP: a device without a WAN service skipped, the router asked to
  *   forward natport to this device for an hour, or permanently when it
  *   takes no other lease, and the forward removed at the stop (also when
- *   the stop cut its AddPortMapping short); control URLs relative to the
- *   description's directory and to its URLBase; failed renewals asked
- *   again, the forward kept;
+ *   the stop cut its AddPortMapping short, once the router shows it is this
+ *   device's; another console's never); control URLs relative to the
+ *   description's directory and to its URLBase, a query kept; failed
+ *   renewals asked again, the forward kept;
  * - natport taken: the backend still starts, the console's 3074 leaves
  *   from another port, no UPnP; upnp=off: no M-SEARCH.
  * The build's nat-smoke test (native/cmake/linux-tests.cmake).
@@ -92,6 +93,8 @@ static struct {
     int layout;                         /* LAYOUTS[]: where the description and control URL are */
     int add_delay_ms;                   /* AddPortMapping answered this late */
     unsigned fail_from, fail_to;        /* AddPortMappings [from, to) (counted from 1) answered 500 */
+    char owner[INET_ADDRSTRLEN];        /* the forward's internal client, "" none */
+    unsigned queries;                   /* GetSpecificPortMappingEntry */
     char last_add[8192], last_delete[8192];
 } g_igd = { .lock = PTHREAD_MUTEX_INITIALIZER };
 
@@ -103,7 +106,27 @@ static const struct {
     { "/rootDesc.xml", "", "/ctl/IPConn", "/ctl/IPConn" },
     { "/dev/upnp/rootDesc.xml", "", "../upnp/./ctl/IPConn", "/dev/upnp/ctl/IPConn" },
     { "/rootDesc.xml", "<URLBase>http://127.0.0.1:%u/base/</URLBase>", "ctl/IPConn", "/base/ctl/IPConn" },
+    { "/rootDesc.xml", "", "/ctl/IPConn?target=/../peer", "/ctl/IPConn?target=/../peer" },
 };
+
+/* The text of <tag>...</tag> in s, to out ("" none). */
+static void tag_text(const char *s, const char *tag, char *out, size_t n)
+{
+    char open[48], close[48];
+    snprintf(open, sizeof(open), "<%s>", tag);
+    snprintf(close, sizeof(close), "</%s>", tag);
+    const char *a = strstr(s, open), *b = a ? strstr(a, close) : NULL;
+    out[0] = 0;
+    if (a && b) {
+        a += strlen(open);
+        snprintf(out, n, "%.*s", (int)(b - a), a);
+    }
+}
+
+static const char UPNP_ERROR[] =
+    "<?xml version=\"1.0\"?><s:Envelope><s:Body><s:Fault><detail>"
+    "<UPnPError xmlns=\"urn:schemas-upnp-org:control-1-0\"><errorCode>%d</errorCode></UPnPError>"
+    "</detail></s:Fault></s:Body></s:Envelope>";
 
 static void reply(int fd, const char *status, const char *body, bool chunked)
 {
@@ -163,19 +186,30 @@ static void serve(int fd)
     } else if (control && strstr(req, "#AddPortMapping\"")) {
         const unsigned nth = ++g_igd.adds;
         snprintf(g_igd.last_add, sizeof(g_igd.last_add), "%s", req);
+        char client[INET_ADDRSTRLEN], error[512];
+        tag_text(req, "NewInternalClient", client, sizeof(client));
+        const bool fail = nth >= g_igd.fail_from && nth < g_igd.fail_to;
+        const bool conflict = g_igd.owner[0] && strcmp(g_igd.owner, client);
+        const bool temporary = g_igd.only_permanent && !strstr(req, "<NewLeaseDuration>0</NewLeaseDuration>");
+        if (!fail && !conflict && !temporary) {
+            snprintf(g_igd.owner, sizeof(g_igd.owner), "%s", client);     /* applied before the answer */
+        }
         const int delay = g_igd.add_delay_ms;
         if (delay) {
             pthread_mutex_unlock(&g_igd.lock);
             sleep_ms(delay);
             pthread_mutex_lock(&g_igd.lock);
         }
-        if (nth >= g_igd.fail_from && nth < g_igd.fail_to) {
+        if (conflict) {
+            snprintf(error, sizeof(error), UPNP_ERROR, 718);
+            reply(fd, "500 Internal Server Error", error, false);
+        } else if (fail) {
             reply(fd, "500 Internal Server Error",
                   "<?xml version=\"1.0\"?><s:Envelope><s:Body><s:Fault><detail>"
                   "<UPnPError xmlns=\"urn:schemas-upnp-org:control-1-0\"><errorCode>501</errorCode>"
                   "<errorDescription>ActionFailed</errorDescription></UPnPError>"
                   "</detail></s:Fault></s:Body></s:Envelope>", false);
-        } else if (g_igd.only_permanent && !strstr(req, "<NewLeaseDuration>0</NewLeaseDuration>")) {
+        } else if (temporary) {
             reply(fd, "500 Internal Server Error",
                   "<?xml version=\"1.0\"?><s:Envelope><s:Body><s:Fault><detail>"
                   "<UPnPError xmlns=\"urn:schemas-upnp-org:control-1-0\"><errorCode>725</errorCode>"
@@ -184,8 +218,23 @@ static void serve(int fd)
         } else {
             reply(fd, "200 OK", ok, false);
         }
+    } else if (control && strstr(req, "#GetSpecificPortMappingEntry\"")) {
+        g_igd.queries++;
+        char out[1024];
+        if (g_igd.owner[0]) {
+            snprintf(out, sizeof(out),
+                     "<?xml version=\"1.0\"?><s:Envelope><s:Body><u:GetSpecificPortMappingEntryResponse>"
+                     "<NewInternalPort>%u</NewInternalPort><NewInternalClient>%s</NewInternalClient>"
+                     "<NewEnabled>1</NewEnabled></u:GetSpecificPortMappingEntryResponse></s:Body></s:Envelope>",
+                     NATPORT, g_igd.owner);
+            reply(fd, "200 OK", out, false);
+        } else {
+            snprintf(out, sizeof(out), UPNP_ERROR, 714);
+            reply(fd, "500 Internal Server Error", out, false);
+        }
     } else if (control && strstr(req, "#DeletePortMapping\"")) {
         g_igd.deletes++;
+        g_igd.owner[0] = 0;
         snprintf(g_igd.last_delete, sizeof(g_igd.last_delete), "%s", req);
         reply(fd, "200 OK", ok, false);
     } else {
@@ -282,6 +331,8 @@ static void igd_reset(bool only_permanent)
     pthread_mutex_lock(&g_igd.lock);
     g_igd.layout = g_igd.add_delay_ms = 0;
     g_igd.fail_from = g_igd.fail_to = 0;
+    g_igd.owner[0] = 0;
+    g_igd.queries = 0;
     g_igd.searches = g_igd.descriptions = g_igd.adds = g_igd.deletes = g_igd.externals = 0;
     g_igd.last_add[0] = g_igd.last_delete[0] = 0;
     g_igd.only_permanent = only_permanent;
@@ -516,8 +567,9 @@ int main(void)
     nc_net_stop();
     CHECK(igd_count(&g_igd.deletes) == 1, "UPnP: the permanent forward removed at the stop");
 
-    /* control URLs relative to the description's directory, and to URLBase */
-    for (int layout = 1; layout <= 2; layout++) {
+    /* control URLs relative to the description's directory, to URLBase, and
+     * one with a query (kept as it is) */
+    for (int layout = 1; layout <= 3; layout++) {
         igd_reset(false);
         g_igd.layout = layout;
         nc_net_start();
@@ -532,7 +584,20 @@ int main(void)
     nc_net_start();
     CHECK(igd_wait(&g_igd.adds, 1, 5000), "UPnP: AddPortMapping asked (answer delayed)");
     nc_net_stop();
-    CHECK(igd_wait(&g_igd.deletes, 1, 2000), "UPnP: the forward removed though its answer never came");
+    CHECK(igd_wait(&g_igd.deletes, 1, 2000) && igd_count(&g_igd.queries) == 1,
+          "UPnP: the forward removed though its answer never came, once shown to be this device's");
+
+    /* the same, but another console has the port: its forward stays */
+    igd_reset(false);
+    snprintf(g_igd.owner, sizeof(g_igd.owner), "192.168.1.99");
+    g_igd.add_delay_ms = 600;
+    nc_net_start();
+    CHECK(igd_wait(&g_igd.adds, 1, 5000), "UPnP: AddPortMapping asked (conflict answer delayed)");
+    nc_net_stop();
+    CHECK(igd_wait(&g_igd.queries, 1, 2000), "UPnP: the router asked whose forward it is");
+    sleep_ms(300);
+    CHECK(igd_count(&g_igd.deletes) == 0 && has(g_igd.owner, "192.168.1.99"),
+          "UPnP: another console's forward left alone");
 
     /* renewals: two fail, the next succeeds; the forward is kept meanwhile */
     igd_reset(false);

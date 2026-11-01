@@ -15,7 +15,9 @@
  *             renewed at half the lease, a failed renewal retried with
  *             backoff; GetExternalIPAddress logged
  *   stop      DeletePortMapping, also after an AddPortMapping the stop cut
- *             short (the router may have applied it)
+ *             short (the router may have applied it); unless the last
+ *             AddPortMapping was answered yes, only once
+ *             GetSpecificPortMappingEntry shows the forward is this device's
  */
 #include "native/net/net.h"
 #include "native/core/nc.h"
@@ -187,30 +189,41 @@ static bool parse_url(const char *s, size_t n, Url *u)
     return true;
 }
 
-/* path with its "." and ".." segments removed, in place (RFC 3986 5.2.4,
- * for an absolute path). */
+/* path's "." and ".." segments removed, in place (RFC 3986 5.2.4, for an
+ * absolute path); a query or fragment kept as it is. */
+static bool path_end(char c)
+{
+    return !c || c == '?' || c == '#';
+}
+
 static void remove_dots(char *path)
 {
     char out[sizeof(((Url *)0)->path)];
     size_t o = 0;
     const char *in = path;
-    while (*in) {
+    while (!path_end(*in)) {
         if (!strncmp(in, "/./", 3)) {
             in += 2;
-        } else if (!strcmp(in, "/.")) {
-            in = "/";
-        } else if (!strncmp(in, "/../", 4) || !strcmp(in, "/..")) {
-            in = in[3] ? in + 3 : "/";
+        } else if (in[0] == '/' && in[1] == '.' && path_end(in[2])) {
+            out[o++] = '/';
+            in += 2;
+        } else if (!strncmp(in, "/../", 4) || (!strncmp(in, "/..", 3) && path_end(in[3]))) {
             while (o && out[--o] != '/') {
+            }
+            if (in[3] == '/') {
+                in += 3;
+            } else {
+                out[o++] = '/';
+                in += 3;
             }
         } else {
             do {
                 out[o++] = *in++;
-            } while (*in && *in != '/');
+            } while (!path_end(*in) && *in != '/');
         }
     }
-    out[o] = 0;
-    memcpy(path, out, o + 1);
+    snprintf(out + o, sizeof(out) - o, "%s", in);         /* the query, verbatim */
+    memcpy(path, out, strlen(out) + 1);
 }
 
 /* ref resolved against base (RFC 3986 5.2): absolute, an absolute path on
@@ -600,8 +613,35 @@ static int add_mapping(unsigned lease, int *error)
     return status;
 }
 
-static void delete_mapping(void)
+/* Whether the router's forward of the port is this device's: 1 yes, 0 no
+ * (another device's, or none), -1 no answer. DeletePortMapping names only
+ * the external port, so another console's forward must not be removed. */
+static int mapping_is_ours(void)
 {
+    char args[256], client[INET_ADDRSTRLEN], port[8];
+    snprintf(args, sizeof(args),
+             "<NewRemoteHost></NewRemoteHost><NewExternalPort>%u</NewExternalPort><NewProtocol>UDP</NewProtocol>",
+             g_upnp.port);
+    const int status = soap("GetSpecificPortMappingEntry", args, DELETE_MS);
+    if (!status) {
+        return -1;
+    }
+    const char *b = g_upnp.buf, *end = b + strlen(b);
+    return status == 200 && xml_text(b, end, "NewInternalClient", client, sizeof(client)) &&
+           xml_text(b, end, "NewInternalPort", port, sizeof(port)) && !strcmp(client, g_upnp.local) &&
+           atoi(port) == g_upnp.port;
+}
+
+/* owned: the router's last answer to AddPortMapping was yes. Otherwise the
+ * forward is removed only once the router shows it is this device's. */
+static void delete_mapping(bool owned)
+{
+    const int ours = mapping_is_ours();
+    if (!ours || (ours < 0 && !owned)) {
+        nc_log(TAG, "nat: UPnP: the router's UDP %u forward left alone: %s", g_upnp.port,
+               ours ? "no answer whether it is this device's" : "not this device's");
+        return;
+    }
     char args[256];
     snprintf(args, sizeof(args),
              "<NewRemoteHost></NewRemoteHost><NewExternalPort>%u</NewExternalPort><NewProtocol>UDP</NewProtocol>",
@@ -628,11 +668,13 @@ static void *upnp_thread(void *arg)
     unsigned lease = nc_net_config()->upnp_lease;
     bool forwarded = false;                     /* the router said yes once */
     int64_t retry = 0;                          /* a failed renewal's next delay, 0: none failed */
+    bool owned = false;                         /* the last AddPortMapping answered yes */
     while (!stopped()) {
         int error;
         const bool before = g_upnp.mapped;
         g_upnp.mapped = true;                   /* a request the stop cuts short may still be applied */
         const int status = add_mapping(lease, &error);
+        owned = status == 200;
         if (status != 200) {
             if (status && !before) {
                 g_upnp.mapped = false;          /* the router answered no: nothing to remove */
@@ -682,7 +724,7 @@ static void *upnp_thread(void *arg)
     }
     if (g_upnp.mapped) {
         g_upnp.leaving = true;
-        delete_mapping();
+        delete_mapping(owned);
     }
     return NULL;
 }
