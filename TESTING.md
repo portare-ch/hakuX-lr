@@ -170,3 +170,46 @@ Other variables are described at the top of
 Dashboard relaunches with `HAKUX_LR_STOP=0` still need checking in real
 RetroArch on a device: starts with `-s <directory>`, **Load Core → Start Core**,
 and `-L <core> --menu`. Confirm that restarts keep the save directory.
+
+### Is it FEX? The same game under KVM
+
+Use an x86-64 Linux machine to compare the same game under KVM and under
+FEX on the Nova. KVM runs the game's code on the host CPU; the kernel,
+devices and renderer stay the same.
+
+**Requirements:** x86-64 Linux with `/dev/kvm`, TSC scaling, UMIP (AMD
+Zen 2 or newer; on Intel, KVM provides UMIP itself), and a Vulkan 1.3 GPU.
+Apple's `container` on a Mac can build it but cannot run KVM.
+
+**Setting up KVM:**
+
+1. **Turn virtualization on in the firmware.** In the BIOS/UEFI setup,
+   enable **Intel Virtualization Technology** (VT-x) on Intel or
+   **SVM Mode** (AMD-V) on AMD.
+2. **Load the KVM module:** `sudo modprobe kvm_intel` on Intel or
+   `sudo modprobe kvm_amd` on AMD.
+3. **Give your user access to `/dev/kvm`.** Check its group with
+   `ls -l /dev/kvm`, usually `kvm`. Run `sudo usermod -aG kvm $USER`,
+   then log out and back in.
+4. **Build and check:** `sh tools/native/linux-ci-x86_64.sh` builds and
+   tests it. Run `build/linux-x86_64/kvm-smoke`; it should end with
+   `PASS: 0 failed`. The core is `build/linux-x86_64/hakux_libretro.so`.
+
+**Compare like with like:**
+
+1. Use the same disc image, core options and RetroArch settings on both.
+   For sound problems, set **Audio Resampler** to **Linear** and
+   **Audio Processing** to **Fast** on the Nova, and check the problem
+   still occurs before comparing.
+2. Transfer progress using in-game saves: copy the `hdd/` folder from
+   RetroArch's save directory (`/storage/saves/xbox/hdd` on PortareOS) to
+   the other machine's. Savestates don't cross between FEX and KVM.
+3. Play the same scene on both and note what differs.
+
+**Reading a difference:**
+
+- **Works under KVM, fails under FEX:** rule out audio settings and GPU
+  driver differences first. Then try FEX's switches on the Nova, set in
+  RetroArch's environment: `NC_FEX_X87=80`, `NC_FEX_PC=0`, `NC_FEX_AFP=0`.
+- **Fails on both:** it's the kernel, a device or the renderer.
+- **Fails under KVM only:** a KVM backend bug.
