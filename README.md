@@ -1,4 +1,4 @@
-# hakuX for PortareOS
+# hakuX libretro core for aarch64 / amd64 devices and PortareOS
 
 Play original Xbox games through RetroArch on the **Retroid Pocket Nova**
 with **[PortareOS](https://github.com/portare-ch/portareos)**, which includes
