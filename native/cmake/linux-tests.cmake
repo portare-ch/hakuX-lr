@@ -1,7 +1,15 @@
+# Tests that run guest code need a CPU backend that runs it: KVM's isn't
+# written yet (#56), so on x86-64 they're built but not run.
+set(NC_GUEST_TESTS OFF)
+if(HAKUX_CPU STREQUAL "fex")
+  set(NC_GUEST_TESTS ON)
+endif()
 add_executable(linux-smoke "${NC_REPO}/tests/native/linux/smoke.c" "${NC_APU_OUT_NULL}")
 target_link_libraries(linux-smoke PRIVATE hakux_native)
-add_test(NAME linux-smoke COMMAND linux-smoke)
-set_tests_properties(linux-smoke PROPERTIES TIMEOUT 15)
+if(NC_GUEST_TESTS)
+  add_test(NAME linux-smoke COMMAND linux-smoke)
+  set_tests_properties(linux-smoke PROPERTIES TIMEOUT 15)
+endif()
 add_executable(audio-smoke "${NC_REPO}/tests/native/linux/audio.c" "${NC_APU_OUT_NULL}")
 target_include_directories(audio-smoke PRIVATE "${NC_REPO}")
 target_link_libraries(audio-smoke PRIVATE hakux_native)
@@ -44,9 +52,11 @@ target_link_libraries(usb-smoke PRIVATE Threads::Threads)
 add_test(NAME usb-smoke COMMAND usb-smoke)
 set_tests_properties(usb-smoke PROPERTIES TIMEOUT 10)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
-add_test(NAME linux-boundaries
-         COMMAND "${Python3_EXECUTABLE}" "${NC_REPO}/tests/native/linux/check.py" "$<TARGET_FILE_DIR:xboxrun>")
-set_tests_properties(linux-boundaries PROPERTIES TIMEOUT 60)
+if(NC_GUEST_TESTS)
+  add_test(NAME linux-boundaries
+           COMMAND "${Python3_EXECUTABLE}" "${NC_REPO}/tests/native/linux/check.py" "$<TARGET_FILE_DIR:xboxrun>")
+  set_tests_properties(linux-boundaries PROPERTIES TIMEOUT 60)
+endif()
 if(TARGET hakux_libretro)
   # The APU made again in one process (a relaunch), its EP's samples through
   # the libretro output.
@@ -68,9 +78,11 @@ if(TARGET hakux_libretro)
   target_include_directories(libretro-harness PRIVATE "${NC_REPO}" "${NC_DEPS}/Vulkan-Headers/include"
                              "${NC_REPO}/native/libretro")
   target_link_libraries(libretro-harness PRIVATE ${CMAKE_DL_LIBS} Threads::Threads)
-  add_test(NAME libretro-smoke
-           COMMAND "${Python3_EXECUTABLE}" "${NC_REPO}/tests/native/libretro/check.py"
-                   "$<TARGET_FILE:libretro-harness>" "$<TARGET_FILE:hakux_libretro>"
-                   --audio-default "$<IF:$<BOOL:${HAKUX_DSP_JIT}>,dsp,fast>")
-  set_tests_properties(libretro-smoke PROPERTIES TIMEOUT 120)
+  if(NC_GUEST_TESTS)
+    add_test(NAME libretro-smoke
+             COMMAND "${Python3_EXECUTABLE}" "${NC_REPO}/tests/native/libretro/check.py"
+                     "$<TARGET_FILE:libretro-harness>" "$<TARGET_FILE:hakux_libretro>"
+                     --audio-default "$<IF:$<BOOL:${HAKUX_DSP_JIT}>,dsp,fast>")
+    set_tests_properties(libretro-smoke PROPERTIES TIMEOUT 120)
+  endif()
 endif()

@@ -78,6 +78,11 @@ static void count(uint32_t addr, bool write, uint64_t value)
     g_other++;
 }
 
+#if defined(__aarch64__)
+/* The ARM64 loads and stores FEX emits for guest memory, decoded in the
+ * fault handler. The KVM backend (x86-64) has its accesses decoded by KVM
+ * and comes through nc_mmio_access instead. */
+
 /* The transfer a load/store instruction makes: one or two elements (LDP/STP)
  * of `bytes` each (16 for a Q register), and the base register writeback of
  * the pre- and post-indexed forms. */
@@ -450,6 +455,24 @@ bool nc_ram_emulate(NcVm *vm, const siginfo_t *info, void *ucontext,
     mc->pc += 4;
     return true;
 }
+#else
+bool nc_mmio_fault(const NcVm *vm, const siginfo_t *info, void *ucontext)
+{
+    return false;
+}
+
+bool nc_ram_access_span(const NcVm *vm, const siginfo_t *info, void *ucontext, uint32_t *lo,
+                        uint32_t *hi, bool *store)
+{
+    return false;
+}
+
+bool nc_ram_emulate(NcVm *vm, const siginfo_t *info, void *ucontext,
+                    void (*stored)(uint32_t pa, uint32_t n))
+{
+    return false;
+}
+#endif
 
 /* nc_mmio_access's store may run again (nc_mmio_retry); one was asked for */
 static __thread bool t_retry_ok, t_retry;

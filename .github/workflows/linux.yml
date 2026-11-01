@@ -67,6 +67,31 @@ jobs:
             build/package/hakux-${{ steps.version.outputs.version }}-aarch64.tar.gz.sha256
           if-no-files-found: error
 
+  # x86-64 Linux (#56): the core with the KVM backend and its tests, in the
+  # same image built for amd64 (tools/native/linux-ci-x86_64.sh). Nothing is
+  # packaged: releases are the aarch64 build's.
+  build-x86_64:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: build/deps
+          key: linux-deps-${{ hashFiles('tools/native/linux-deps.json') }}
+
+      - name: Image
+        run: docker build --tag hakux-linux --file tools/native/Dockerfile.linux tools/native
+
+      - name: Build and check
+        run: |
+          docker run --rm --volume "$PWD:/src" --workdir /src \
+            --env JOBS=4 --env GIT_CONFIG_COUNT=1 \
+            --env GIT_CONFIG_KEY_0=safe.directory --env GIT_CONFIG_VALUE_0='*' \
+            hakux-linux sh tools/native/linux-ci-x86_64.sh
+
   release:
     needs: build
     if: startsWith(github.ref, 'refs/tags/linux-v')

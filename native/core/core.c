@@ -2,6 +2,7 @@
  * hakuX native core — boot and run a title.
  */
 #include "native/core/core.h"
+#include "native/core/hostctx.h"
 #include "native/dev/dev.h"
 #include "native/dev/usb.h"
 #include "native/hle/hle_native.h"
@@ -503,7 +504,7 @@ bool nc_core_fault(NcCore *c, int sig, siginfo_t *info, void *ucontext)
     if (sig == SIGILL) {
         return false;
     }
-    const uintptr_t pc = ((ucontext_t *)ucontext)->uc_mcontext.pc;
+    const uintptr_t pc = nc_host_pc(ucontext);
     if (sig == SIGBUS && nc_cpu_unaligned_fault(c->cpu, info->si_code, ucontext)) {
         /* Doom 3 keeps a critical section at 0x00BFD88E: RtlEnterCriticalSection's
          * lock inc of its LockCount (0x00BFD89E) took the core down */
