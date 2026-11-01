@@ -46,8 +46,7 @@ its system instructions come to the kernel as they do from FEX. It needs
 `/dev/kvm` with TSC scaling and UMIP (`container run` on a Mac has neither:
 build there, run on an x86-64 Linux machine or in CI, which hands the
 container its runner's `/dev/kvm`). `kvm-smoke` checks the backend itself;
-`libretro-smoke` waits for the shootdown that keeps the decode thread's page
-protections in step (#56, PR 4). Without NEON, voices resample linearly, and
+the other tests run as on ARM64. Without NEON, voices resample linearly, and
 the DSP JIT is off. It is a debugging build: releases are ARM64's.
 
 The Linux ARM64 build enables `HAKUX_DSP_JIT` by default. It builds

@@ -5,9 +5,11 @@
 #include "hw/xbox/hle/mem/barrier.h"
 #include "hw/xbox/hle/mem/guestmem.h"
 
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/mman.h>
+#include <time.h>
 #include <unistd.h>
 
 static NcCore core;
@@ -86,6 +88,41 @@ static bool prot_mirrored(const NcVm *vm)
     }
     fclose(f);
     return seen == (1u << 20) && !bad;
+}
+
+/* Another thread protecting a page the guest keeps storing to: once
+ * hle_host_mem_test_and_clear() returns, the guest's next store must fault
+ * and be seen (dirty), as mprotect guarantees under FEX; a backend with its
+ * own page tables (KVM) must take the old entry from the guest's TLB first.
+ * A store seen as a changed counter on a page still clean went through a
+ * stale entry. */
+#define RACE_ROUNDS 1000
+static uint32_t race_pa, race_stop_pa;
+static unsigned race_unseen, race_rounds;
+
+static uint64_t now_ns(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+}
+
+static void *race(void *arg)
+{
+    volatile uint32_t *counter = (volatile uint32_t *)(core.vm.phys + race_pa);
+    for (unsigned i = 0; i < RACE_ROUNDS; i++) {
+        hle_host_mem_test_and_clear(race_pa, NC_PAGE);
+        const uint32_t before = *counter;
+        const uint64_t t0 = now_ns();
+        while (*counter == before && now_ns() - t0 < 1000000000ull) {
+        }
+        race_rounds++;
+        if (!hle_host_mem_dirty(race_pa)) {
+            race_unseen++;
+        }
+    }
+    *(volatile uint32_t *)(core.vm.phys + race_stop_pa) = 1;
+    return NULL;
 }
 
 static bool system_op(void *opaque, NcFrame *frame, enum NcSysOp op, unsigned size)
@@ -219,6 +256,21 @@ int main(int argc, char **argv)
     check(prot_mirrored(&core.vm), "page protections mirrored with a page closed");
     hle_host_mem_noaccess(pa, NC_PAGE, false);
     check(prot_mirrored(&core.vm), "page protections mirrored with it open again");
+
+    /* L: inc dword [0x22000]; mov eax, [0x24000]; test eax, eax; jz L; hlt */
+    check(nc_vm_alloc_at(&core.vm, 0x22000, NC_PAGE, &race_pa) &&
+          nc_vm_alloc_at(&core.vm, 0x24000, NC_PAGE, &race_stop_pa), "pages for the protection race");
+    const uint8_t stores[] = {0xff, 0x05, 0x00, 0x20, 0x02, 0x00, 0xa1, 0x00, 0x40, 0x02, 0x00,
+                              0x85, 0xc0, 0x74, 0xf1, 0xf4};
+    memcpy(nc_vm_host(&core.vm, 0x10400), stores, sizeof(stores));
+    pthread_t racer;
+    pthread_create(&racer, NULL, race, NULL);
+    nc_context_init(core.cpu, &context, 0x10400, 0);
+    nc_cpu_run(core.cpu, &context);
+    pthread_join(racer, NULL);
+    printf("  protection race: %u rounds, %u stores unseen\n", race_rounds, race_unseen);
+    check(race_rounds == RACE_ROUNDS && race_unseen == 0,
+          "every guest store after another thread protects its page is seen");
     if (argc > 1 && !strcmp(argv[1], "--host-fault")) {
         /* Host code writing the reservation's low guard, after the CPU ran:
          * nc_core_fault must decline it rather than resume it as the guest's. */

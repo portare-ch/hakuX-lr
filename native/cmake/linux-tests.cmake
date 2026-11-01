@@ -1,9 +1,7 @@
-# Tests that run guest code: on x86-64 under KVM (/dev/kvm), except the
-# libretro core's, which wait for the shootdown (#56, PR 4).
+# Tests that run guest code run on x86-64 under KVM (/dev/kvm) too.
 set(NC_GUEST_TESTS ON)
 set(NC_LIBRETRO_GUEST_TESTS ON)
 if(HAKUX_CPU STREQUAL "kvm")
-  set(NC_LIBRETRO_GUEST_TESTS OFF)
   # The KVM backend's own checks (#56): privilege, exits, thread switches,
   # interrupts, the TSC, hooks.
   add_executable(kvm-smoke "${NC_REPO}/tests/native/kvm/kvm_smoke.c" "${NC_APU_OUT_NULL}")
