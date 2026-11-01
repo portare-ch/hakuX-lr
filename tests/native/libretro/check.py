@@ -422,13 +422,16 @@ def main():
             hops + ('relaunch: starting RetroArch again for the dashboard', 'ending the process'), restart)
         # Load Core and Start Core in RetroArch's menu (no core on its command
         # line), and -L with --menu (the core named, the menu asked for): it
-        # starts again with -L and the core, its config kept and anything else
-        # (--menu) dropped.
-        cfg = root / 'retroarch.cfg'
-        for name, command in (('started from the menu', [args.harness, '-c', cfg, '--menu']),
-                              ('started on -L with --menu', [args.harness, '-L', args.core, '-c', cfg, '--menu'])):
-            menu = subprocess.run([str(x) for x in command], env=dict(restart, HARNESS_MENU_CORE=str(args.core)),
-                                  capture_output=True, text=True, timeout=15)
+        # starts again with -L and the core, its config and save directory
+        # (-s, the console disk's; no HARNESS_SAVES to fall back on) kept and
+        # anything else (--menu) dropped.
+        cfg, saves = root / 'retroarch.cfg', root / 'saves'
+        menu_env = {k: v for k, v in restart.items() if k != 'HARNESS_SAVES'}
+        menu_env['HARNESS_MENU_CORE'] = str(args.core)
+        for name, command in (('started from the menu', [args.harness, '-c', cfg, '-s', saves, '--menu']),
+                              ('started on -L with --menu',
+                               [args.harness, '-L', args.core, '-c', cfg, '-s', saves, '--menu'])):
+            menu = subprocess.run([str(x) for x in command], env=menu_env, capture_output=True, text=True, timeout=15)
             out = menu.stdout + menu.stderr
             missing = [m for m in hops + (f'relaunch: RetroArch starts again with its config and -L '
                                           f'{args.core.resolve()}',
@@ -436,13 +439,15 @@ def main():
                                           f'core from the command line: -L {args.core.resolve()}',
                                           'ending the process') if m not in out]
             starts = out.count('core from the command line: -L ') + out.count('core loaded from the menu: ')
-            if menu.returncode or missing or out.count(f'config: {cfg}') != starts \
+            kept = (out.count(f'config: {cfg}'), out.count(f'save directory from the command line: -s {saves}'))
+            if menu.returncode or missing or kept != (starts, starts) \
                     or out.count('option: --menu') != 1 or "can't start again" in out:
                 print(out[-4000:])
                 raise SystemExit(f'FAIL: the dashboard {name}: exit {menu.returncode}, missing {missing!r}, '
-                                 f'{out.count(f"config: {cfg}")} configs in {starts} starts, '
+                                 f'{kept} (config, save directory) in {starts} starts, '
                                  f'{out.count("option: --menu")} times --menu')
-            print(f'PASS: the dashboard {name} started again on -L and the core, without --menu')
+            print(f'PASS: the dashboard {name} started again on -L and the core, its config and save directory '
+                  'kept, without --menu')
         if (root / 'saves' / 'relaunch.bin').exists():
             raise SystemExit("FAIL: the dashboard's relaunch left its launch data page")
         run([args.harness, args.core, root / 'back.iso', 600, root / 'saves'], 0,

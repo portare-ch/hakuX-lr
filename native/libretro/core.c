@@ -635,12 +635,12 @@ static void close_on_exec(void)
 }
 
 /* RetroArch's options kept when it starts again for the dashboard: its
- * config, its log. Every other argument is dropped (content, another core's
- * -L, --menu). Returns how many
- * of argv's words the option at i takes (0: not kept). */
+ * config, its save directory (-s: the console disk's), its log. Every other
+ * argument is dropped (content, another core's -L, --menu). Returns how
+ * many of argv's words the option at i takes (0: not kept). */
 static unsigned kept_option(char *const *argv, unsigned i, unsigned argc)
 {
-    static const char *const with_value[] = {"-c", "--config", "--appendconfig", "--log-file"};
+    static const char *const with_value[] = {"-c", "--config", "-s", "--save", "--appendconfig", "--log-file"};
     static const char *const alone[] = {"-v", "--verbose", "-f", "--fullscreen"};
     const char *a = argv[i];
     for (size_t k = 0; k < sizeof(alone) / sizeof(*alone); k++) {
@@ -656,7 +656,7 @@ static unsigned kept_option(char *const *argv, unsigned i, unsigned argc)
         if (!a[len]) {
             return i + 1 < argc ? 2 : 0;
         }
-        if (a[len] == '=' || (len == 2 && a[1] == 'c')) {       /* --config=x, -cx */
+        if (a[len] == '=' || len == 2) {        /* --config=x, -cx */
             return 1;
         }
     }
