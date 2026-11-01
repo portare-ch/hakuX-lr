@@ -31,6 +31,7 @@
 #include <fcntl.h>
 #include <linux/kvm.h>
 #include <pthread.h>
+#include <sched.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -114,6 +115,8 @@ struct NcCpu {
     bool running;
     volatile int irq;      /* nc_cpu_request_interrupt */
     volatile int flush;    /* a PTE lost access since the last entry */
+    volatile int in_guest; /* from before the flush check to KVM_RUN's return */
+    volatile uint64_t exits; /* KVM_RUN returns, counted at once */
     NcFrame frame;
     bool in_stub;          /* the frame is a stub exit's (ring-0 stack holds the title's EIP...) */
     uint32_t stub_esp;
@@ -183,9 +186,10 @@ static uint32_t pte_for(NcCpu *cpu, uint32_t va)
 
 /* PTEs for [va, va + len) again; a lost permission makes the next entry
  * flush the TLB (a gained one needs none: the stale entry faults once and
- * the #PF path finds the PTE allows it). */
-static void pte_update(NcCpu *cpu, uint32_t va, uint32_t len)
+ * the #PF path finds the PTE allows it). True if one was lost. */
+static bool pte_update(NcCpu *cpu, uint32_t va, uint32_t len)
 {
+    bool any = false;
     for (uint64_t a = va & ~0xFFFu; a < (uint64_t)va + len; a += NC_PAGE) {
         uint32_t *p = pt_entry(cpu, (uint32_t)a);
         const uint32_t old = __atomic_load_n(p, __ATOMIC_RELAXED);
@@ -197,14 +201,39 @@ static void pte_update(NcCpu *cpu, uint32_t va, uint32_t len)
         const bool lost = (old & PTE_P) && (!(now & PTE_P) || ((old & PTE_RW) && !(now & PTE_RW)) ||
                                             ((old ^ now) & ~0xFFFu));
         if (lost) {
-            __atomic_store_n(&cpu->flush, 1, __ATOMIC_RELEASE);
+            __atomic_store_n(&cpu->flush, 1, __ATOMIC_SEQ_CST);
+            any = true;
+        }
+    }
+    return any;
+}
+
+/* A page lost access on another thread (the decode thread re-protecting
+ * guest RAM) while the guest may be running: back only once the guest can
+ * no longer use the old entry, as mprotect is. The vCPU flushes before
+ * every entry (tlb_flush), so it is enough that it has been outside KVM_RUN
+ * since the PTE changed: out of it now, or kicked out and counted. It never
+ * waits on this thread (exits counts before any handler runs), so a vCPU in
+ * a kernel call or a fault handler doesn't hold it up. */
+static void shootdown(NcCpu *cpu)
+{
+    if (!__atomic_load_n(&cpu->in_guest, __ATOMIC_SEQ_CST)) {
+        return; /* its next entry reads the flush */
+    }
+    const uint64_t seen = __atomic_load_n(&cpu->exits, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&cpu->run->immediate_exit, 1, __ATOMIC_SEQ_CST);
+    pthread_kill(cpu->thread, KICK_SIGNAL);
+    for (unsigned spins = 0; __atomic_load_n(&cpu->in_guest, __ATOMIC_SEQ_CST) &&
+                             __atomic_load_n(&cpu->exits, __ATOMIC_SEQ_CST) == seen;
+         spins++) {
+        if (spins > 64) {
+            sched_yield();
         }
     }
 }
 
-/* vm.c: a guest view's mapping or protection changed (under its lock). A
- * change made on another thread while the guest runs takes effect at the
- * guest's next exit: the synchronous shootdown is #56's PR 4. */
+/* vm.c: a guest view's mapping or protection changed (under its lock), on
+ * whichever thread made it. */
 static void prot_hook(uint32_t va, uint32_t len, int prot)
 {
     if (g_prev_hook) {
@@ -220,16 +249,15 @@ static void prot_hook(uint32_t va, uint32_t len, int prot)
             nc_log("hakuX-native-kvm", "vm: a guest mapping at %08x, over the backend's own pages", va);
         }
     }
-    pte_update(cpu, va, len);
-    if (cpu->flush && cpu->running && !pthread_equal(pthread_self(), cpu->thread)) {
-        __atomic_store_n(&cpu->run->immediate_exit, 1, __ATOMIC_RELEASE);
-        pthread_kill(cpu->thread, KICK_SIGNAL);
+    if (pte_update(cpu, va, len) && __atomic_load_n(&cpu->running, __ATOMIC_ACQUIRE) &&
+        !pthread_equal(pthread_self(), cpu->thread)) {
+        shootdown(cpu);
     }
 }
 
 static void tlb_flush(NcCpu *cpu)
 {
-    if (!__atomic_exchange_n(&cpu->flush, 0, __ATOMIC_ACQ_REL)) {
+    if (!__atomic_exchange_n(&cpu->flush, 0, __ATOMIC_SEQ_CST)) {
         return;
     }
     struct kvm_sregs s;
@@ -1246,12 +1274,18 @@ void nc_cpu_run(NcCpu *cpu, const NcCpuContext *c)
     load_context(cpu, c);
     __atomic_store_n(&cpu->running, true, __ATOMIC_RELEASE);
     for (;;) {
-        __atomic_store_n(&cpu->run->immediate_exit, 0, __ATOMIC_RELEASE);
+        /* immediate_exit cleared before in_guest is set: a shootdown that
+         * sees in_guest sets it after, and it stays set for KVM_RUN */
+        __atomic_store_n(&cpu->run->immediate_exit, 0, __ATOMIC_SEQ_CST);
+        __atomic_store_n(&cpu->in_guest, 1, __ATOMIC_SEQ_CST);
         tlb_flush(cpu);
         /* an interrupt waits for KVM's window: IF set and no STI or MOV SS
          * shadow; none while a hooked instruction runs once (TF) */
         cpu->run->request_interrupt_window = __atomic_load_n(&cpu->irq, __ATOMIC_ACQUIRE) && !cpu->stepping;
-        if (ioctl(cpu->vcpu, KVM_RUN, 0) < 0) {
+        const int ran = ioctl(cpu->vcpu, KVM_RUN, 0);
+        __atomic_add_fetch(&cpu->exits, 1, __ATOMIC_SEQ_CST);
+        __atomic_store_n(&cpu->in_guest, 0, __ATOMIC_SEQ_CST);
+        if (ran < 0) {
             if (errno != EINTR && errno != EAGAIN) {
                 fatal(cpu, "KVM_RUN");
             }
