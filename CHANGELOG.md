@@ -2,10 +2,46 @@
 
 ## Unreleased
 
-- **Insignia NAT (libretro and Android)** — Forwards the console's UDP 3074
-  through the device's UDP 3074 and requests a router forward through UPnP
-  for Open NAT. Renews leases with retries and checks ownership before
-  cleanup on shutdown. Without UPnP, forward UDP 3074 to the device manually.
+## linux-v0.16.0 (PortareOS)
+
+Adds UDP forwarding and automatic router port mapping for Xbox Live
+(Insignia), allowing peers to reach the console before it sends to them.
+
+### What's new
+
+- **Insignia UDP forwarding** — Forwards the console's UDP 3074 through
+  the device's UDP 3074. With **Network → Xbox Live (Insignia)** enabled,
+  enable UPnP on the router or forward UDP 3074 to the device manually for
+  Open NAT. If the device has a firewall, allow inbound UDP 3074.
+- **Automatic router setup** — Discovers UPnP routers, requests a port
+  forward, renews leases with retries and checks ownership before cleanup
+  on shutdown. Supports routers that require permanent leases.
+- **Fallbacks and diagnostics** — If UDP 3074 is busy, outgoing traffic
+  uses a free port without automatic forwarding. Logs explain port
+  conflicts, missing routers and upstream NAT. Advanced overrides are
+  documented in the
+  [NAT options](https://github.com/portare-ch/hakuX-lr/blob/linux-v0.16.0/native/README.linux.md#insignia-nat).
+- **Network regression checks** — Adds tests using console Ethernet
+  frames and a fake UPnP router for incoming traffic, busy ports, lease
+  renewal, router replies and ownership checks during shutdown.
+
+The merged code passed the Linux build, automated regression tests, package
+verification, generated Vulkan shaders and save-state schema checks.
+Real-router interoperability, dashboard navigation in RetroArch and
+end-to-end Insignia registration, account setup and online play still need
+device validation.
+[Implementation and validation](https://github.com/portare-ch/hakuX-lr/pull/55).
+
+### Current limitations
+
+- Only one console behind the same router can use external UDP 3074.
+  An upstream NAT, including carrier-grade NAT, may still block peers.
+- Dashboard files are not included; install your own copy to use Start Core.
+- Save states are not yet available.
+- XLink Kai and a general-purpose Internet (NAT) option are unavailable in
+  RetroArch; NAT is used by the Insignia option.
+- CD CHDs and CHDs that require a parent image are unsupported. Use `chdman createdvd`.
+- NBA Inside Drive 2003 has blank saved player textures because GPU readback is incomplete.
 
 ## linux-v0.15.0 (PortareOS)
 
