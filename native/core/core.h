@@ -60,6 +60,38 @@ void nc_core_destroy(NcCore *c);
  * the handler), false that the fault is someone else's. */
 bool nc_core_fault(NcCore *c, int sig, siginfo_t *info, void *ucontext);
 
+/* A guest memory access that faulted, as a CPU backend reports it. */
+typedef struct NcGuestAccess {
+    uint32_t va;     /* the guest address it reached */
+    bool wrapped;    /* past the 4 GiB window's end: va is the wrapped address */
+    bool page_fault; /* a page fault (FEX: SIGSEGV; SIGBUS is not one) */
+    bool write;      /* the CPU's write bit (FEX: the abort's WnR; KVM: #PF's W) */
+    /* FEX's backend: the fault's signal, for the decoders of dirty tracking
+     * and MMIO (core/mmio.c); NULL in a backend without them (KVM's) */
+    const siginfo_t *info;
+    void *ucontext;
+    /* the guest's frame at the faulting instruction, or NULL when the
+     * access is host code's (a kernel call reaching guest memory); its EIP
+     * for the logs, 0 if unknown. Asked only when needed: FEX finds them
+     * from the host PC, too dear for every dirty-tracking fault. */
+    NcFrame *(*frame)(void *opaque);
+    uint32_t (*eip)(void *opaque);
+    void *opaque;
+} NcGuestAccess;
+
+enum NcGuestFault {
+    NC_GF_DECLINED, /* not the guest's to take: why says why (NULL: nothing to report) */
+    NC_GF_RETRY,    /* handled: the guest runs the access again, or past it (MMIO) */
+    NC_GF_FRAME,    /* handled in the frame (the title's #PF handler): the guest runs from it */
+};
+
+/* A guest access fault, the same for every CPU backend and in this order:
+ * the NC_WATCHPA log, dirty tracking, MMIO by decoding (FEX), then for a
+ * page the guest doesn't have the title's page tables since their last
+ * flush (nc_paging_fault: Fable maps pages lazily), and only then the
+ * title's page-fault handler (nc_kernel_page_fault). */
+enum NcGuestFault nc_core_guest_fault(NcCore *c, const NcGuestAccess *a, const char **why);
+
 #ifdef __cplusplus
 }
 #endif

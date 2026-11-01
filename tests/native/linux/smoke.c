@@ -7,6 +7,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/mman.h>
 #include <unistd.h>
 
 static NcCore core;
@@ -40,8 +41,65 @@ static void write_mmio(void *opaque, uint32_t offset, uint64_t value, unsigned s
     mmio_value = (uint32_t)value;
 }
 
+/* What nc_vm_prot_hook was told, page by page, as a CPU backend with its own
+ * page tables (KVM) mirrors it: the protection, and the frame vm->pte had
+ * when the hook was called (a backend reads it there). */
+static uint8_t hooked[1u << 20];
+static uint32_t hooked_pte[1u << 20];
+
+static void prot_hook(uint32_t va, uint32_t len, int prot)
+{
+    for (uint32_t i = va / NC_PAGE; i < (uint32_t)(((uint64_t)va + len) / NC_PAGE); i++) {
+        hooked[i] = (uint8_t)prot;
+        hooked_pte[i] = core.vm.pte[i];
+    }
+}
+
+/* Every page of the guest's 4 GiB as the host has it (/proc/self/maps)
+ * against vm->vprot and the hook's record. */
+static bool prot_mirrored(const NcVm *vm)
+{
+    FILE *f = fopen("/proc/self/maps", "r");
+    if (!f) {
+        return false;
+    }
+    const uintptr_t lo = (uintptr_t)vm->base, hi = lo + (1ull << 32);
+    unsigned seen = 0, bad = 0;
+    char line[512];
+    while (fgets(line, sizeof(line), f)) {
+        unsigned long a, b;
+        char perms[8];
+        if (sscanf(line, "%lx-%lx %7s", &a, &b, perms) != 3 || b <= lo || a >= hi) {
+            continue;
+        }
+        const int prot = (perms[0] == 'r' ? PROT_READ : 0) | (perms[1] == 'w' ? PROT_WRITE : 0);
+        for (uintptr_t p = a < lo ? lo : a; p < (b > hi ? hi : b); p += NC_PAGE) {
+            const uint32_t i = (uint32_t)((p - lo) / NC_PAGE);
+            seen++;
+            if (vm->vprot[i] != prot || hooked[i] != prot || hooked_pte[i] != vm->pte[i]) {
+                if (bad++ < 4) {
+                    printf("  va %08x: host %d, vprot %d, hook %d; pte %08x, at the hook %08x\n", i * NC_PAGE,
+                           prot, vm->vprot[i], hooked[i], vm->pte[i], hooked_pte[i]);
+                }
+            }
+        }
+    }
+    fclose(f);
+    return seen == (1u << 20) && !bad;
+}
+
 static bool system_op(void *opaque, NcFrame *frame, enum NcSysOp op, unsigned size)
 {
+    if (op == NC_SYSOP_CPUID) {
+        uint32_t r[4];
+        nc_kernel_cpuid(nc_frame_gpr(frame, NC_EAX), nc_frame_gpr(frame, NC_ECX), r);
+        nc_frame_set_gpr(frame, NC_EAX, r[0]);
+        nc_frame_set_gpr(frame, NC_EBX, r[1]);
+        nc_frame_set_gpr(frame, NC_ECX, r[2]);
+        nc_frame_set_gpr(frame, NC_EDX, r[3]);
+        nc_frame_set_eip(frame, nc_frame_eip(frame) + size);
+        return true;
+    }
     if (op != NC_SYSOP_INT || size != 2) {
         return false;
     }
@@ -55,6 +113,7 @@ int main(int argc, char **argv)
 {
     setvbuf(stdout, NULL, _IONBF, 0);
     check(sysconf(_SC_PAGESIZE) == NC_PAGE, "host page size supports Xbox page mappings");
+    nc_vm_prot_hook = prot_hook;
     check(nc_vm_init(&core.vm, 64u << 20), "memfd VM initialization");
     check(nc_kernel_init(&core.kernel, &core.vm), "replacement kernel initialization");
     check(nc_vm_alloc_at(&core.vm, 0x10000, NC_PAGE, NULL), "guest code page");
@@ -109,6 +168,52 @@ int main(int argc, char **argv)
     nc_context_init(core.cpu, &context, 0x10100, 0);
     nc_cpu_run(core.cpu, &context);
     check(nc_rd32(nc_vm_host(&core.vm, 0x20003)) == 42, "translated unaligned locked increment");
+    check(prot_mirrored(&core.vm), "page protections mirrored after the tracked write opened one view");
+
+    /* CPUID as the kernel's table answers it: leaf 0's vendor, leaf 1's
+     * signature, zeros past the highest leaf (7). */
+    const struct {
+        uint32_t leaf;
+        uint8_t then[6];
+        uint32_t want;
+        const char *what;
+    } leaves[] = {
+        {0, {0x89, 0xd8, 0x90, 0x90, 0x90, 0x90}, 0x756E6547, "CPUID leaf 0: GenuineIntel"}, /* mov eax, ebx */
+        {1, {0x90, 0x90, 0x90, 0x90, 0x90, 0x90}, 0x068A, "CPUID leaf 1: the Pentium III's signature"},
+        {7, {0x09, 0xd8, 0x09, 0xc8, 0x09, 0xd0}, 0, "CPUID leaf 7: zeros past leaf 2"}, /* or eax, ebx/ecx/edx */
+    };
+    for (unsigned i = 0; i < sizeof(leaves) / sizeof(leaves[0]); i++) {
+        /* mov eax, leaf; xor ecx, ecx; cpuid; <then>; int 42h; hlt */
+        uint8_t prog[18] = {0xb8, 0, 0, 0, 0, 0x31, 0xc9, 0x0f, 0xa2};
+        nc_wr32(prog + 1, leaves[i].leaf);
+        memcpy(prog + 9, leaves[i].then, 6);
+        prog[15] = 0xcd;
+        prog[16] = 0x42;
+        prog[17] = 0xf4;
+        memcpy(nc_vm_host(&core.vm, 0x10200 + 0x40 * i), prog, sizeof(prog));
+        nc_context_init(core.cpu, &context, 0x10200 + 0x40 * i, 0);
+        nc_cpu_run(core.cpu, &context);
+        check(result == leaves[i].want, leaves[i].what);
+    }
+
+    /* Fable's pager: a page-directory entry pointing at the directory makes
+     * the page tables a 4 MiB window at 0xC0000000, and it reads an entry
+     * through the window before any flush. The access faults; the tables
+     * are applied (nc_paging_fault) before the title's handler is asked. */
+    const uint32_t pd = nc_paging_cr3(&core.kernel);
+    check(pd != 0, "a page directory for CR3");
+    nc_wr32(core.vm.phys + pd + 4 * 0x300, pd | 3);
+    const uint8_t recursive[] = {0xa1, 0x00, 0x0c, 0x30, 0xc0, 0xcd, 0x42, 0xf4}; /* mov eax, [0xC0300C00] */
+    memcpy(nc_vm_host(&core.vm, 0x10300), recursive, sizeof(recursive));
+    nc_context_init(core.cpu, &context, 0x10300, 0);
+    nc_cpu_run(core.cpu, &context);
+    check(result == (pd | 3), "recursive PDE read through before any flush");
+    check(prot_mirrored(&core.vm), "page protections mirrored after the tables mapped a page");
+
+    hle_host_mem_noaccess(pa, NC_PAGE, true);
+    check(prot_mirrored(&core.vm), "page protections mirrored with a page closed");
+    hle_host_mem_noaccess(pa, NC_PAGE, false);
+    check(prot_mirrored(&core.vm), "page protections mirrored with it open again");
     if (argc > 1 && !strcmp(argv[1], "--host-fault")) {
         /* Host code writing the reservation's low guard, after the CPU ran:
          * nc_core_fault must decline it rather than resume it as the guest's. */
