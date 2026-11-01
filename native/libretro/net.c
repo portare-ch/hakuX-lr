@@ -7,9 +7,11 @@
  * directory, including peers on another subnet or across a VPN. Use
  * insignia-dns.txt in that directory to select another DNS server, such as
  * insigniaDNS on the local network, if the provider blocks Insignia's server.
- * If another console has the same identity (for example, after copying its
- * hard disk), warn and request a new identity for this console on the next
- * game start, as the app's "New identity" does.
+ * Insignia accounts are created in the dashboard (no content, core.c).
+ * Warn game users if no account exists, and dashboard users if Insignia is
+ * disabled. If another console has the same identity (e.g. after copying
+ * its hard disk), warn and request a new identity at the next game start,
+ * as the app's "New identity" does.
  */
 #include "native/libretro/libretro_int.h"
 #include "native/kernel/kernel.h"
@@ -22,6 +24,7 @@
 #include <netinet/in.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 
 static bool g_twin_told;                /* this run's console with our identity, said */
 
@@ -146,6 +149,65 @@ static void insignia_dns(char *out, size_t n)
     snprintf(out, n, "%s", first);
 }
 
+/* Read online accounts from <hdd>/raw-partition0.bin, like the app's
+ * Insignia.accounts: one per 512-byte sector starting at sector 8, with a
+ * 16-byte gamertag at +0x18 and a 20-byte domain at +0x30. Write comma-separated
+ * Insignia gamertags to out and return the account count. */
+#define ACCOUNT_SECTORS 32u
+
+static unsigned insignia_accounts(char *out, size_t n)
+{
+    out[0] = 0;
+    char p[PATH_MAX];
+    snprintf(p, sizeof(p), "%s/raw-partition0.bin", nc_io_hdd_root());
+    FILE *f = fopen(p, "rb");
+    if (!f) {
+        return 0;
+    }
+    static uint8_t area[ACCOUNT_SECTORS * 512];
+    const size_t got = fread(area, 1, sizeof(area), f);
+    fclose(f);
+    unsigned count = 0;
+    size_t len = 0;
+    for (size_t s = 8; (s + 1) * 512 <= got; s++) {
+        char name[17], domain[21];
+        snprintf(name, sizeof(name), "%.16s", (const char *)area + s * 512 + 0x18);
+        snprintf(domain, sizeof(domain), "%.20s", (const char *)area + s * 512 + 0x30);
+        bool printable = *name;
+        for (const char *c = name; *c; c++) {
+            printable = printable && *c >= ' ' && *c <= '~';
+        }
+        if (!printable || strcasecmp(domain, "insignia.live")) {
+            continue;
+        }
+        count++;
+        if (len + strlen(name) + 3 <= n) {
+            len += (size_t)snprintf(out + len, n - len, "%s%s", len ? ", " : "", name);
+        }
+    }
+    return count;
+}
+
+/* Log accounts at boot. Tell game users where to create one if needed;
+ * dashboard users are already in the right place. */
+static void insignia_status(void)
+{
+    char names[200];
+    const unsigned count = insignia_accounts(names, sizeof(names));
+    if (count) {
+        nc_log("hakuX-libretro", "network: Insignia account%s on this console: %s", count == 1 ? "" : "s", names);
+        return;
+    }
+    nc_log("hakuX-libretro", "network: no Insignia account on this console");
+    if (nc_lr_dashboard()) {
+        return;
+    }
+    static const struct retro_message msg = {
+        "No Insignia account on this console yet: after registering it with Insignia's Setup Assistant, "
+        "start the core without a game to open the dashboard, then Xbox Live", 600};
+    nc_lr_env(RETRO_ENVIRONMENT_SET_MESSAGE, (void *)&msg);
+}
+
 void nc_lr_net_apply(const char *mode)
 {
     g_twin_told = false;
@@ -157,7 +219,15 @@ void nc_lr_net_apply(const char *mode)
         nc_net_option(arg);
         nc_log("hakuX-libretro", "network: Xbox Live through Insignia (NAT), DNS %s%s", dns,
                strcmp(dns, INSIGNIA_DNS) ? " (insignia-dns.txt)" : "");
+        insignia_status();
         return;
+    }
+    if (nc_lr_dashboard()) {
+        /* Dashboard account sign-up and recovery require Insignia networking. */
+        static const struct retro_message msg = {
+            "Xbox Live in the dashboard needs Network set to Xbox Live (Insignia) in the core options", 480};
+        nc_lr_env(RETRO_ENVIRONMENT_SET_MESSAGE, (void *)&msg);
+        nc_log("hakuX-libretro", "network: the dashboard without Insignia (network %s)", mode);
     }
     if (strcmp(mode, "lan")) {
         nc_net_option("net=off");

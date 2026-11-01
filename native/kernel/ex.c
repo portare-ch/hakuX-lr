@@ -845,16 +845,25 @@ bool nc_kernel_launch_xbe(const uint8_t page[NC_LAUNCH_PAGE], char *out, size_t 
 #define LDT_LAUNCH_DASHBOARD 1
 #define LAUNCH_DATA_OFF 0x400
 
+/* Treat XBEs on the hard disk's C: drive as dashboard code, including
+ * xboxdash.xbe and Xbox Live's xodash\xonlinedash.xbe. */
+static bool in_dashboard(const NcKernel *k)
+{
+    static const char c[] = "\\Device\\Harddisk0\\Partition2\\";
+    return !strncasecmp(k->image_path, c, sizeof(c) - 1);
+}
+
 /* A quick reboot to the dashboard (no launch path, or the dashboard's) that
- * asks for one of its pages, a title's "create an Xbox Live account": true
- * when the dashboard is there to boot, the page then naming it. To the main
- * menu, the game closes, as without a dashboard. */
-static bool dashboard_page(uint8_t *page, char *xbe, size_t n)
+ * requests a page (e.g. a title's "create an Xbox Live account") or returns
+ * from dashboard code to its main menu. If installed, name the dashboard
+ * in the launch page and return true. A title requesting the main menu,
+ * or a missing dashboard, closes the game. */
+static bool dashboard_page(const NcKernel *k, uint8_t *page, char *xbe, size_t n)
 {
     char host[512];
     const bool to_dash = !page[LAUNCH_PATH_OFF] || !strcasecmp(xbe, NC_DASHBOARD_PATH);
-    if (!to_dash || nc_rd32(page) != LDT_LAUNCH_DASHBOARD || !nc_rd32(page + LAUNCH_DATA_OFF) ||
-        !nc_io_host_file(NC_DASHBOARD_PATH, host, sizeof(host))) {
+    const bool asks_page = nc_rd32(page) == LDT_LAUNCH_DASHBOARD && nc_rd32(page + LAUNCH_DATA_OFF);
+    if (!to_dash || !(asks_page || in_dashboard(k)) || !nc_io_host_file(NC_DASHBOARD_PATH, host, sizeof(host))) {
         return false;
     }
     memset(page + LAUNCH_PATH_OFF, 0, LAUNCH_PATH_LEN);
@@ -880,7 +889,7 @@ void nc_kernel_launch_page_restore(NcKernel *k, const uint8_t page[NC_LAUNCH_PAG
  * lives for one run), so the page goes to a file and the app starts the core
  * again (NativeCoreActivity), which boots the XBE the page names: on the
  * disc, on the hard disk (when it's there), or the dashboard a title asked
- * a page of (dashboard_page). */
+ * a page of, or returned to from Xbox Live's pages (dashboard_page). */
 static uint64_t HalReturnToFirmware(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
     const uint32_t slot = data_va(k, "LaunchDataPage");
@@ -890,7 +899,7 @@ static uint64_t HalReturnToFirmware(NcKernel *k, NcFrame *f, const uint32_t *a)
     if (a[0] == 2 && page) {
         uint8_t *pg = nc_vm_host(k->vm, page);
         const bool named = nc_kernel_launch_xbe(pg, xbe, sizeof(xbe));
-        go = dashboard_page(pg, xbe, sizeof(xbe)) ||
+        go = dashboard_page(k, pg, xbe, sizeof(xbe)) ||
              (named && strcasecmp(xbe, NC_DASHBOARD_PATH) &&
               (!strncasecmp(xbe, "\\Device\\CdRom0", 14) || nc_io_host_file(xbe, host, sizeof(host))));
     }

@@ -136,8 +136,23 @@ Don't attach games or other copyrighted files.
 
 For tests without a device, see
 [Build and check](native/README.linux.md#build-and-check). The libretro
-harness, `libretro-harness <core.so> <game.iso> <frames> <save directory>`,
-loads the core as RetroArch does and can play a real game headless. Its
-variables are described at the top of
+harness loads the core as RetroArch does and can play a real game headless:
+
+```text
+libretro-harness [-c <config>] [-s <save directory>] [--menu] (<core.so> | -L <core.so>) [<disc image or -> <frames> <save directory>]
+```
+
+`-c/--config` is accepted but not read; `-s/--save` overrides the save
+directory. `--menu` is accepted but ignored. `-` loads no content (Start Core).
+To simulate **Load Core → Start Core**, omit the core argument and set
+`HARNESS_MENU_CORE=<core.so>`. With that variable or `-L` and no content
+arguments, set `HARNESS_FRAMES` and supply a save directory via `-s` or
+`HARNESS_SAVES` (used only when `-s` is absent).
+
+Other variables are described at the top of
 [harness.c](tests/native/libretro/harness.c): `HARNESS_VULKAN`,
 `HARNESS_CYCLES`, `HARNESS_RESET_AT`, `HARNESS_REINIT_AT` and others.
+
+Dashboard relaunches with `HAKUX_LR_STOP=0` still need checking in real
+RetroArch on a device: starts with `-s <directory>`, **Load Core → Start Core**,
+and `-L <core> --menu`. Confirm that restarts keep the save directory.
