@@ -634,18 +634,52 @@ static void close_on_exec(void)
     closedir(d);
 }
 
+/* RetroArch's options kept when it starts again on a command line that did
+ * not name the core (Load Core and Start Core in its menu): its config, its
+ * log. Every other argument is dropped (content, --menu). Returns how many
+ * of argv's words the option at i takes (0: not kept). */
+static unsigned kept_option(char *const *argv, unsigned i, unsigned argc)
+{
+    static const char *const with_value[] = {"-c", "--config", "--appendconfig", "--log-file"};
+    static const char *const alone[] = {"-v", "--verbose", "-f", "--fullscreen"};
+    const char *a = argv[i];
+    for (size_t k = 0; k < sizeof(alone) / sizeof(*alone); k++) {
+        if (!strcmp(a, alone[k])) {
+            return 1;
+        }
+    }
+    for (size_t k = 0; k < sizeof(with_value) / sizeof(*with_value); k++) {
+        const size_t len = strlen(with_value[k]);
+        if (strncmp(a, with_value[k], len)) {
+            continue;
+        }
+        if (!a[len]) {
+            return i + 1 < argc ? 2 : 0;
+        }
+        if (a[len] == '=' || (len == 2 && a[1] == 'c')) {       /* --config=x, -cx */
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /* A title's XLaunchNewImage (kernel.relaunch; the launch data page is in
  * relaunch.bin, beside the console disk): the core cannot boot again in this
  * process, so RetroArch starts again in its place, on the same command line,
  * with HAKUX_RELAUNCH naming the game (DASH_MARK for the dashboard, started
- * with no content: the command line names this core). Its load boots the XBE
- * the page names, as Android's activity does with "relaunch". The process
- * stays the same one to its parent (runemu.sh), so the game does not go back
- * to the launcher. Returns if RetroArch can't start again for the game. */
+ * with no content: the command line names this core). The dashboard started
+ * from RetroArch's menu (Load Core, Start Core), whose command line names no
+ * core, starts again with -L and this core, RetroArch's config kept
+ * (kept_option). Its load boots the XBE the page names, as Android's activity
+ * does with "relaunch". The process stays the same one to its parent
+ * (runemu.sh), so the game does not go back to the launcher. Returns if
+ * RetroArch can't start again for the game. */
 static void relaunch(void)
 {
     static char cmd[64 * 1024];
     static char *argv[1024];
+    static char *menu_argv[1024 + 3];
+    static char opt_core[] = "-L";
     static char mark[PATH_MAX + 32];
     static char want[PATH_MAX];
     extern char **environ;
@@ -672,7 +706,23 @@ static void relaunch(void)
         on_game = on_game || (*want && realpath(cmd + i, real) && !strcmp(real, want));
     }
     argv[argc] = NULL;
-    if (!on_game) {
+    char *const *start = argv;
+    if (!on_game && g_dash && *want && argc > 0) {
+        unsigned m = 0;
+        menu_argv[m++] = argv[0];
+        for (unsigned i = 1; i < argc;) {
+            const unsigned k = kept_option(argv, i, argc);
+            for (unsigned j = 0; j < k; j++) {
+                menu_argv[m++] = argv[i + j];
+            }
+            i += k ? k : 1;
+        }
+        menu_argv[m++] = opt_core;
+        menu_argv[m++] = want;
+        menu_argv[m] = NULL;
+        start = menu_argv;
+        nc_log("hakuX-libretro", "relaunch: RetroArch was started without the core; it starts again with -L %s", want);
+    } else if (!on_game) {
         nc_log("hakuX-libretro", "relaunch: RetroArch was not started on the %s; it can't start again for it",
                g_dash ? "core" : "game");
         return;
@@ -699,7 +749,7 @@ static void relaunch(void)
     sigset_t none;
     sigemptyset(&none);
     pthread_sigmask(SIG_SETMASK, &none, NULL);
-    execve("/proc/self/exe", argv, envp);
+    execve("/proc/self/exe", start, envp);
     nc_log("hakuX-libretro", "relaunch: RetroArch can't start again: %s", strerror(errno));
     free(envp);
 }

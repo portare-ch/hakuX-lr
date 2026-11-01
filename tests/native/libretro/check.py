@@ -417,6 +417,26 @@ def main():
             hops + ("relaunch: the dashboard boots again in RetroArch's process", 'unload: the core stopped in'))
         run([args.harness, args.core, '-', 600, root / 'saves'], 0,
             hops + ('relaunch: starting RetroArch again for the dashboard', 'ending the process'), old)
+        # Load Core and Start Core in RetroArch's menu: no core on its command
+        # line, so it starts again with -L and the core, its config kept and
+        # anything else (--menu) dropped.
+        cfg = root / 'retroarch.cfg'
+        menu = subprocess.run([str(args.harness), '-c', str(cfg), '--menu'],
+                              env=dict(old, HARNESS_MENU_CORE=str(args.core), HARNESS_FRAMES='600',
+                                       HARNESS_SAVES=str(root / 'saves')),
+                              capture_output=True, text=True, timeout=15)
+        out = menu.stdout + menu.stderr
+        missing = [m for m in ('core loaded from the menu: ',) + hops +
+                   ('relaunch: RetroArch was started without the core; it starts again with -L ',
+                    'relaunch: starting RetroArch again for the dashboard',
+                    f'core from the command line: -L {args.core.resolve()}', 'ending the process') if m not in out]
+        starts = 1 + out.count('core from the command line: -L ')
+        if menu.returncode or missing or out.count(f'config: {cfg}') != starts \
+                or out.count('option: --menu') != 1 or "can't start again" in out:
+            print(out[-4000:])
+            raise SystemExit(f'FAIL: the dashboard started from the menu: exit {menu.returncode}, missing {missing!r}, '
+                             f'{out.count(f"config: {cfg}")} configs in {starts} starts')
+        print('PASS: the dashboard started from the menu started again on -L and the core')
         if (root / 'saves' / 'relaunch.bin').exists():
             raise SystemExit("FAIL: the dashboard's relaunch left its launch data page")
         run([args.harness, args.core, root / 'back.iso', 600, root / 'saves'], 0,

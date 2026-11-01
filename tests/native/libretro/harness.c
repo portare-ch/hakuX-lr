@@ -19,6 +19,11 @@
  * after it, the core opened again and that one played for as many frames, as
  * RetroArch plays the next game.
  *
+ * RetroArch's -L <core.so> names the core instead, and -c <config> and
+ * --menu are accepted; with -L and no content, or with HARNESS_MENU_CORE=<core.so> and
+ * no arguments (Load Core and Start Core in RetroArch's menu), the core
+ * starts with no content for HARNESS_FRAMES frames, saving to HARNESS_SAVES.
+ *
  * HARNESS_VULKAN=1: the core renders on a Vulkan device the harness's
  * frontend (vk.c) negotiates with it, as RetroArch does, without a window.
  * HARNESS_RESET_AT=N: retro_reset before the Nth retro_run.
@@ -509,8 +514,50 @@ static int play(const struct retro_game_info *game, long frames)
 
 int main(int argc, char **argv)
 {
+    /* RetroArch's -c (its config, ignored here), --menu (ignored) and -L (the
+     * core); with -L or HARNESS_MENU_CORE and nothing else, Start Core: no
+     * content, the frames and save directory HARNESS_FRAMES's and
+     * HARNESS_SAVES's. */
+    char *pos[7] = {argv[0]};
+    int npos = 1;
+    const char *core_opt = NULL;
+    for (int i = 1; i < argc; i++) {
+        if ((!strcmp(argv[i], "-c") || !strcmp(argv[i], "--config")) && i + 1 < argc) {
+            printf("config: %s\n", argv[++i]);
+        } else if (!strcmp(argv[i], "-L") && i + 1 < argc) {
+            core_opt = argv[++i];
+            printf("core from the command line: -L %s\n", core_opt);
+        } else if (!strcmp(argv[i], "--menu")) {
+            printf("option: --menu\n");
+        } else if (npos < 6) {
+            pos[npos++] = argv[i];
+        } else {
+            npos = 7;
+            break;
+        }
+    }
+    const char *menu_core = getenv("HARNESS_MENU_CORE");
+    if (!core_opt && menu_core && npos == 1) {
+        core_opt = menu_core;
+        printf("core loaded from the menu: %s\n", core_opt);
+    }
+    if (core_opt && npos < 7) {
+        if (npos == 1 && getenv("HARNESS_FRAMES") && getenv("HARNESS_SAVES")) {
+            pos[npos++] = "-";
+            pos[npos++] = getenv("HARNESS_FRAMES");
+            pos[npos++] = getenv("HARNESS_SAVES");
+        }
+        for (int i = npos; i > 1; i--) {
+            pos[i] = pos[i - 1];
+        }
+        pos[1] = (char *)core_opt;
+        npos++;
+    }
+    argc = npos;
+    argv = pos;
     if (argc != 2 && argc != 5) {
-        fprintf(stderr, "usage: libretro-harness <core.so> [<disc image> <frames> <save directory>]\n");
+        fprintf(stderr, "usage: libretro-harness [-c <config>] <core.so> | -L <core.so> [<disc image> <frames> "
+                        "<save directory>]\n");
         return 2;
     }
     g_core_path = argv[1];
