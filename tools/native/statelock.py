@@ -311,9 +311,12 @@ def sizes(build):
             raise SystemExit(f"probe of {src} failed")
         for m in re.finditer(r"^nc_probe_size_(\w+):[^\n]*\n\s*\.(?:xword|quad|word)\s+(\d+)", asm.stdout, re.M):
             found[m.group(1)] = int(m.group(2))
-        abi = re.search(r"^nc_probe_host_abi:[^\n]*\n\s*\.(?:xword|quad|word)\s+([12])", asm.stdout, re.M)
+        abi = re.search(r"^nc_probe_host_abi:[^\n]*\n\s*\.(?:xword|quad|word)\s+([123])", asm.stdout, re.M)
         if abi:
             host_abi = int(abi.group(1))
+    if host_abi == 3:
+        raise SystemExit("an x86-64 build (#56): the record sizes are the AArch64 builds' "
+                         "(Android, Linux); run --sizes on one of those")
     changed = 0
     for fn in sorted(os.listdir(STATE)):
         if not fn.endswith(".def"):

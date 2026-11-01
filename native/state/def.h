@@ -45,6 +45,8 @@
 #define NC_STATE_PROBE_ABI
 #ifdef __ANDROID__
 const unsigned long nc_probe_host_abi = 1;
+#elif defined(__x86_64__)
+const unsigned long nc_probe_host_abi = 3; /* no slot: statelock.py --sizes refuses it */
 #else
 const unsigned long nc_probe_host_abi = 2;
 #endif
