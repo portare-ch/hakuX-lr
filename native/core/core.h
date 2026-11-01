@@ -60,6 +60,10 @@ void nc_core_destroy(NcCore *c);
  * the handler), false that the fault is someone else's. */
 bool nc_core_fault(NcCore *c, int sig, siginfo_t *info, void *ucontext);
 
+/* The backend-specific half of a CPU's configuration (NcCpuConfig: guest
+ * memory, the fault path, devices, CPUID, hooks), for the KVM backend. */
+void nc_core_cpu_backend(NcCore *c, NcCpuConfig *cfg);
+
 /* A guest memory access that faulted, as a CPU backend reports it. */
 typedef struct NcGuestAccess {
     uint32_t va;     /* the guest address it reached */

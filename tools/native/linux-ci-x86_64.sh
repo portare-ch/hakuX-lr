@@ -15,6 +15,9 @@ jobs=${JOBS:-4}
 
 python3 tools/native/linux-deps.py --dest "$HAKUX_DEPS"
 sh tools/native/linux-build.sh
+# the KVM backend's checks once more, each line in the log
+"$HAKUX_BUILD/kvm-smoke"
+"$HAKUX_BUILD/linux-smoke" | grep -E '^(PASS|FAIL)'
 
 tests=$repo/build/hle-tests-x86_64
 cmake -S tests/hle -B "$tests" -G Ninja -DCMAKE_C_COMPILER="${CC:-clang}" \

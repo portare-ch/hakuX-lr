@@ -74,6 +74,8 @@ void nc_hle_host_flush_discard(void);
 
 /* NcCpuConfig.hook_query: a probe at eip (core/probe.h). */
 bool nc_hle_hook_query(void *opaque, uint32_t eip);
+/* The same addresses as a list, for a backend that patches them (KVM). */
+unsigned nc_hle_hook_list(void *opaque, uint32_t *eips, unsigned max);
 
 /* NC_SYSOP_HOOK: the probe at EIP logs; the title's code there runs. */
 void nc_hle_hook(NcKernel *k, NcFrame *f);

@@ -17,4 +17,7 @@ cmake --build "$build" --target xboxrun hakux_libretro libretro-harness linux-sm
 if grep -q '^HAKUX_DSP_JIT:BOOL=ON$' "$build/CMakeCache.txt"; then
     cmake --build "$build" --target apu-jit-smoke -j "${JOBS:-4}"
 fi
+if grep -q '^HAKUX_CPU:STRING=kvm$' "$build/CMakeCache.txt"; then
+    cmake --build "$build" --target kvm-smoke -j "${JOBS:-4}"
+fi
 ctest --test-dir "$build" --output-on-failure

@@ -526,6 +526,8 @@ extern "C" void nc_frame_set_eflags(NcFrame* f, uint32_t eflags) {
   F(f).Thread->CTX->SetFlagsFromCompactedEFLAGS(F(f).Thread, eflags);
 }
 
+extern "C" const char nc_cpu_backend[] = "fex";
+
 extern "C" uint32_t nc_cpu_guest_eip_at(NcCpu* cpu, uintptr_t host_pc) {
   if (!cpu || !cpu->Thread) {
     return 0;

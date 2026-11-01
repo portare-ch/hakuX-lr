@@ -245,6 +245,11 @@ bool nc_hle_hook_query(void *opaque, uint32_t eip)
     return g_active && hle_probe_at(eip);
 }
 
+unsigned nc_hle_hook_list(void *opaque, uint32_t *eips, unsigned max)
+{
+    return g_active ? hle_probe_list(eips, max) : 0;
+}
+
 void nc_hle_hook(NcKernel *k, NcFrame *f)
 {
     HleCpu *env = &nc_hle_regs;

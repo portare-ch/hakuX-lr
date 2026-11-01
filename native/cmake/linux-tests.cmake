@@ -1,8 +1,15 @@
-# Tests that run guest code need a CPU backend that runs it: KVM's isn't
-# written yet (#56), so on x86-64 they're built but not run.
-set(NC_GUEST_TESTS OFF)
-if(HAKUX_CPU STREQUAL "fex")
-  set(NC_GUEST_TESTS ON)
+# Tests that run guest code: on x86-64 under KVM (/dev/kvm), except the
+# libretro core's, which wait for the shootdown (#56, PR 4).
+set(NC_GUEST_TESTS ON)
+set(NC_LIBRETRO_GUEST_TESTS ON)
+if(HAKUX_CPU STREQUAL "kvm")
+  set(NC_LIBRETRO_GUEST_TESTS OFF)
+  # The KVM backend's own checks (#56): privilege, exits, thread switches,
+  # interrupts, the TSC, hooks.
+  add_executable(kvm-smoke "${NC_REPO}/tests/native/kvm/kvm_smoke.c" "${NC_APU_OUT_NULL}")
+  target_link_libraries(kvm-smoke PRIVATE hakux_native Threads::Threads)
+  add_test(NAME kvm-smoke COMMAND kvm-smoke)
+  set_tests_properties(kvm-smoke PROPERTIES TIMEOUT 30)
 endif()
 add_executable(linux-smoke "${NC_REPO}/tests/native/linux/smoke.c" "${NC_APU_OUT_NULL}")
 target_link_libraries(linux-smoke PRIVATE hakux_native)
@@ -78,7 +85,7 @@ if(TARGET hakux_libretro)
   target_include_directories(libretro-harness PRIVATE "${NC_REPO}" "${NC_DEPS}/Vulkan-Headers/include"
                              "${NC_REPO}/native/libretro")
   target_link_libraries(libretro-harness PRIVATE ${CMAKE_DL_LIBS} Threads::Threads)
-  if(NC_GUEST_TESTS)
+  if(NC_LIBRETRO_GUEST_TESTS)
     add_test(NAME libretro-smoke
              COMMAND "${Python3_EXECUTABLE}" "${NC_REPO}/tests/native/libretro/check.py"
                      "$<TARGET_FILE:libretro-harness>" "$<TARGET_FILE:hakux_libretro>"

@@ -49,6 +49,8 @@ bool nc_ram_emulate(NcVm *vm, const siginfo_t *info, void *ucontext,
 
 /* Writes the busiest MMIO sites to fd. */
 void nc_mmio_dump_stats(int fd);
+/* A registered device's window covers addr. */
+bool nc_mmio_window(uint32_t addr);
 /* A device access at guest physical/virtual addr (the windows are identity
  * mapped) without a fault: false if no device is there. */
 bool nc_mmio_access(uint32_t addr, unsigned bytes, bool store, uint64_t *v);

@@ -55,6 +55,15 @@ static void backtrace(uint32_t esp, uint32_t va)
     hle_log("hakuX-hle-probe", "%08x stack:%s", va, line);
 }
 
+unsigned hle_probe_list(uint32_t *vas, unsigned max)
+{
+    unsigned n = 0;
+    for (unsigned i = 0; i < MAX_PROBES && g_probe[i].va && n < max; i++) {
+        vas[n++] = g_probe[i].va;
+    }
+    return n;
+}
+
 bool hle_probe_at(uint32_t va)
 {
     for (unsigned i = 0; i < MAX_PROBES && g_probe[i].va; i++) {

@@ -493,6 +493,11 @@ bool nc_mmio_take_retry(void)
     return r;
 }
 
+bool nc_mmio_window(uint32_t addr)
+{
+    return dev_at(addr) != NULL;
+}
+
 bool nc_mmio_access(uint32_t addr, unsigned bytes, bool store, uint64_t *v)
 {
     const NcMmioDev *dev = dev_at(addr);

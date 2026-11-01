@@ -85,9 +85,10 @@ jobs:
       - name: Image
         run: docker build --tag hakux-linux --file tools/native/Dockerfile.linux tools/native
 
+      # the KVM backend's guest CPU (#56): the runner's /dev/kvm, handed in
       - name: Build and check
         run: |
-          docker run --rm --volume "$PWD:/src" --workdir /src \
+          docker run --rm --volume "$PWD:/src" --workdir /src --device /dev/kvm \
             --env JOBS=4 --env GIT_CONFIG_COUNT=1 \
             --env GIT_CONFIG_KEY_0=safe.directory --env GIT_CONFIG_VALUE_0='*' \
             hakux-linux sh tools/native/linux-ci-x86_64.sh
