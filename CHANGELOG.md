@@ -2,6 +2,49 @@
 
 ## Unreleased
 
+## linux-v0.17.0 (Linux, aarch64 and x86-64)
+
+Adds an experimental AMD64 (x86-64) Linux core alongside the ARM64 build
+used by PortareOS. Download the archive for your machine's architecture.
+
+### What's new
+
+- **AMD64 Linux core** — Runs Xbox code on Intel and AMD CPUs through
+  KVM, sharing the ARM64 build's kernel, devices and Vulkan renderer.
+  Requires Linux 5.16 or newer, access to `/dev/kvm`, TSC scaling and UMIP.
+  See the [AMD64 installation guide](https://github.com/portare-ch/hakuX-lr/blob/linux-v0.17.0/README.md#play-on-amd64-x86-64-linux-systems)
+  for virtualization setup, permissions and RetroArch installation.
+- **Archives for both architectures** — Releases now include `aarch64`
+  and `x86_64` archives, each with a SHA-256 checksum and `BUILD-INFO`.
+  Publication waits for both architectures' build, regression and package
+  checks to pass.
+- **KVM regression coverage** — Checks CPU exits, thread state, memory
+  faults, interrupts, Xbox clock timing and page protection across threads.
+  The libretro harness also tests synthetic titles, graphics and repeated
+  loading and unloading under KVM.
+- **Comparing ARM64 and AMD64** — The testing guide covers using the
+  same game, in-game saves and audio settings to investigate differences
+  between FEX and KVM.
+
+The KVM backend and core have automated test coverage on GitHub's Linux
+runners. Real-game play and GPU driver compatibility on AMD64 still need
+device validation. [Implementation](https://github.com/portare-ch/hakuX-lr/issues/56).
+
+### Current limitations
+
+- AMD64 uses linear audio resampling and defaults to Fast audio
+  processing; the DSP JIT is available only on ARM64.
+- Only one console behind the same router can use external UDP 3074.
+  An upstream NAT, including carrier-grade NAT, may still block peers.
+- Dashboard files are not included; install your own copy to use Start Core.
+  Dashboard navigation and end-to-end Insignia setup still need device validation.
+- Save states, rewind and run-ahead are unavailable. Transfer progress
+  between architectures using in-game saves.
+- XLink Kai and a general-purpose Internet (NAT) option are unavailable in
+  RetroArch; NAT is used by the Insignia option.
+- CD CHDs and CHDs that require a parent image are unsupported. Use `chdman createdvd`.
+- NBA Inside Drive 2003 has blank saved player textures because GPU readback is incomplete.
+
 ## linux-v0.16.0 (PortareOS)
 
 Adds UDP forwarding and automatic router port mapping for Xbox Live

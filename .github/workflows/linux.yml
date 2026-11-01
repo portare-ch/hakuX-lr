@@ -1,7 +1,7 @@
-# The libretro core for PortareOS (aarch64 Linux): built and checked by
-# tools/native/linux-ci.sh in the pinned image (tools/native/Dockerfile.linux)
-# on every push and pull request, the package kept as the run's artifact. A
-# linux-v<version> tag also publishes it as that release, with its
+# The libretro core for Linux (aarch64 and x86-64): built and checked in the
+# pinned image (tools/native/Dockerfile.linux) on every push and pull
+# request, both packages kept as the run's artifacts. A linux-v<version>
+# tag also publishes them as that release, with its
 # CHANGELOG.md section as the notes (tools/native/linux-release-notes.py); a
 # version with a suffix (0.12.0-exp.1) is a pre-release, not the latest.
 # A pull request from this repository's own branches has its push's run; one
@@ -68,14 +68,23 @@ jobs:
           if-no-files-found: error
 
   # x86-64 Linux (#56): the core with the KVM backend and its tests, in the
-  # same image built for amd64 (tools/native/linux-ci-x86_64.sh). Nothing is
-  # packaged: releases are the aarch64 build's.
+  # same image built for amd64 (tools/native/linux-ci-x86_64.sh).
   build-x86_64:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
+
+      - name: Version
+        id: version
+        run: |
+          case "$GITHUB_REF" in
+            refs/tags/linux-v*) v=${GITHUB_REF_NAME#linux-v} ;;
+            *) v=ci-$(git rev-parse --short=10 HEAD) ;;
+          esac
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "hakuX $v"
 
       - uses: actions/cache@v4
         with:
@@ -91,10 +100,18 @@ jobs:
           docker run --rm --volume "$PWD:/src" --workdir /src --device /dev/kvm \
             --env JOBS=4 --env GIT_CONFIG_COUNT=1 \
             --env GIT_CONFIG_KEY_0=safe.directory --env GIT_CONFIG_VALUE_0='*' \
-            hakux-linux sh tools/native/linux-ci-x86_64.sh
+            hakux-linux sh tools/native/linux-ci-x86_64.sh "${{ steps.version.outputs.version }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hakux-${{ steps.version.outputs.version }}-x86_64
+          path: |
+            build/package/hakux-${{ steps.version.outputs.version }}-x86_64.tar.gz
+            build/package/hakux-${{ steps.version.outputs.version }}-x86_64.tar.gz.sha256
+          if-no-files-found: error
 
   release:
-    needs: build
+    needs: [build, build-x86_64]
     if: startsWith(github.ref, 'refs/tags/linux-v')
     runs-on: ubuntu-latest
     permissions:
@@ -106,7 +123,8 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: hakux-${{ needs.build.outputs.version }}-aarch64
+          pattern: hakux-${{ needs.build.outputs.version }}-*
+          merge-multiple: true
           path: dist
 
       - name: Release
@@ -117,7 +135,7 @@ jobs:
         run: |
           previous=$(git describe --tags --abbrev=0 --match 'linux-v*' --exclude "$GITHUB_REF_NAME" "$GITHUB_SHA" 2>/dev/null || true)
           python3 tools/native/linux-release-notes.py "$VERSION" "$GITHUB_SHA" "$previous" "$RUN_URL" > notes.md
-          title="hakuX $VERSION for PortareOS (Linux, aarch64)"
+          title="hakuX $VERSION for Linux (aarch64, x86-64)"
           case "$VERSION" in
             *-exp*) title="$title — experimental" ;;
           esac

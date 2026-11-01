@@ -1,7 +1,7 @@
 # Linux build
 
-The ARM64 Linux build provides `hakux_libretro.so` for RetroArch and the
-diagnostic tools `xboxrun`, `vulkan-probe` and `kms-grab`. PortareOS uses the
+The ARM64 and x86-64 Linux builds provide `hakux_libretro.so` for RetroArch
+and the diagnostic tools `xboxrun`, `vulkan-probe` and `kms-grab`. PortareOS uses the
 RetroArch core; the untested standalone app was removed in 0.4.0.
 See [TESTING.md](../TESTING.md) for installation and device testing.
 
@@ -38,7 +38,7 @@ including a sysroot or toolchain file.
 
 ### x86-64
 
-The same build runs on an x86-64 Linux host (`sh tools/native/linux-ci-x86_64.sh`,
+The same build runs on an x86-64 Linux host (`sh tools/native/linux-ci-x86_64.sh 0.17.0`,
 or `container run --arch amd64` with the image built for amd64). FEX translates
 for ARM64 only, so there the guest CPU is the KVM backend (`HAKUX_CPU=kvm`,
 issue #56): the title's code runs on the host CPU, at CPL 3 with IOPL 3, and
@@ -46,8 +46,10 @@ its system instructions come to the kernel as they do from FEX. It needs
 `/dev/kvm` with TSC scaling and UMIP (`container run` on a Mac has neither:
 build there, run on an x86-64 Linux machine or in CI, which hands the
 container its runner's `/dev/kvm`). `kvm-smoke` checks the backend itself;
-the other tests run as on ARM64. Without NEON, voices resample linearly, and
-the DSP JIT is off. It is a debugging build: releases are ARM64's.
+the other tests run as on ARM64. Voices resample linearly without NEON;
+the DSP JIT is off and audio processing defaults to Fast. Releases include
+an experimental x86-64 archive; see the
+[installation guide](../README.md#play-on-amd64-x86-64-linux-systems).
 
 The Linux ARM64 build enables `HAKUX_DSP_JIT` by default. It builds
 dsp56300 0.1.3 from pinned sources using Cargo's locked dependencies;
@@ -213,17 +215,18 @@ The `nat:` log lines explain common failures:
 - **Router behind another NAT:** a private or carrier-grade external
   address means an upstream NAT, possibly the provider's, may still block peers.
 
-## The PortareOS package
+## Release packages
 
 PortareOS's `hakux-lr` package installs the release tarball. Make it from a
 clean checkout of the release commit, in the same image:
 
 ```sh
-HAKUX_VERSION=0.12.0 CC=clang-19 CXX=clang++-19 sh tools/native/linux-build.sh
-CC=clang-19 sh tools/native/linux-package.sh 0.12.0
+HAKUX_VERSION=0.17.0 CC=clang-19 CXX=clang++-19 sh tools/native/linux-build.sh
+CC=clang-19 sh tools/native/linux-package.sh 0.17.0
 ```
 
-This writes `build/package/hakux-0.12.0-aarch64.tar.gz` and prints its
+This writes `build/package/hakux-0.17.0-aarch64.tar.gz` on ARM64 or
+`build/package/hakux-0.17.0-x86_64.tar.gz` on x86-64, and prints its
 SHA-256. The archive contains the stripped core and info file in
 `lib/libretro/`, licenses in `share/licenses/hakux/`, and `BUILD-INFO` with
 the source revision, compiler and dependency manifest. Sorted names, root
@@ -234,11 +237,15 @@ PortareOS package's `PKG_VERSION` and `PKG_SHA256` to match the release.
 tests, packages and verifies the archive, checks generated shaders with
 glslang, and validates the save-state schema. `linux-verify.py` also writes
 the `.sha256` file. CI runs this in the pinned image on an ARM64 runner for
-every push and keeps the package as an artifact.
+every push and keeps the package as an artifact. The x86-64 job runs
+`linux-ci-x86_64.sh <version>` with `/dev/kvm`, testing the KVM backend,
+core and HLE code, packaging and verifying its archive, and checking the
+save-state schema. It also keeps the package and checksum as an artifact.
 
 To release, add a `## linux-v<version>` section to `CHANGELOG.md` on
 `master` and push the tag `linux-v<version>` on that commit. CI builds the
-tag and publishes the release with the section as its notes. A version with
+tag and publishes both archives and their checksums after both builds
+pass, with the section as its notes. A version with
 a suffix, such as `0.12.0-exp.1`, is a pre-release that doesn't become the
 latest release. The PortareOS bump (`PKG_VERSION`, `PKG_SHA256` from the
 `.sha256` asset) is still a pull request there.

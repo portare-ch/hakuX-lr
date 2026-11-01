@@ -191,8 +191,11 @@ Apple's `container` on a Mac can build it but cannot run KVM.
 3. **Give your user access to `/dev/kvm`.** Check its group with
    `ls -l /dev/kvm`, usually `kvm`. Run `sudo usermod -aG kvm $USER`,
    then log out and back in.
-4. **Build and check:** `sh tools/native/linux-ci-x86_64.sh` builds and
-   tests it. Run `build/linux-x86_64/kvm-smoke`; it should end with
+4. **Install the core** from the `x86_64` release archive using the
+   [AMD64 installation guide](README.md#play-on-amd64-x86-64-linux-systems).
+   To build, test and package a clean checkout instead, run
+   `sh tools/native/linux-ci-x86_64.sh 0.17.0`. Run
+   `build/linux-x86_64/kvm-smoke`; it should end with
    `PASS: 0 failed`. The core is `build/linux-x86_64/hakux_libretro.so`.
 
 **Compare like with like:**

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Check build/package/hakux-<version>-aarch64.tar.gz after linux-package.sh,
+"""Check build/package/hakux-<version>-<architecture>.tar.gz after linux-package.sh,
 in the image that built it, and write its .sha256: the commit's archive, an
-AArch64 core that reports the version and loads (retro_* exports only, no
+native core that reports the version and loads (retro_* exports only, no
 RUNPATH, no SDL), within PortareOS's glibc 2.38 and GLIBCXX 3.4.31.
     python3 tools/native/linux-verify.py <version>
 """
@@ -9,6 +9,7 @@ from pathlib import Path
 import ctypes
 import hashlib
 import importlib.util
+import platform
 import re
 import struct
 import subprocess
@@ -19,11 +20,14 @@ version = sys.argv[1] if len(sys.argv) == 2 else sys.exit(__doc__)
 root = Path(__file__).resolve().parents[2]
 package = root / 'build/package'
 name = f'hakux-{version}'
-archive = package / f'{name}-aarch64.tar.gz'
+arch = platform.machine()
+machines = {'aarch64': 183, 'x86_64': 62}
+assert arch in machines, f'unsupported architecture: {arch}'
+archive = package / f'{name}-{arch}.tar.gz'
 core = package / name / 'lib/libretro/hakux_libretro.so'
 revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
 assert not subprocess.check_output(['git', 'status', '--porcelain', '--untracked-files=no'], cwd=root)
-assert struct.unpack_from('<H', core.read_bytes(), 18)[0] == 183, 'not AArch64'
+assert struct.unpack_from('<H', core.read_bytes(), 18)[0] == machines[arch], f'not {arch}'
 with tarfile.open(archive) as tar:
     names = tar.getnames()
     assert f'{name}/lib/libretro/hakux_libretro.so' in names
@@ -34,6 +38,7 @@ with tarfile.open(archive) as tar:
     assert 'supported_extensions = "iso|chd"' in info
     build_info = tar.extractfile(f'{name}/BUILD-INFO').read().decode()
     assert 'source ' + revision in build_info
+    assert 'architecture ' + arch in build_info
     assert 'libchdr' in build_info
     assert tar.extractfile(f'{name}/lib/libretro/hakux_libretro.so').read() == core.read_bytes()
 
@@ -64,6 +69,6 @@ assert glibc[-1] <= (2, 38), glibc[-1]
 assert glibcxx[-1] <= (3, 4, 31), glibcxx[-1]
 digest = hashlib.sha256(archive.read_bytes()).hexdigest()
 (package / (archive.name + '.sha256')).write_text(f'{digest}  {archive.name}\n')
-print(f'PASS: release {version}, source {revision}, AArch64, iso|chd, {len(exports)} retro_* exports, no RUNPATH')
+print(f'PASS: release {version}, source {revision}, {arch}, iso|chd, {len(exports)} retro_* exports, no RUNPATH')
 print('PASS: runtime GLIBC_' + '.'.join(map(str, glibc[-1])) + ', GLIBCXX_' + '.'.join(map(str, glibcxx[-1])))
 print(f'{digest}  {archive.name} ({archive.stat().st_size} bytes)')

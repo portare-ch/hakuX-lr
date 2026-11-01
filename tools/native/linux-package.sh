@@ -1,7 +1,7 @@
 #!/bin/sh
 # PortareOS's hakux-lr package's input: the libretro core with its core
 # info, stripped, with the licences and the revisions it was built from, as
-# build/package/hakux-<version>-aarch64.tar.gz.
+# build/package/hakux-<version>-<architecture>.tar.gz.
 # Run after linux-build.sh, in the same image, on a clean checkout: the
 # archive is the commit's.
 set -eu
@@ -10,6 +10,11 @@ version=${1:?usage: linux-package.sh <version>}
 repo=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$repo"
 build=${HAKUX_BUILD:-$repo/build/linux}
+arch=$(uname -m)
+case "$arch" in
+    aarch64|x86_64) ;;
+    *) echo "linux-package.sh: unsupported architecture: $arch" >&2; exit 1 ;;
+esac
 if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
     echo "linux-package.sh: the checkout has changes; package a commit" >&2
     exit 1
@@ -36,14 +41,18 @@ fi
     echo "hakuX $version"
     echo "source $(git rev-parse HEAD) (https://github.com/portare-ch/hakuX-lr)"
     echo "compiler $("${CC:-clang}" --version | head -1)"
+    echo "architecture $arch"
     echo "DSP JIT $dsp_jit"
     if [ "$dsp_jit" = on ]; then
         cat "$build/dsp-jit/licenses/BUILD-INFO"
     fi
-    echo "runtime libz, libstdc++, libm, libgcc_s, glibc 2.38 (aarch64); libvulkan.so.1 loaded at run time"
+    echo "runtime libz, libstdc++, libm, libgcc_s, glibc 2.38 ($arch); libvulkan.so.1 loaded at run time"
+    if [ "$arch" = x86_64 ]; then
+        echo "CPU KVM; Linux 5.16+, /dev/kvm, TSC scaling and UMIP required"
+    fi
     echo "dependencies (tools/native/linux-deps.json):"
     cat tools/native/linux-deps.json
 } > "$out/$name/BUILD-INFO"
 tar -C "$out" --sort=name --owner=0 --group=0 --numeric-owner \
-    --mtime="@$(git log -1 --format=%ct)" -cf - "$name" | gzip -n > "$out/$name-aarch64.tar.gz"
-cd "$out" && sha256sum "$name-aarch64.tar.gz"
+    --mtime="@$(git log -1 --format=%ct)" -cf - "$name" | gzip -n > "$out/$name-$arch.tar.gz"
+cd "$out" && sha256sum "$name-$arch.tar.gz"

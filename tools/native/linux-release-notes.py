@@ -20,18 +20,20 @@ section = re.search(rf'^## {re.escape(tag)}(?:[ \t][^\n]*)?\n(.*?)(?=^## |\Z)', 
 if not section:
     sys.exit(f'CHANGELOG.md has no "## {tag}" section')
 
-on_portareos = ('On PortareOS, extract the archive and copy `hakux_libretro.so` and '
+on_portareos = ('On PortareOS, extract the `aarch64` archive and copy `hakux_libretro.so` and '
                 '`hakux_libretro.info` from `lib/libretro/` to `/storage/cores/`, then restart. '
                 'These files override the bundled core, including after OS updates; '
                 'remove both and restart to restore it. Back up `/storage/saves/xbox/hdd/` before updating.')
 built = f'Built from [{commit[:10]}]({repo}/commit/{commit})'
 built += f' by [CI]({run}).' if run else '.'
-print('For PortareOS on the Retroid Pocket Nova.\n')
+print('For ARM64 Linux, including PortareOS on the Retroid Pocket Nova, and AMD64 (x86-64) Linux.\n')
 print(section.group(1).strip() + '\n')
 print('### Install\n')
 print(on_portareos + '\n')
 print('For other ARM64 Linux systems, follow the '
       f'[RetroArch installation guide]({repo}/blob/{tag}/README.md#play-on-other-aarch64-linux-systems).\n')
+print('For AMD64 (x86-64) Linux, download the `x86_64` archive and follow the '
+      f'[KVM setup and RetroArch installation guide]({repo}/blob/{tag}/README.md#play-on-amd64-x86-64-linux-systems).\n')
 print(built + ' `BUILD-INFO` lists the source revision and pinned dependencies.')
 if previous:
     print(f'\n[Full changelog]({repo}/compare/{previous}...{tag})')

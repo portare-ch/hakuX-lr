@@ -3,8 +3,9 @@
 Play original Xbox games through RetroArch on the **Retroid Pocket Nova**
 with **[PortareOS](https://github.com/portare-ch/portareos)**, which includes
 hakuX. The ROCKNIX community has also tested the build on other devices.
-For other **ARM64 (aarch64) Linux systems**,
-[install the core in RetroArch](#play-on-other-aarch64-linux-systems).
+For other Linux systems, install the core in RetroArch on
+**[ARM64 (aarch64)](#play-on-other-aarch64-linux-systems)** or
+**[AMD64 (x86-64)](#play-on-amd64-x86-64-linux-systems)**.
 
 Bring your own game disc images. **No BIOS, MCPX ROM or hard disk image is
 needed.** hakuX creates the console's storage on first launch.
@@ -76,6 +77,52 @@ unsupported; leave them off. hakuX stores game saves in `hdd/` under
 RetroArch's save directory. Choose a writable directory under
 **Settings → Directory → Save Files**.
 
+## Play on AMD64 (x86-64) Linux systems
+
+Requires **64-bit Intel or AMD Linux**, kernel 5.16 or newer, glibc 2.38 or
+newer, libstdc++ from GCC 13 or newer, zlib, and a **Vulkan 1.3** GPU driver.
+Install a 64-bit RetroArch through your distribution.
+
+The AMD64 build runs Xbox code through **KVM**. The CPU and KVM must support
+**TSC scaling** and **UMIP** (AMD Zen 2 or newer; Intel KVM can provide
+UMIP). The core checks these features when starting a game and logs any
+missing requirement. This build is experimental; automated KVM and core
+tests pass, but real-game compatibility on AMD64 still needs testing.
+
+1. **Enable virtualization** in BIOS/UEFI: **Intel Virtualization
+   Technology (VT-x)** on Intel, or **SVM Mode (AMD-V)** on AMD.
+2. **Load KVM** for your CPU: `sudo modprobe kvm_intel` on Intel, or
+   `sudo modprobe kvm_amd` on AMD.
+3. **Give your user access to `/dev/kvm`.** Check `ls -l /dev/kvm`. If its
+   group is `kvm`, run the command below, then **log out and back in**:
+
+   ```sh
+   sudo usermod -aG kvm "$USER"
+   ```
+
+   Confirm that `test -r /dev/kvm && test -w /dev/kvm && echo 'KVM access OK'`
+   prints the message. If RetroArch is sandboxed, it must also have access
+   to `/dev/kvm`.
+4. Download and extract **`hakux-<version>-x86_64.tar.gz`** from the latest
+   `linux-v…` [release](https://github.com/portare-ch/hakuX-lr/releases).
+   The `aarch64` archive is for ARM64 devices.
+5. In RetroArch, open **Settings → Directory** and note the **Cores** and
+   **Core Info** directories. From the archive's `lib/libretro/` folder,
+   copy `hakux_libretro.so` into Cores and `hakux_libretro.info` into
+   Core Info.
+6. Set **Settings → Drivers → Video** to **vulkan**. Save through
+   **Main Menu → Configuration File → Save Current Configuration**, then
+   restart RetroArch.
+7. Choose **Load Core → Microsoft - Xbox (hakuX)**, then **Load Content**
+   and select your game's `.iso` or DVD `.chd` file.
+
+AMD64 uses linear audio resampling and defaults to **Audio Processing →
+Fast**; the ARM64 DSP JIT is unavailable. Use in-game saves in `hdd/` under
+RetroArch's save directory. Save states, rewind and run-ahead are
+unsupported; leave them off. See the
+[testing guide](TESTING.md#is-it-fex-the-same-game-under-kvm) to compare a
+game between AMD64 and ARM64.
+
 ## Game formats
 
 Use an Xbox `.iso`: either an XISO or a full disc dump (Redump).
@@ -107,13 +154,14 @@ varies; other games may have bugs or fail to start.
   RetroArch's **Core provided** aspect ratio. Close and reopen the game
   after changing render scale, screen format, language, video region or
   network. **Crop Overscan** changes immediately.
-- **Audio:** **Audio Resampler** defaults to **Sinc**, which preserves more
-  high-frequency detail and uses ARM NEON. Try **Linear** if audio crackles
-  or runs slowly, then close and reopen the game. **Audio Processing**
-  defaults to **Full DSP (experimental)** in Linux releases, running the
+- **Audio:** on ARM64, **Audio Resampler** defaults to **Sinc**, which
+  preserves more high-frequency detail and uses ARM NEON. Try **Linear**
+  if audio crackles or runs slowly, then close and reopen the game. AMD64
+  always uses linear resampling. **Audio Processing** defaults to
+  **Full DSP (experimental)** in ARM64 Linux releases, running the
   game's Xbox reverb and other effects with a DSP JIT and stereo output.
   Select **Fast** for a dry mix that uses less CPU if a game has audio or
-  performance problems.
+  performance problems. AMD64 defaults to **Fast**.
   Close and reopen the game after changing it.
 - **System link:** to play a game's LAN mode across devices, set
   **Network** to **LAN (system link)** in **Quick Menu → Core Options** on
@@ -155,6 +203,7 @@ varies; other games may have bugs or fail to start.
 | Xbox or a game is missing from the PortareOS launcher | Check that the file is in `/storage/roms/xbox/` and ends in `.iso` or `.chd`. Extract ZIP/7z archives. Return to the console list with Home. Update PortareOS if CHDs are missing. |
 | RetroArch cannot find hakuX | Check that both release files were copied into the directories above, then restart. |
 | The game is slow or the picture is black | On other Linux systems, select the **vulkan** video driver and restart RetroArch. Try **Render Scale: 1x**. |
+| A game will not start on AMD64 | Check virtualization in BIOS/UEFI, your read/write access to `/dev/kvm`, and the log for missing TSC scaling or UMIP support. |
 | The game asks for a controller | Open **Quick Menu → Controls → Port 1 Controls** and set **Device Type** to **Xbox Controller**. A port set to None is unplugged. |
 | A game fails to start | Try an XISO image and the latest core. For a CHD, check that it was made with `createdvd`. If it still fails, report it below. |
 
