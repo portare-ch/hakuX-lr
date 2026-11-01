@@ -1,5 +1,45 @@
 # Changelog
 
+## linux-v0.15.0 (PortareOS)
+
+Boot the Xbox dashboard from RetroArch to access its Xbox Live pages for
+Insignia account setup.
+
+### What's new
+
+- **Xbox dashboard** — Select **Load Core → Microsoft - Xbox (hakuX) →
+  Start Core** without loading a game. Copy your dashboard files
+  (`xboxdash.xbe` and its folders) into `hdd/Partition2/` under RetroArch's
+  save directory (`/storage/saves/xbox/hdd/Partition2/` on PortareOS).
+  If the dashboard is missing, the core shows where to install it.
+- **Dashboard restarts** — Supports resets, video driver rebuilds and
+  navigation between the dashboard's main menu and Xbox Live pages.
+  Process relaunches preserve the configuration and save directory,
+  including when the core was loaded through RetroArch's menu.
+- **Insignia guidance** — Prompts when a game has no Insignia account or
+  the dashboard needs **Network → Xbox Live (Insignia)** enabled. Existing
+  Insignia gamertags are listed in the log. Register the console with
+  Insignia's Setup Assistant before creating an account in the dashboard.
+- **Regression checks** — Adds dashboard boot, reset, game switching,
+  relaunch and account-detection coverage. Includes the restart memory-check
+  fix documented after 0.14.0.
+
+The merged code passed the Linux build, automated regression tests, package
+verification, generated Vulkan shaders and save-state schema checks.
+Dashboard coverage uses synthetic executables in the libretro harness;
+real RetroArch dashboard navigation and end-to-end Insignia registration,
+account setup and sign-in still need device validation.
+[Implementation and validation](https://github.com/portare-ch/hakuX-lr/pull/54).
+
+### Current limitations
+
+- Dashboard files are not included; install your own copy to use Start Core.
+- Save states are not yet available.
+- XLink Kai and a general-purpose Internet (NAT) option are unavailable in
+  RetroArch; NAT is used by the Insignia option.
+- CD CHDs and CHDs that require a parent image are unsupported. Use `chdman createdvd`.
+- NBA Inside Drive 2003 has blank saved player textures because GPU readback is incomplete.
+
 ## linux-v0.14.0 (PortareOS)
 
 Brings upstream hakuX 1.3.0's game fixes to RetroArch and adds an experimental

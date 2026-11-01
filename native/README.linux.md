@@ -148,9 +148,14 @@ Insignia mode uses upstream's NAT backend (`native/net/nat.c`, libslirp).
 The console gets 10.0.2.15 via DHCP and uses Insignia's DNS server,
 46.101.64.175. If your provider blocks that server, put an insigniaDNS
 server's address in `insignia-dns.txt` in the save directory, using the same
-format as `lan-peers.txt`. Only the first address is used. The core can't
-boot the Xbox dashboard, so Insignia accounts can't be created or recovered
-from RetroArch yet.
+format as `lan-peers.txt`. Only the first address is used. To boot the Xbox
+dashboard, copy your `xboxdash.xbe` and its folders into `hdd/Partition2/`
+under RetroArch's save directory,
+then choose **Load Core → Microsoft - Xbox (hakuX) → Start Core** without
+loading content. Enable **Network → Xbox Live (Insignia)** for its Xbox Live
+pages. Register the console with Insignia's Setup Assistant first.
+Dashboard navigation in real RetroArch and end-to-end Insignia account
+setup and sign-in still need device validation.
 
 PAL60 is always enabled; 480p, 720p and 1080i are disabled. Use RetroArch's
 shaders for filters such as FXAA and **Core provided** for the core's 4:3 or

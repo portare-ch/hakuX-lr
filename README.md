@@ -126,9 +126,14 @@ varies; other games may have bugs or fail to start.
 - **Xbox Live (Insignia):** set **Network** to **Xbox Live (Insignia)** and
   restart the game to connect to [Insignia](https://insignia.live), the
   revival of the original Xbox Live service. Register the console first
-  by running Insignia's Setup Assistant as a game. Creating or recovering
-  an account requires the Xbox dashboard, which the RetroArch core can't
-  boot yet. If your provider blocks Insignia's DNS server, run
+  by running Insignia's Setup Assistant as a game. For account creation
+  or recovery, copy your Xbox dashboard files (`xboxdash.xbe` and its
+  folders) into `hdd/Partition2/` under RetroArch's save directory
+  (`/storage/saves/xbox/hdd/Partition2/` on PortareOS). Close the game,
+  select **Load Core → Microsoft - Xbox (hakuX) → Start Core**, and open
+  **Xbox Live** in the dashboard. Dashboard files are not included.
+  Dashboard navigation and end-to-end Insignia setup still need device
+  validation. If your provider blocks Insignia's DNS server, run
   insigniaDNS on another computer and put its address in `insignia-dns.txt`
   in the save directory (`/storage/saves/xbox/insignia-dns.txt` on
   PortareOS).
