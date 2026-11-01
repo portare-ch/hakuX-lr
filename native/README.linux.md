@@ -166,6 +166,40 @@ The remaining design targets are in [LIBRETRO_SPEC.md](../LIBRETRO_SPEC.md).
 `HAKUX_LR_STATS=1` logs time spent in `retro_run`. `HAKUX_DISP_STATS=1`
 logs new frames per second, frame age and gaps between frames in any frontend.
 
+## Insignia NAT
+
+The libretro core and Android app share this backend. It forwards the
+console's UDP 3074 through the device's UDP 3074 and asks the router to
+forward that port through UPnP. For Open NAT, enable UPnP on the router or
+forward UDP 3074 to the device manually. If a device firewall is enabled,
+allow inbound UDP 3074 so peers can reach the console. Only one console
+behind the same router can own external UDP 3074.
+
+Timed leases renew halfway through; failed renewals retry with backoff.
+Routers that require permanent leases are retried with a lease of zero.
+At shutdown, the core checks ownership before removing its UPnP forward.
+If ownership is unknown, it removes the forward only if the last mapping
+request succeeded. A forward identified as another device's is left alone.
+
+`NC_NET` accepts space-separated overrides before boot, such as
+`NC_NET="natport=43074 upnp=off"`. These are native environment options,
+not RetroArch core options:
+
+| Option | Behavior |
+| --- | --- |
+| `natport=N` | Device UDP port for the console's 3074; default `3074`, `0` disables the forward. UPnP requests the same external port. |
+| `upnp=on\|off\|A.B.C.D[:PORT]` | Default `on`. An address sends discovery directly to that SSDP endpoint instead of multicast; its default port is `1900`. |
+| `upnplease=S` | Lease in seconds, `0`–`604800`; default `3600`, `0` requests a permanent lease. |
+
+The `nat:` log lines explain common failures:
+
+- **UDP port unavailable:** another program holds the device port. Outgoing
+  traffic uses a free port; no local forward or UPnP request is created.
+- **No router answered:** configure a manual router forward.
+- **UPnP error 718:** another device owns the external port.
+- **Router behind another NAT:** a private or carrier-grade external
+  address means an upstream NAT, possibly the provider's, may still block peers.
+
 ## The PortareOS package
 
 PortareOS's `hakux-lr` package installs the release tarball. Make it from a

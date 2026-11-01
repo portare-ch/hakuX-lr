@@ -12,12 +12,11 @@
  * and takes datagrams from anyone (Xbox Live's peer-to-peer traffic on UDP
  * 3074). The phone's own loopback stays out of reach.
  *
- * The console's UDP 3074 is bound to the host's natport (3074 by default):
- * libslirp finds that forward for the console's datagrams from 3074 too, so
- * they leave from the same host port, and peers reach the console before it
- * has sent to them once the router forwards that port (by hand, or asked by
- * UPnP: upnp.c). Insignia's NAT guide asks for both. If the port is taken,
- * the console's 3074 leaves from any free port, as before.
+ * Forward the console's UDP 3074 through the host's natport (default 3074).
+ * libslirp reuses this socket for outgoing traffic, keeping the source port
+ * stable. With a router forward (manual or UPnP, upnp.c), peers can reach
+ * the console before it sends to them. If the host port is busy, outgoing
+ * traffic falls back to a free port.
  *
  * Everything runs on the network thread: libslirp's descriptors join its
  * poll (fill/poll), its timers are checked there, and the guest's frames are
@@ -129,8 +128,7 @@ static const SlirpCb g_cb = {
 
 /* ------------------------------------------------------------ backend */
 
-/* The console's UDP 3074 on the host's natport, and the router asked to
- * forward that port to this device. */
+/* Bind the console's UDP 3074 to natport, then request a router forward. */
 static void nat_forward(const NcNetConfig *c, struct in_addr guest)
 {
     if (!c->nat_port) {
@@ -251,9 +249,8 @@ static void nat_poll(struct pollfd *fds, int n)
     g_nat.overflow = 0;
 }
 
-/* After nc_net_stop joins the network thread, remove the router's forward,
- * free the stack, host sockets and timers, ready for nat_init on the next
- * boot. */
+/* After the network thread joins, clean up UPnP, the stack, sockets and
+ * timers so the next boot can initialize them again. */
 static void nat_close(void)
 {
     nc_upnp_stop();

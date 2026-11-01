@@ -6,8 +6,7 @@
  *
  *   off  no network: the link is down (titles see no cable)
  *   nat  a user-mode TCP/IP stack and NAT (libslirp): DHCP, the Internet;
- *        Xbox Live through Insignia, its DNS server given by DHCP, the
- *        console's UDP 3074 on the host's (and the router asked by UPnP)
+ *        Insignia DNS via DHCP, UDP 3074 forwarding and UPnP for Xbox Live
  *   lan  Ethernet frames in UDP datagrams among the consoles on the local
  *        network (system link): broadcast to the subnet, unicast once a MAC
  *        is known; xemu's UDP tunnel carries the same datagrams, and peers
@@ -38,15 +37,15 @@ typedef enum NcNetMode { NC_NET_OFF, NC_NET_NAT, NC_NET_LAN, NC_NET_KAI } NcNetM
 /* Options (native/core/options.c), before the boot:
  *   net=off|nat|lan|kai
  *   dns=A.B.C.D[,A.B.C.D]   nat: the DNS servers DHCP gives the guest
- *   natport=N               nat: the host's UDP port for the console's 3074
- *                           (Xbox Live's): the console sends from it and
- *                           receives what anyone sends to it; 0: none
+ *   natport=N               nat: host UDP port for the console's 3074,
+ *                           used for outgoing and unsolicited incoming
+ *                           traffic; default 3074, 0 disables forwarding
  *   upnp=on|off|A.B.C.D[:PORT]
- *                           nat: ask the router (UPnP IGD) to forward
- *                           natport to this device; an address: its SSDP
- *                           port, asked directly instead of by multicast
- *   upnplease=S             nat: the UPnP forward's lease, renewed at half
- *                           (3600; 0: permanent)
+ *                           nat: request a router forward; default on.
+ *                           An address selects unicast SSDP discovery
+ *                           instead of multicast; default port 1900
+ *   upnplease=S             nat: lease in seconds (0-604800), renewed
+ *                           halfway through; default 3600, 0 is permanent
  *   lanport=N               lan: the UDP port (all consoles the same)
  *   lanbcast=A.B.C.D[/BITS] lan: the local network's broadcast address
  *                           (and its prefix: who is outside it)
@@ -129,9 +128,9 @@ typedef struct NcNetConfig {
 const NcNetConfig *nc_net_config(void);
 
 /* ---- UPnP (native/net/upnp.c), for the NAT backend ----
- * nc_upnp_start: a thread asks the router to forward its UDP port to this
- * device's port, renewing the lease while it runs. nc_upnp_stop: removes
- * the forward and joins the thread. Safe to call when not started. */
+ * nc_upnp_start requests a router forward to the same port on this device
+ * and renews its lease on a worker thread. nc_upnp_stop checks ownership,
+ * attempts cleanup and joins the thread; safe to call when not started. */
 void nc_upnp_start(uint16_t port);
 void nc_upnp_stop(void);
 

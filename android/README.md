@@ -72,6 +72,17 @@ ninja -C build/hle-tests
 ctest --test-dir build/hle-tests --output-on-failure
 ```
 
+## Networking
+
+Xbox Live (Insignia) mode forwards the console's UDP 3074 through the
+device's UDP 3074 and requests a router forward through UPnP. For Open NAT,
+enable UPnP on the router or forward UDP 3074 to the device manually. Only
+one console behind the same router can use external UDP 3074.
+
+The native options `natport=`, `upnp=` and `upnplease=` use the same backend
+as the libretro core; see [Insignia NAT](../native/README.linux.md#insignia-nat)
+for defaults and behavior.
+
 ## Debug builds
 
 Debug builds also carry the Khronos validation layer, which Android loads

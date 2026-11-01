@@ -1,23 +1,19 @@
 /*
- * hakuX native core — UPnP for the NAT backend (nat.c): the router (an
- * Internet Gateway Device) forwards a UDP port to this device, as a console
- * on the router's network would ask it to, so Xbox Live peers reach the
- * console first (Insignia's Open NAT). The console behind libslirp can't ask
- * itself: its 10.0.2.15 isn't on the router's network.
+ * hakuX native core — UPnP port forwarding for NAT (nat.c).
  *
- * One thread, every wait bounded and watching the stop:
- *   SSDP      M-SEARCH to 239.255.255.250:1900 (or upnp=ADDRESS[:PORT],
- *             asked directly); each answer's LOCATION, until one is a router
- *   describe  its device description: the WANIPConnection (or
- *             WANPPPConnection) service's control URL
- *   map       AddPortMapping, the port to this device's same port, for
- *             upnplease= seconds (permanent if the router takes no other),
- *             renewed at half the lease, a failed renewal retried with
- *             backoff; GetExternalIPAddress logged
- *   stop      DeletePortMapping, also after an AddPortMapping the stop cut
- *             short (the router may have applied it); unless the last
- *             AddPortMapping was answered yes, only once
- *             GetSpecificPortMappingEntry shows the forward is this device's
+ * The host must request the forward: libslirp's guest address, 10.0.2.15,
+ * is not reachable on the router's LAN.
+ *
+ * A worker discovers an IGD through SSDP multicast (239.255.255.250:1900)
+ * or the upnp= endpoint, then finds its WANIPConnection or WANPPPConnection
+ * control URL. It logs GetExternalIPAddress and calls AddPortMapping with
+ * upnplease= seconds, falling back to a permanent lease if required.
+ * Timed leases renew halfway through; failed renewals retry with backoff.
+ *
+ * Waits are bounded; shutdown cleanup ignores cancellation.
+ * Cleanup checks ownership, including after an interrupted AddPortMapping
+ * that the router may have applied. If ownership is unknown, deletion
+ * requires the last AddPortMapping to have succeeded.
  */
 #include "native/net/net.h"
 #include "native/core/nc.h"
@@ -40,11 +36,11 @@
 
 #define SSDP_GROUP "239.255.255.250"
 #define SSDP_PORT 1900
-#define SEARCH_MS 3000                  /* SSDP: the answers awaited */
-#define SEARCH_AGAIN_MS 1000            /* SSDP: the M-SEARCHes sent again (UDP) */
+#define SEARCH_MS 3000                  /* SSDP response window */
+#define SEARCH_AGAIN_MS 1000            /* SSDP retransmission interval */
 #define HTTP_MS 3000                    /* one HTTP exchange */
-#define DELETE_MS 1000                  /* the forward removed, at the stop */
-#define RETRY_MS 5000                   /* a failed renewal's first retry, doubling */
+#define DELETE_MS 1000                  /* shutdown HTTP timeout */
+#define RETRY_MS 5000                   /* initial retry delay; doubles up to the cap */
 #define RETRY_MAX_MS 300000
 #define RESPONSE_MAX 65536
 #define TAG "hakuX-native-net"
@@ -57,14 +53,14 @@ typedef struct Url {
 static struct {
     pthread_t thread;
     bool started;
-    int stop_fd;                        /* eventfd: written once at the stop */
+    int stop_fd;                        /* eventfd signaled at shutdown */
     uint16_t port;
-    /* the thread's */
-    bool leaving;                       /* the stop seen: the last exchange ignores it */
+    /* Worker-owned state. */
+    bool leaving;                       /* cleanup ignores the stop signal */
     Url control;
     char service[96];
     char local[INET_ADDRSTRLEN];
-    bool mapped;                        /* the router may have the forward: removed at the stop */
+    bool mapped;                        /* a mapping may exist; check ownership at cleanup */
     char buf[RESPONSE_MAX];
 } g_upnp = { .stop_fd = -1 };
 
@@ -75,8 +71,8 @@ static int64_t now_ms(void)
     return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
-/* 1: fd is ready for events; 0: the deadline (monotonic ms) passed; -1: the
- * stop (unless leaving) or an error. fd < 0 waits for the stop only. */
+/* Return 1 for fd readiness, 0 at deadline (monotonic ms), or -1 on error
+ * or cancellation (unless leaving). With fd < 0, wait only for cancellation. */
 static int wait_fd(int fd, short events, int64_t deadline)
 {
     for (;;) {
@@ -112,8 +108,8 @@ static bool stopped(void)
 
 /* --------------------------------------------------------------- parsing */
 
-/* The value of header name in [s, end) (one header per line): its start,
- * its length in *len, spaces trimmed; NULL if none. */
+/* Find header name in [s, end); return its trimmed value and length in
+ * *len, or NULL if absent. */
 static const char *header(const char *s, const char *end, const char *name, size_t *len)
 {
     const size_t nl = strlen(name);
@@ -139,8 +135,8 @@ static const char *header(const char *s, const char *end, const char *name, size
     return NULL;
 }
 
-/* "http://A.B.C.D[:PORT][/PATH]" (n bytes) to u. Routers name themselves
- * by address. */
+/* Parse n bytes of "http://A.B.C.D[:PORT][/PATH]"; only IPv4 literals
+ * are supported. */
 static bool parse_url(const char *s, size_t n, Url *u)
 {
     if (n < 7 || strncasecmp(s, "http://", 7)) {
@@ -189,8 +185,8 @@ static bool parse_url(const char *s, size_t n, Url *u)
     return true;
 }
 
-/* path's "." and ".." segments removed, in place (RFC 3986 5.2.4, for an
- * absolute path); a query or fragment kept as it is. */
+/* Remove dot segments from an absolute path (RFC 3986 5.2.4), preserving
+ * the query and fragment. */
 static bool path_end(char c)
 {
     return !c || c == '?' || c == '#';
@@ -222,12 +218,12 @@ static void remove_dots(char *path)
             } while (!path_end(*in) && *in != '/');
         }
     }
-    snprintf(out + o, sizeof(out) - o, "%s", in);         /* the query, verbatim */
+    snprintf(out + o, sizeof(out) - o, "%s", in);         /* Preserve query and fragment. */
     memcpy(path, out, strlen(out) + 1);
 }
 
-/* ref resolved against base (RFC 3986 5.2): absolute, an absolute path on
- * base's server, or a path relative to base's directory. */
+/* Resolve an absolute URL, absolute path or directory-relative path
+ * against base (RFC 3986 5.2). */
 static bool resolve(const Url *base, const char *ref, Url *out)
 {
     if (!strncasecmp(ref, "http://", 7)) {
@@ -251,8 +247,8 @@ static bool resolve(const Url *base, const char *ref, Url *out)
     return true;
 }
 
-/* The text of the first <tag>...</tag> in [s, end), trimmed, to out (n
- * bytes); false if none or too long. */
+/* Copy the first <tag>...</tag> text in [s, end), trimmed, into out
+ * (capacity n bytes). Return false if absent or too long. */
 static bool xml_text(const char *s, const char *end, const char *tag, char *out, size_t n)
 {
     char open[48], close[48];
@@ -307,8 +303,8 @@ static size_t dechunk(char *s, size_t n)
     return out;
 }
 
-/* Whether the response read so far (len bytes, NUL-terminated) is all of
- * it: a Content-Length reached or a chunked body's last chunk. */
+/* Check whether the NUL-terminated response (len bytes) has reached
+ * Content-Length or the final chunk. */
 static bool response_complete(const char *s, size_t len)
 {
     const char *end = strstr(s, "\r\n\r\n");
@@ -327,9 +323,9 @@ static bool response_complete(const char *s, size_t len)
 
 /* --------------------------------------------------------------- HTTP */
 
-/* An HTTP exchange with u's server: req (len bytes) sent, the response read
- * to its end. Its status (0: none, no answer in timeout_ms or the stop);
- * the body, decoded and NUL-terminated, in g_upnp.buf. */
+/* Send req (len bytes) to u and read the response within timeout_ms.
+ * Return the HTTP status, or 0 on error, timeout or cancellation.
+ * Leave the decoded, NUL-terminated response body in g_upnp.buf. */
 static int http(const Url *u, const char *req, size_t len, int timeout_ms)
 {
     const int64_t deadline = now_ms() + timeout_ms;
@@ -366,7 +362,7 @@ static int http(const Url *u, const char *req, size_t len, int timeout_ms)
                 break;
             }
         } else if (n == 0) {
-            whole = true;               /* the server closed: the end */
+            whole = true;               /* Connection close terminates the response. */
             break;
         } else if ((errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) ||
                    wait_fd(fd, POLLIN, deadline) != 1) {
@@ -398,8 +394,8 @@ out:
     return status;
 }
 
-/* A SOAP action on the control URL with its arguments (XML elements); the
- * HTTP status, the response's body in g_upnp.buf. */
+/* Call a SOAP action with XML arguments; return the HTTP status and
+ * leave the response body in g_upnp.buf. */
 static int soap(const char *action, const char *args, int timeout_ms)
 {
     const Url *u = &g_upnp.control;
@@ -432,8 +428,8 @@ static int soap_error(void)
 
 /* --------------------------------------------------------------- steps */
 
-/* The description at desc: the control URL and service type of its WAN
- * connection service, the first of services[] it has. */
+/* Read desc and select a WAN connection service in services[] order,
+ * saving its type and control URL. */
 static bool describe(const Url *desc)
 {
     static const char *const services[] = {
@@ -483,8 +479,8 @@ static bool describe(const Url *desc)
     return false;
 }
 
-/* SSDP: the Internet Gateway Devices that answer, each new one described
- * as it's heard, until one has a WAN connection service (describe). */
+/* Fetch each new SSDP responder's description until a WAN connection
+ * service is found. */
 static bool discover(void)
 {
     static const char *const targets[] = {
@@ -563,7 +559,7 @@ static bool discover(void)
     return found;
 }
 
-/* This device's address toward the router (the forward's destination). */
+/* Find the local address used to reach the router: the mapping's destination. */
 static bool local_address(void)
 {
     const int fd = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
@@ -579,9 +575,8 @@ static bool local_address(void)
     return ok;
 }
 
-/* The router's own Internet address, logged: one that is private or
- * carrier-grade NAT's (100.64.0.0/10) has another NAT before the Internet,
- * which no forward here opens. */
+/* A private or carrier-grade (100.64.0.0/10) external address indicates
+ * an upstream NAT that a forward on this router cannot bypass. */
 static void log_external(void)
 {
     char ip[INET_ADDRSTRLEN];
@@ -613,10 +608,9 @@ static int add_mapping(unsigned lease, int *error)
     return status;
 }
 
-/* Whether the router's forward of the port is this device's: 1 yes, 0 no
- * (another device's, or none: error 714), -1 unknown (no answer, another
- * error, an entry without its client). DeletePortMapping names only the
- * external port, so another console's forward must not be removed. */
+/* Return 1 for our mapping, 0 for another device's or no entry (714), and
+ * -1 if the query fails or lacks client/port fields. DeletePortMapping has
+ * no internal-client argument, so ownership must be checked first. */
 static int mapping_is_ours(void)
 {
     char args[256], client[INET_ADDRSTRLEN], port[8];
@@ -635,8 +629,8 @@ static int mapping_is_ours(void)
     return !strcmp(client, g_upnp.local) && atoi(port) == g_upnp.port;
 }
 
-/* owned: the router's last answer to AddPortMapping was yes. Otherwise the
- * forward is removed only once the router shows it is this device's. */
+/* If the ownership query is inconclusive, delete only when owned:
+ * the last AddPortMapping succeeded. Never delete a confirmed mismatch. */
 static void delete_mapping(bool owned)
 {
     const int ours = mapping_is_ours();
@@ -669,18 +663,18 @@ static void *upnp_thread(void *arg)
     inet_ntop(AF_INET, &g_upnp.control.addr.sin_addr, router, sizeof(router));
     log_external();
     unsigned lease = nc_net_config()->upnp_lease;
-    bool forwarded = false;                     /* the router said yes once */
-    int64_t retry = 0;                          /* a failed renewal's next delay, 0: none failed */
-    bool owned = false;                         /* the last AddPortMapping answered yes */
+    bool forwarded = false;                     /* at least one AddPortMapping succeeded */
+    int64_t retry = 0;                          /* retry delay in ms; 0 after success */
+    bool owned = false;                         /* the last AddPortMapping succeeded */
     while (!stopped()) {
         int error;
         const bool before = g_upnp.mapped;
-        g_upnp.mapped = true;                   /* a request the stop cuts short may still be applied */
+        g_upnp.mapped = true;                   /* The router may apply a request before cancellation. */
         const int status = add_mapping(lease, &error);
         owned = status == 200;
         if (status != 200) {
             if (status && !before) {
-                g_upnp.mapped = false;          /* the router answered no: nothing to remove */
+                g_upnp.mapped = false;          /* Explicit initial rejection: no mapping to clean up. */
             }
             if (stopped()) {
                 break;
@@ -700,7 +694,7 @@ static void *upnp_thread(void *arg)
             if (!forwarded) {
                 break;
             }
-            /* a renewal: the forward may still hold; asked again until the router answers */
+            /* Retry without discarding a possibly active mapping. */
             const int64_t cap = (int64_t)lease * 500 < RETRY_MAX_MS ? (int64_t)lease * 500 : RETRY_MAX_MS;
             retry = !retry ? ((int64_t)lease * 125 < RETRY_MS ? (int64_t)lease * 125 : RETRY_MS)
                            : (retry * 2 < cap ? retry * 2 : cap);

@@ -1,18 +1,12 @@
 /*
- * The NAT backend (native/net/nat.c, upnp.c) with frames made here as the
- * console's, and a router made here that answers UPnP on 127.0.0.1:
- * - the console's UDP 3074 leaves from natport, and a datagram sent to
- *   natport first (from a peer the console never sent to) reaches it;
- * - UPnP: a device without a WAN service skipped, the router asked to
- *   forward natport to this device for an hour, or permanently when it
- *   takes no other lease, and the forward removed at the stop (also when
- *   the stop cut its AddPortMapping short, once the router shows it is this
- *   device's; another console's never); control URLs relative to the
- *   description's directory and to its URLBase, a query kept; failed
- *   renewals asked again, the forward kept;
- * - natport taken: the backend still starts, the console's 3074 leaves
- *   from another port, no UPnP; upnp=off: no M-SEARCH.
- * The build's nat-smoke test (native/cmake/linux-tests.cmake).
+ * nat-smoke (native/cmake/linux-tests.cmake): exercise NAT with console
+ * Ethernet frames and a fake UPnP router on 127.0.0.1.
+ *
+ * Check stable outgoing UDP 3074 and unsolicited incoming traffic,
+ * discovery that skips non-router devices, relative control URLs and
+ * preserved queries, timed and permanent leases, and renewal retries.
+ * Shutdown covers delayed replies, ownership checks and failed queries.
+ * Also check busy-port fallback, UPnP disabled and interrupted startup.
  */
 #include "native/net/net.h"
 
@@ -69,7 +63,7 @@ static const char TV_XML[] =
     "<serviceType>urn:schemas-upnp-org:service:RenderingControl:1</serviceType>"
     "<controlURL>/tv/ctl</controlURL></service></serviceList></device></root>";
 
-/* The router's description: %s its URLBase element, %s its controlURL. */
+/* Description template: %s substitutes URLBase, then controlURL. */
 static const char IGD_XML[] =
     "<?xml version=\"1.0\"?>\r\n<root xmlns=\"urn:schemas-upnp-org:device-1-0\">%s<device>"
     "<deviceType>urn:schemas-upnp-org:device:InternetGatewayDevice:1</deviceType><serviceList><service>"
@@ -91,16 +85,16 @@ static struct {
     unsigned searches, descriptions, adds, deletes, externals;
     bool only_permanent;
     int layout;                         /* LAYOUTS[]: where the description and control URL are */
-    int add_delay_ms;                   /* AddPortMapping answered this late */
-    unsigned fail_from, fail_to;        /* AddPortMappings [from, to) (counted from 1) answered 500 */
+    int add_delay_ms;                   /* response delay in ms */
+    unsigned fail_from, fail_to;        /* requests [from, to), numbered from 1, return HTTP 500 */
     char owner[INET_ADDRSTRLEN];        /* the forward's internal client, "" none */
     unsigned queries;                   /* GetSpecificPortMappingEntry */
     bool fail_queries;                  /* GetSpecificPortMappingEntry answered 500 (ActionFailed) */
     char last_add[8192], last_delete[8192];
 } g_igd = { .lock = PTHREAD_MUTEX_INITIALIZER };
 
-/* The description's path, its URLBase ("" none, else a format of the HTTP
- * port), its controlURL, and the control path that resolves to. */
+/* Description path, URLBase template (%u is the HTTP port; "" omits it),
+ * controlURL reference and expected resolved request target. */
 static const struct {
     const char *desc, *base, *control, *resolved;
 } LAYOUTS[] = {
@@ -110,7 +104,7 @@ static const struct {
     { "/rootDesc.xml", "", "/ctl/IPConn?target=/../peer", "/ctl/IPConn?target=/../peer" },
 };
 
-/* The text of <tag>...</tag> in s, to out ("" none). */
+/* Copy <tag>...</tag> text into out, or an empty string if absent. */
 static void tag_text(const char *s, const char *tag, char *out, size_t n)
 {
     char open[48], close[48];
@@ -193,7 +187,8 @@ static void serve(int fd)
         const bool conflict = g_igd.owner[0] && strcmp(g_igd.owner, client);
         const bool temporary = g_igd.only_permanent && !strstr(req, "<NewLeaseDuration>0</NewLeaseDuration>");
         if (!fail && !conflict && !temporary) {
-            snprintf(g_igd.owner, sizeof(g_igd.owner), "%s", client);     /* applied before the answer */
+            /* Apply before replying: shutdown may interrupt the response. */
+            snprintf(g_igd.owner, sizeof(g_igd.owner), "%s", client);
         }
         const int delay = g_igd.add_delay_ms;
         if (delay) {
@@ -265,7 +260,7 @@ static void *igd_thread(void *arg)
                     pthread_mutex_lock(&g_igd.lock);
                     g_igd.searches++;
                     pthread_mutex_unlock(&g_igd.lock);
-                    /* a media renderer that answers everything, then the router */
+                    /* A media renderer answers first; discovery must skip it. */
                     const char *const paths[] = { "/tv.xml", LAYOUTS[g_igd.layout].desc };
                     for (unsigned i = 0; i < 2; i++) {
                         char out[512];
@@ -408,7 +403,7 @@ static void console_send(uint32_t ip, uint16_t port, const char *payload)
     nc_net_send(f, 14 + tlen);
 }
 
-/* A UDP datagram for the console's port 3074 with payload, within ms. */
+/* Wait up to ms milliseconds for payload on the console's UDP 3074. */
 static bool console_got(const char *payload, int ms)
 {
     const size_t plen = strlen(payload);
@@ -432,8 +427,8 @@ static bool console_got(const char *payload, int ms)
     return false;
 }
 
-/* This host's first non-loopback IPv4 address (network order), 0 if none:
- * the console's datagrams reach a socket here through it. */
+/* Find a non-loopback host IPv4 address (network order) for outgoing
+ * datagram tests; return 0 if none exists. */
 static uint32_t host_ip(void)
 {
     struct ifaddrs *list;
@@ -451,8 +446,7 @@ static uint32_t host_ip(void)
     return ip;
 }
 
-/* The source port of the console's datagram as a host peer receives it, 0
- * if it didn't arrive. */
+/* Return the source port seen by a host peer, or 0 if no datagram arrives. */
 static uint16_t console_source_port(uint32_t ip, const char *payload)
 {
     const int peer = socket(AF_INET, SOCK_DGRAM, 0);
@@ -524,7 +518,7 @@ int main(void)
     }
     const uint32_t ip = host_ip();
 
-    /* natport forwarded, UPnP on through the test's router */
+    /* Test the local forward and UPnP mapping together. */
     option("net=nat");
     option("natport=%u", NATPORT);
     option("upnp=127.0.0.1:%u", g_igd.ssdp_port);
@@ -564,7 +558,7 @@ int main(void)
           "UPnP: the forward removed at the stop");
     CHECK(port_free(NATPORT), "UDP %u released", NATPORT);
 
-    /* a router that takes permanent forwards only (error 725) */
+    /* Retry error 725 with a permanent lease. */
     igd_reset(true);
     nc_net_start();
     CHECK(igd_wait(&g_igd.adds, 2, 5000) && has(g_igd.last_add, "<NewLeaseDuration>0</NewLeaseDuration>"),
@@ -572,8 +566,7 @@ int main(void)
     nc_net_stop();
     CHECK(igd_count(&g_igd.deletes) == 1, "UPnP: the permanent forward removed at the stop");
 
-    /* control URLs relative to the description's directory, to URLBase, and
-     * one with a query (kept as it is) */
+    /* Resolve directory-relative and URLBase references; preserve queries. */
     for (int layout = 1; layout <= 3; layout++) {
         igd_reset(false);
         g_igd.layout = layout;
@@ -583,7 +576,7 @@ int main(void)
         CHECK(igd_count(&g_igd.deletes) == 1, "UPnP: removed at %s", LAYOUTS[layout].resolved);
     }
 
-    /* the stop cuts AddPortMapping short: the router may have applied it */
+    /* Stop before AddPortMapping replies, after the router applies it. */
     igd_reset(false);
     g_igd.add_delay_ms = 600;
     nc_net_start();
@@ -592,7 +585,7 @@ int main(void)
     CHECK(igd_wait(&g_igd.deletes, 1, 2000) && igd_count(&g_igd.queries) == 1,
           "UPnP: the forward removed though its answer never came, once shown to be this device's");
 
-    /* the same, but another console has the port: its forward stays */
+    /* Leave another console's mapping intact after a delayed conflict. */
     igd_reset(false);
     snprintf(g_igd.owner, sizeof(g_igd.owner), "192.168.1.99");
     g_igd.add_delay_ms = 600;
@@ -604,8 +597,7 @@ int main(void)
     CHECK(igd_count(&g_igd.deletes) == 0 && has(g_igd.owner, "192.168.1.99"),
           "UPnP: another console's forward left alone");
 
-    /* the ownership query fails (not "no such entry"): a forward the router
-     * said yes to is still removed */
+    /* A failed ownership query still allows cleanup of a confirmed mapping. */
     igd_reset(false);
     g_igd.fail_queries = true;
     nc_net_start();
@@ -615,7 +607,7 @@ int main(void)
     CHECK(igd_count(&g_igd.queries) == 1 && igd_count(&g_igd.deletes) == 1,
           "UPnP: a confirmed forward removed though the ownership query failed");
 
-    /* renewals: two fail, the next succeeds; the forward is kept meanwhile */
+    /* Keep the mapping through two failed renewals, then recover. */
     igd_reset(false);
     g_igd.fail_from = 2, g_igd.fail_to = 4;
     option("upnplease=2");
@@ -627,7 +619,7 @@ int main(void)
     CHECK(igd_count(&g_igd.deletes) == 1, "UPnP: removed at the stop after renewals");
     option("upnplease=3600");
 
-    /* natport taken by another program */
+    /* A busy local port disables forwarding, but NAT still works. */
     igd_reset(false);
     const int busy = socket(AF_INET, SOCK_DGRAM, 0);
     struct sockaddr_in b = { .sin_family = AF_INET, .sin_port = htons(BUSYPORT) };
@@ -654,7 +646,7 @@ int main(void)
     CHECK(igd_count(&g_igd.searches) == 0, "UPnP off: no M-SEARCH");
     nc_net_stop();
 
-    /* boots stopped while UPnP is still asking */
+    /* Stop during discovery or mapping, then boot again. */
     option("upnp=127.0.0.1:%u", g_igd.ssdp_port);
     t = now_ms();
     for (int i = 0; i < 5; i++) {

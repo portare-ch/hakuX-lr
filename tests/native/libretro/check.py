@@ -82,8 +82,8 @@ def chd(path, image, hunk=4096, cd=False, lead=0):
     path.write_bytes(out.ljust(data_off, b'\0') + body)
 
 
-# NAT runs: the console's UDP 3074 on a test port, and UPnP asked of an
-# address where nothing answers, never the network's router.
+# Use a test NAT port and an unanswered loopback SSDP endpoint so tests
+# never change the real router's mappings.
 NAT_TEST = 'natport=43080 upnp=127.0.0.1:9'
 
 

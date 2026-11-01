@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **Insignia NAT (libretro and Android)** — Forwards the console's UDP 3074
+  through the device's UDP 3074 and requests a router forward through UPnP
+  for Open NAT. Renews leases with retries and checks ownership before
+  cleanup on shutdown. Without UPnP, forward UDP 3074 to the device manually.
+
 ## linux-v0.15.0 (PortareOS)
 
 Boot the Xbox dashboard from RetroArch to access its Xbox Live pages for
