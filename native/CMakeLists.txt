@@ -103,6 +103,7 @@ add_library(hakux_native STATIC
   net/lan.c
   net/kai.c
   net/nat.c
+  net/upnp.c
   kernel/kernel.c
   kernel/pool.c
   kernel/ob.c

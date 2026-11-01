@@ -82,6 +82,11 @@ def chd(path, image, hunk=4096, cd=False, lead=0):
     path.write_bytes(out.ljust(data_off, b'\0') + body)
 
 
+# Use a test NAT port and an unanswered loopback SSDP endpoint so tests
+# never change the real router's mappings.
+NAT_TEST = 'natport=43080 upnp=127.0.0.1:9'
+
+
 def cycles(command, env, n, expect=None):
     """The harness's game cycles (HARNESS_CYCLES): each cycle's threads,
     descriptors and memory; the last as the second, up to a margin (the
@@ -302,7 +307,7 @@ def main():
         for network, marker in (
                 ('net=lan lanport=43075 lanbcast=127.0.0.1', 'lan: started'),
                 ('net=kai kai=127.0.0.1:43076', 'kai: started'),
-                ('net=nat', 'nat: started')):
+                (f'net=nat {NAT_TEST}', 'nat: UDP 43080 forwarded')):
             cycles([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'],
                    dict(os.environ, NC_NET=network), 5, marker)
         # a backend that fails to start (LAN's port taken, without
@@ -330,24 +335,25 @@ def main():
         # address insignia-dns.txt in the save directory names (an
         # insigniaDNS server; NAT gives the console one), never a word that
         # isn't one
+        insignia = dict(os.environ, HARNESS_OPTIONS='hakux_network=insignia', NC_NET=NAT_TEST)
         run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
             ('network insignia', 'Xbox Live through Insignia (NAT), DNS 46.101.64.175',
-             'nat: libslirp 4.7.0, 10.0.2.0/24, DNS 46.101.64.175', 'nat: started', 'ran 30 frames'),
-            dict(os.environ, HARNESS_OPTIONS='hakux_network=insignia'))
+             'nat: libslirp 4.7.0, 10.0.2.0/24, DNS 46.101.64.175', "nat: UDP 43080 forwarded to the console's 3074",
+             'nat: started', 'ran 30 frames'),
+            insignia)
         dns = root / 'saves' / 'insignia-dns.txt'
         dns.write_text('# insigniaDNS at home\n192.168.1.20, 192.168.1.21\n192.168.1.22\n')
         run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
             ('DNS 192.168.1.20 (insignia-dns.txt)', 'nat: libslirp 4.7.0, 10.0.2.0/24, DNS 192.168.1.20',
              'nat: started', 'ran 30 frames'),
-            dict(os.environ, HARNESS_OPTIONS='hakux_network=insignia'))
+            insignia)
         dns.write_text('insignia.example\n')
         run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
             ('names no IPv4 address (insignia.example)', 'DNS 46.101.64.175', 'nat: started', 'ran 30 frames'),
-            dict(os.environ, HARNESS_OPTIONS='hakux_network=insignia'))
+            insignia)
         dns.unlink()
         # Log only Insignia accounts from the config area, as the app does.
         # If none exist, tell game users where to create one.
-        insignia = dict(os.environ, HARNESS_OPTIONS='hakux_network=insignia')
         run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
             ('network: no Insignia account on this console', 'message: No Insignia account on this console yet',
              'ran 30 frames'), insignia)

@@ -343,6 +343,12 @@ Options (`options.c`): only what the emulator backs.
   Xbox dashboard, needed to create or recover Insignia accounts, are not
   available yet.
 
+Insignia's NAT backend forwards the console's UDP 3074 through the device's
+UDP 3074 and requests a router forward through UPnP for Open NAT. Without
+UPnP, forward that port to the device manually. Native overrides
+`natport=`, `upnp=` and `upnplease=` are documented under
+[Insignia NAT](native/README.linux.md#insignia-nat).
+
 All but the crop are read before the console boots, so a change takes effect
 when the game starts next, and RetroArch shows a message saying so. The crop
 changes from the next frame. No display, VRR, latency, mapping or

@@ -6,7 +6,7 @@
  *
  *   off  no network: the link is down (titles see no cable)
  *   nat  a user-mode TCP/IP stack and NAT (libslirp): DHCP, the Internet;
- *        Xbox Live through Insignia, its DNS server given by DHCP
+ *        Insignia DNS via DHCP, UDP 3074 forwarding and UPnP for Xbox Live
  *   lan  Ethernet frames in UDP datagrams among the consoles on the local
  *        network (system link): broadcast to the subnet, unicast once a MAC
  *        is known; xemu's UDP tunnel carries the same datagrams, and peers
@@ -37,6 +37,15 @@ typedef enum NcNetMode { NC_NET_OFF, NC_NET_NAT, NC_NET_LAN, NC_NET_KAI } NcNetM
 /* Options (native/core/options.c), before the boot:
  *   net=off|nat|lan|kai
  *   dns=A.B.C.D[,A.B.C.D]   nat: the DNS servers DHCP gives the guest
+ *   natport=N               nat: host UDP port for the console's 3074,
+ *                           used for outgoing and unsolicited incoming
+ *                           traffic; default 3074, 0 disables forwarding
+ *   upnp=on|off|A.B.C.D[:PORT]
+ *                           nat: request a router forward; default on.
+ *                           An address selects unicast SSDP discovery
+ *                           instead of multicast; default port 1900
+ *   upnplease=S             nat: lease in seconds (0-604800), renewed
+ *                           halfway through; default 3600, 0 is permanent
  *   lanport=N               lan: the UDP port (all consoles the same)
  *   lanbcast=A.B.C.D[/BITS] lan: the local network's broadcast address
  *                           (and its prefix: who is outside it)
@@ -77,7 +86,7 @@ void nc_net_wait_rx(uint64_t timeout_ns);
 void nc_net_twin(uint32_t ip);
 bool nc_net_take_twin(char *addr, size_t len);
 
-/* ---- backends (native/net/nat.c, lan.c) ---- */
+/* ---- backends (native/net/nat.c, lan.c, kai.c) ---- */
 
 struct pollfd;
 typedef struct NcNetBackend {
@@ -101,6 +110,11 @@ void nc_net_deliver(const uint8_t *frame, size_t len);
 /* Backends' configuration (the options). */
 typedef struct NcNetConfig {
     uint32_t dns[2];                    /* network order, 0: none */
+    uint16_t nat_port;                  /* 0: no forward */
+    bool upnp;
+    uint32_t upnp_ip;                   /* network order, 0: the SSDP multicast group */
+    uint16_t upnp_port;
+    unsigned upnp_lease;                /* seconds, 0: permanent */
     uint16_t lan_port;
     uint32_t lan_bcast;                 /* network order, 0: 255.255.255.255 */
     uint32_t lan_mask;                  /* network order, 0: not known */
@@ -112,6 +126,13 @@ typedef struct NcNetConfig {
     uint16_t kai_port;
 } NcNetConfig;
 const NcNetConfig *nc_net_config(void);
+
+/* ---- UPnP (native/net/upnp.c), for the NAT backend ----
+ * nc_upnp_start requests a router forward to the same port on this device
+ * and renews its lease on a worker thread. nc_upnp_stop checks ownership,
+ * attempts cleanup and joins the thread; safe to call when not started. */
+void nc_upnp_start(uint16_t port);
+void nc_upnp_stop(void);
 
 #ifdef __cplusplus
 }

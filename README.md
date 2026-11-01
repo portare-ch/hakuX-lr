@@ -137,6 +137,13 @@ varies; other games may have bugs or fail to start.
   insigniaDNS on another computer and put its address in `insignia-dns.txt`
   in the save directory (`/storage/saves/xbox/insignia-dns.txt` on
   PortareOS).
+  For **Open NAT**, hakuX forwards the console's UDP 3074 through the
+  device's UDP 3074 and asks the router to forward it through UPnP. Enable
+  UPnP on the router or forward UDP 3074 to the device manually. If the
+  device has a firewall, allow inbound UDP 3074 so peers can reach the
+  console. Only one console behind the same router can use external UDP
+  3074. Advanced overrides: `natport=`, `upnp=` and `upnplease=`; see
+  [NAT options](native/README.linux.md#insignia-nat).
 - **Saving:** save inside the game, as on an Xbox. On PortareOS, your saves
   live in `/storage/saves/xbox/hdd/`. Back up that folder to keep them when
   moving or reinstalling. RetroArch save states are not available.

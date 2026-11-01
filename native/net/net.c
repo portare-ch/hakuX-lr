@@ -49,7 +49,7 @@ static struct {
 } g_net = {
     .lock = PTHREAD_MUTEX_INITIALIZER,
     .wake_fd = -1,
-    .cfg = { .lan_port = 3075, .kai_port = 34523 },
+    .cfg = { .nat_port = 3074, .upnp = true, .upnp_lease = 3600, .lan_port = 3075, .kai_port = 34523 },
 };
 
 static bool ring_init(Ring *r, unsigned n)
@@ -120,6 +120,38 @@ bool nc_net_option(const char *arg)
             parse_ip(comma + 1, &g_net.cfg.dns[1]);
         }
         parse_ip(buf, &g_net.cfg.dns[0]);
+    } else if (!strncmp(arg, "natport=", 8)) {
+        char *end;
+        const long p = strtol(arg + 8, &end, 10);
+        if (end != arg + 8 && !*end && p >= 0 && p < 65536) {
+            g_net.cfg.nat_port = (uint16_t)p;
+        }
+    } else if (!strncmp(arg, "upnp=", 5)) {
+        const char *v = arg + 5;
+        g_net.cfg.upnp_ip = 0;
+        g_net.cfg.upnp_port = 0;
+        if (!strcmp(v, "off") || !strcmp(v, "0")) {
+            g_net.cfg.upnp = false;
+            return true;
+        }
+        g_net.cfg.upnp = true;
+        if (strcmp(v, "on") && strcmp(v, "1")) {
+            char buf[32];
+            snprintf(buf, sizeof(buf), "%s", v);
+            char *colon = strchr(buf, ':');
+            if (colon) {
+                *colon = 0;
+                const int p = atoi(colon + 1);
+                g_net.cfg.upnp_port = p > 0 && p < 65536 ? (uint16_t)p : 0;
+            }
+            parse_ip(buf, &g_net.cfg.upnp_ip);
+        }
+    } else if (!strncmp(arg, "upnplease=", 10)) {
+        char *end;
+        const long v = strtol(arg + 10, &end, 10);
+        if (end != arg + 10 && !*end && v >= 0 && v <= 604800) {
+            g_net.cfg.upnp_lease = (unsigned)v;
+        }
     } else if (!strncmp(arg, "lanport=", 8)) {
         const int p = atoi(arg + 8);
         if (p > 0 && p < 65536) {

@@ -134,6 +134,20 @@ Don't attach games or other copyrighted files.
 
 ## For developers
 
+After the [Linux build](native/README.linux.md#build-and-check), run the
+network regression test with:
+
+```sh
+ctest --test-dir build/linux -R '^nat-smoke$' --output-on-failure
+```
+
+`nat-smoke` builds console Ethernet frames and uses a fake UPnP router on
+127.0.0.1, leaving the real router untouched. It checks outgoing and
+unsolicited incoming UDP 3074, busy ports, UPnP disabled, relative control
+URLs and preserved queries, permanent leases, renewal failures and retries,
+and shutdown during delayed replies. Cleanup checks cover another console's
+mapping and failed ownership queries.
+
 For tests without a device, see
 [Build and check](native/README.linux.md#build-and-check). The libretro
 harness loads the core as RetroArch does and can play a real game headless:
