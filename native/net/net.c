@@ -49,7 +49,7 @@ static struct {
 } g_net = {
     .lock = PTHREAD_MUTEX_INITIALIZER,
     .wake_fd = -1,
-    .cfg = { .nat_port = 3074, .upnp = true, .lan_port = 3075, .kai_port = 34523 },
+    .cfg = { .nat_port = 3074, .upnp = true, .upnp_lease = 3600, .lan_port = 3075, .kai_port = 34523 },
 };
 
 static bool ring_init(Ring *r, unsigned n)
@@ -145,6 +145,12 @@ bool nc_net_option(const char *arg)
                 g_net.cfg.upnp_port = p > 0 && p < 65536 ? (uint16_t)p : 0;
             }
             parse_ip(buf, &g_net.cfg.upnp_ip);
+        }
+    } else if (!strncmp(arg, "upnplease=", 10)) {
+        char *end;
+        const long v = strtol(arg + 10, &end, 10);
+        if (end != arg + 10 && !*end && v >= 0 && v <= 604800) {
+            g_net.cfg.upnp_lease = (unsigned)v;
         }
     } else if (!strncmp(arg, "lanport=", 8)) {
         const int p = atoi(arg + 8);

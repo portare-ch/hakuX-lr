@@ -45,6 +45,8 @@ typedef enum NcNetMode { NC_NET_OFF, NC_NET_NAT, NC_NET_LAN, NC_NET_KAI } NcNetM
  *                           nat: ask the router (UPnP IGD) to forward
  *                           natport to this device; an address: its SSDP
  *                           port, asked directly instead of by multicast
+ *   upnplease=S             nat: the UPnP forward's lease, renewed at half
+ *                           (3600; 0: permanent)
  *   lanport=N               lan: the UDP port (all consoles the same)
  *   lanbcast=A.B.C.D[/BITS] lan: the local network's broadcast address
  *                           (and its prefix: who is outside it)
@@ -113,6 +115,7 @@ typedef struct NcNetConfig {
     bool upnp;
     uint32_t upnp_ip;                   /* network order, 0: the SSDP multicast group */
     uint16_t upnp_port;
+    unsigned upnp_lease;                /* seconds, 0: permanent */
     uint16_t lan_port;
     uint32_t lan_bcast;                 /* network order, 0: 255.255.255.255 */
     uint32_t lan_mask;                  /* network order, 0: not known */

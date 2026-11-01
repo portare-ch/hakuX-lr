@@ -11,9 +11,11 @@
  *   describe  its device description: the WANIPConnection (or
  *             WANPPPConnection) service's control URL
  *   map       AddPortMapping, the port to this device's same port, for
- *             LEASE_S (permanent if the router takes no other), renewed at
- *             half the lease; GetExternalIPAddress logged
- *   stop      DeletePortMapping
+ *             upnplease= seconds (permanent if the router takes no other),
+ *             renewed at half the lease, a failed renewal retried with
+ *             backoff; GetExternalIPAddress logged
+ *   stop      DeletePortMapping, also after an AddPortMapping the stop cut
+ *             short (the router may have applied it)
  */
 #include "native/net/net.h"
 #include "native/core/nc.h"
@@ -40,7 +42,8 @@
 #define SEARCH_AGAIN_MS 1000            /* SSDP: the M-SEARCHes sent again (UDP) */
 #define HTTP_MS 3000                    /* one HTTP exchange */
 #define DELETE_MS 1000                  /* the forward removed, at the stop */
-#define LEASE_S 3600u
+#define RETRY_MS 5000                   /* a failed renewal's first retry, doubling */
+#define RETRY_MAX_MS 300000
 #define RESPONSE_MAX 65536
 #define TAG "hakuX-native-net"
 
@@ -59,7 +62,7 @@ static struct {
     Url control;
     char service[96];
     char local[INET_ADDRSTRLEN];
-    bool mapped;
+    bool mapped;                        /* the router may have the forward: removed at the stop */
     char buf[RESPONSE_MAX];
 } g_upnp = { .stop_fd = -1 };
 
@@ -184,15 +187,55 @@ static bool parse_url(const char *s, size_t n, Url *u)
     return true;
 }
 
-/* ref (absolute, or a path on base's server) to out. */
+/* path with its "." and ".." segments removed, in place (RFC 3986 5.2.4,
+ * for an absolute path). */
+static void remove_dots(char *path)
+{
+    char out[sizeof(((Url *)0)->path)];
+    size_t o = 0;
+    const char *in = path;
+    while (*in) {
+        if (!strncmp(in, "/./", 3)) {
+            in += 2;
+        } else if (!strcmp(in, "/.")) {
+            in = "/";
+        } else if (!strncmp(in, "/../", 4) || !strcmp(in, "/..")) {
+            in = in[3] ? in + 3 : "/";
+            while (o && out[--o] != '/') {
+            }
+        } else {
+            do {
+                out[o++] = *in++;
+            } while (*in && *in != '/');
+        }
+    }
+    out[o] = 0;
+    memcpy(path, out, o + 1);
+}
+
+/* ref resolved against base (RFC 3986 5.2): absolute, an absolute path on
+ * base's server, or a path relative to base's directory. */
 static bool resolve(const Url *base, const char *ref, Url *out)
 {
     if (!strncasecmp(ref, "http://", 7)) {
         return parse_url(ref, strlen(ref), out);
     }
     *out = *base;
-    return snprintf(out->path, sizeof(out->path), "%s%s", ref[0] == '/' ? "" : "/", ref) <
-           (int)sizeof(out->path);
+    int n;
+    if (ref[0] == '/') {
+        n = snprintf(out->path, sizeof(out->path), "%s", ref);
+    } else {
+        size_t dir = strcspn(base->path, "?#");
+        while (dir && base->path[dir - 1] != '/') {
+            dir--;
+        }
+        n = snprintf(out->path, sizeof(out->path), "%.*s%s%s", (int)dir, base->path, dir ? "" : "/", ref);
+    }
+    if (n < 0 || n >= (int)sizeof(out->path)) {
+        return false;
+    }
+    remove_dots(out->path);
+    return true;
 }
 
 /* The text of the first <tag>...</tag> in [s, end), trimmed, to out (n
@@ -564,8 +607,14 @@ static void delete_mapping(void)
              "<NewRemoteHost></NewRemoteHost><NewExternalPort>%u</NewExternalPort><NewProtocol>UDP</NewProtocol>",
              g_upnp.port);
     const int status = soap("DeletePortMapping", args, DELETE_MS);
-    nc_log(TAG, "nat: UPnP: the router's UDP %u forward %s", g_upnp.port,
-           status == 200 ? "removed" : "not removed (no answer)");
+    if (status == 200) {
+        nc_log(TAG, "nat: UPnP: the router's UDP %u forward removed", g_upnp.port);
+    } else if (status) {
+        nc_log(TAG, "nat: UPnP: the router's UDP %u forward not removed: HTTP %d, UPnP error %d", g_upnp.port,
+               status, soap_error());
+    } else {
+        nc_log(TAG, "nat: UPnP: the router's UDP %u forward not removed: no answer", g_upnp.port);
+    }
 }
 
 static void *upnp_thread(void *arg)
@@ -576,28 +625,57 @@ static void *upnp_thread(void *arg)
     char router[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &g_upnp.control.addr.sin_addr, router, sizeof(router));
     log_external();
-    unsigned lease = LEASE_S;
+    unsigned lease = nc_net_config()->upnp_lease;
+    bool forwarded = false;                     /* the router said yes once */
+    int64_t retry = 0;                          /* a failed renewal's next delay, 0: none failed */
     while (!stopped()) {
         int error;
+        const bool before = g_upnp.mapped;
+        g_upnp.mapped = true;                   /* a request the stop cuts short may still be applied */
         const int status = add_mapping(lease, &error);
         if (status != 200) {
+            if (status && !before) {
+                g_upnp.mapped = false;          /* the router answered no: nothing to remove */
+            }
+            if (stopped()) {
+                break;
+            }
             if (error == 725 && lease) {        /* OnlyPermanentLeasesSupported */
                 lease = 0;
                 continue;
             }
-            if (!stopped() && !status) {
-                nc_log(TAG, "nat: UPnP: the router (%s) didn't forward UDP %u: no answer", router, g_upnp.port);
-            } else if (!stopped()) {
-                nc_log(TAG, "nat: UPnP: the router (%s) didn't forward UDP %u: HTTP %d, UPnP error %d%s", router,
-                       g_upnp.port, status, error, error == 718 ? " (another device has the port)" : "");
+            if (!status) {
+                nc_log(TAG, "nat: UPnP: the router (%s) didn't %s UDP %u: no answer", router,
+                       forwarded ? "renew" : "forward", g_upnp.port);
+            } else {
+                nc_log(TAG, "nat: UPnP: the router (%s) didn't %s UDP %u: HTTP %d, UPnP error %d%s", router,
+                       forwarded ? "renew" : "forward", g_upnp.port, status, error,
+                       error == 718 ? " (another device has the port)" : "");
             }
-            break;
+            if (!forwarded) {
+                break;
+            }
+            /* a renewal: the forward may still hold; asked again until the router answers */
+            const int64_t cap = (int64_t)lease * 500 < RETRY_MAX_MS ? (int64_t)lease * 500 : RETRY_MAX_MS;
+            retry = !retry ? ((int64_t)lease * 125 < RETRY_MS ? (int64_t)lease * 125 : RETRY_MS)
+                           : (retry * 2 < cap ? retry * 2 : cap);
+            if (retry < 1) {
+                retry = 1;
+            }
+            nc_log(TAG, "nat: UPnP: asking again in %lld ms", (long long)retry);
+            if (wait_fd(-1, 0, now_ms() + retry) < 0) {
+                break;
+            }
+            continue;
         }
-        if (!g_upnp.mapped) {
+        if (!forwarded) {
             nc_log(TAG, "nat: UPnP: the router (%s) forwards UDP %u to %s:%u (lease %s)", router, g_upnp.port,
                    g_upnp.local, g_upnp.port, lease ? "renewed while running" : "permanent, removed at the stop");
+        } else if (retry) {
+            nc_log(TAG, "nat: UPnP: the router (%s) renewed UDP %u again", router, g_upnp.port);
         }
-        g_upnp.mapped = true;
+        forwarded = true;
+        retry = 0;
         if (wait_fd(-1, 0, lease ? now_ms() + (int64_t)lease * 500 : INT64_MAX) < 0) {
             break;
         }
