@@ -170,3 +170,71 @@ Other variables are described at the top of
 Dashboard relaunches with `HAKUX_LR_STOP=0` still need checking in real
 RetroArch on a device: starts with `-s <directory>`, **Load Core → Start Core**,
 and `-L <core> --menu`. Confirm that restarts keep the save directory.
+
+### Is it FEX? The same game under KVM
+
+On an x86-64 Linux machine, the core runs the game's code on the host CPU
+through KVM instead of translating it with FEX, while the kernel, devices
+and renderer stay the same (#56). If a game misbehaves on the Nova and
+works under KVM, the cause is on the CPU side. That doesn't yet mean FEX's
+translation: the machine, its memory ordering, its GPU driver and the timing
+are different too.
+
+**Requirements:** x86-64 Linux with `/dev/kvm`, TSC scaling and UMIP (on
+AMD, Zen 2 or newer; on Intel, KVM provides UMIP itself), and a Vulkan 1.3
+GPU. Without one of them the core logs which and starts no game. Apple's
+`container` on a Mac has no KVM: build there, run on Linux.
+
+**Build:** `sh tools/native/linux-ci-x86_64.sh` builds and tests it; the
+core is `build/linux-x86_64/hakux_libretro.so`. The log's first lines say
+which guest CPU it got:
+
+```text
+hakuX-native-kvm: guest CPU: KVM, CPL 3 with IOPL 3, TSC 733333 kHz on a 2445427 kHz host
+```
+
+**Compare like with like:**
+
+1. The same disc image, core options and RetroArch settings on both.
+2. Carry the game's progress over as in-game saves: copy the `hdd/` folder of
+   RetroArch's save directory (`/storage/saves/xbox/hdd` on PortareOS) to the
+   other machine's. Savestates don't cross between FEX and KVM.
+3. Play the same scene on both, and note what differs: a crash and its
+   `hakuX-native-frontier` lines, a hang, wrong physics or logic, missing
+   or wrong graphics, sound.
+
+Headless, without RetroArch, the harness plays a game for a number of frames
+under KVM as on the Nova:
+
+```sh
+build/linux-x86_64/libretro-harness build/linux-x86_64/hakux_libretro.so game.chd 3600 saves
+```
+
+**Reading a difference:**
+
+- **Works under KVM, fails under FEX:** try FEX's switches on the Nova, set
+  in RetroArch's environment: `NC_FEX_X87=80` (the full 80-bit x87 instead
+  of FEX's reduced one), `NC_FEX_PC=0` (no x87 precision control),
+  `NC_FEX_AFP=0` (no ARM alternate floating point). If one fixes it, that's
+  where to look; if none does, narrow the scene down to a short piece of
+  guest code and compare FEX's result with the CPU's. `linux-smoke`
+  (`tests/native/linux/smoke.c`) runs the same guest code under either
+  backend, so a test written like it runs on both.
+- **Fails on both:** it's the kernel, a device or the renderer.
+- **Fails under KVM only:** a KVM backend bug, or one of its differences
+  from an Xbox, below.
+
+**How KVM differs from an Xbox:**
+
+- The game runs at CPL 3 with IOPL 3: `CS` and `SS` have RPL 3 and `pushfd`
+  shows IOPL 3. Its system instructions reach the kernel as they do from
+  FEX.
+- CPUID leaf 7 reports UMIP, which KVM needs. Leaf 0 still says leaf 2 is
+  the highest.
+- A modern CPU: flags the manual leaves undefined can differ from a
+  Pentium III's.
+- No translation stalls: a bug that needs FEX's stalls won't show up.
+- A hooked address (`HAKUX_HLE_PROBE`) reads as `0xCC` to the game.
+
+`kvm-smoke` checks the backend itself: privilege, each system op, thread
+switches, MMIO and I/O, page faults, interrupts, the TSC and hooks.
