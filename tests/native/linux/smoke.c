@@ -42,12 +42,17 @@ static void write_mmio(void *opaque, uint32_t offset, uint64_t value, unsigned s
 }
 
 /* What nc_vm_prot_hook was told, page by page, as a CPU backend with its own
- * page tables (KVM) mirrors it. */
+ * page tables (KVM) mirrors it: the protection, and the frame vm->pte had
+ * when the hook was called (a backend reads it there). */
 static uint8_t hooked[1u << 20];
+static uint32_t hooked_pte[1u << 20];
 
 static void prot_hook(uint32_t va, uint32_t len, int prot)
 {
-    memset(hooked + va / NC_PAGE, prot, len / NC_PAGE);
+    for (uint32_t i = va / NC_PAGE; i < (uint32_t)(((uint64_t)va + len) / NC_PAGE); i++) {
+        hooked[i] = (uint8_t)prot;
+        hooked_pte[i] = core.vm.pte[i];
+    }
 }
 
 /* Every page of the guest's 4 GiB as the host has it (/proc/self/maps)
@@ -71,9 +76,10 @@ static bool prot_mirrored(const NcVm *vm)
         for (uintptr_t p = a < lo ? lo : a; p < (b > hi ? hi : b); p += NC_PAGE) {
             const uint32_t i = (uint32_t)((p - lo) / NC_PAGE);
             seen++;
-            if (vm->vprot[i] != prot || hooked[i] != prot) {
+            if (vm->vprot[i] != prot || hooked[i] != prot || hooked_pte[i] != vm->pte[i]) {
                 if (bad++ < 4) {
-                    printf("  va %08x: host %d, vprot %d, hook %d\n", i * NC_PAGE, prot, vm->vprot[i], hooked[i]);
+                    printf("  va %08x: host %d, vprot %d, hook %d; pte %08x, at the hook %08x\n", i * NC_PAGE,
+                           prot, vm->vprot[i], hooked[i], vm->pte[i], hooked_pte[i]);
                 }
             }
         }

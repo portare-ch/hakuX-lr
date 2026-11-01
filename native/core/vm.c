@@ -166,6 +166,23 @@ static int view_prot(NcVm *vm, uint32_t va, uint32_t len, int prot)
     return r;
 }
 
+/* nc_vm_prot_hook told about [va, va + len) as vm->vprot has it, in runs of
+ * one protection. Under g_prot_lock. */
+static void notify_runs(NcVm *vm, uint32_t va, uint32_t len)
+{
+    if (!nc_vm_prot_hook) {
+        return;
+    }
+    const uint64_t end = (uint64_t)va + len;
+    uint64_t run = va;
+    for (uint64_t a = va + NC_PAGE; a <= end; a += NC_PAGE) {
+        if (a == end || vm->vprot[a / NC_PAGE] != vm->vprot[run / NC_PAGE]) {
+            nc_vm_prot_hook((uint32_t)run, (uint32_t)(a - run), vm->vprot[run / NC_PAGE]);
+            run = a;
+        }
+    }
+}
+
 int nc_vm_view_prot(NcVm *vm, uint32_t va, uint32_t len, int prot)
 {
     pthread_mutex_lock(&g_prot_lock);
@@ -190,7 +207,6 @@ bool nc_vm_map(NcVm *vm, uint32_t va, uint32_t pa, uint32_t len)
                strerror(errno));
         return false;
     }
-    prot_set(vm, va, len, PROT_READ | PROT_WRITE);
     const bool window = va == NC_CONTIG_WINDOW || va == NC_GPU_WINDOW;
     for (uint32_t off = 0; off < len; off += NC_PAGE) {
         const uint32_t page = (pa + off) / NC_PAGE;
@@ -207,12 +223,19 @@ bool nc_vm_map(NcVm *vm, uint32_t va, uint32_t pa, uint32_t len)
             }
             vm->rmap[page] = va + off;
         }
+        int prot = PROT_READ | PROT_WRITE;
         if (g_na && g_na[page]) {
-            view_prot(vm, va + off, NC_PAGE, PROT_NONE); /* still no access (nc_vm_noaccess) */
+            prot = PROT_NONE;                   /* still no access (nc_vm_noaccess) */
         } else if (vm->wp[page] == NC_WP_CLEAN) {
-            view_prot(vm, va + off, NC_PAGE, PROT_READ); /* still tracked */
+            prot = PROT_READ;                   /* still tracked */
         }
+        if (prot != (PROT_READ | PROT_WRITE)) {
+            mprotect(vm->base + va + off, NC_PAGE, prot);
+        }
+        vm->vprot[(va + off) / NC_PAGE] = (uint8_t)prot;
     }
+    /* the hook hears each page once, as it ends up: frame and protection */
+    notify_runs(vm, va, len);
     pthread_mutex_unlock(&g_prot_lock);
     return true;
 }
@@ -353,8 +376,6 @@ bool nc_vm_unmap(NcVm *vm, uint32_t va, uint32_t len)
         pthread_mutex_unlock(&g_prot_lock);
         return false;
     }
-    prot_set(vm, va, len, PROT_NONE);
-    pthread_mutex_unlock(&g_prot_lock);
     for (uint32_t off = 0; off < len; off += NC_PAGE) {
         const uint32_t e = vm->pte[(va + off) / NC_PAGE];
         if ((e & NC_PTE_VALID) && vm->rmap[e / NC_PAGE] == va + off) {
@@ -362,6 +383,8 @@ bool nc_vm_unmap(NcVm *vm, uint32_t va, uint32_t len)
         }
         vm->pte[(va + off) / NC_PAGE] = 0;
     }
+    prot_set(vm, va, len, PROT_NONE);
+    pthread_mutex_unlock(&g_prot_lock);
     return true;
 }
 
