@@ -12,6 +12,13 @@
  * and takes datagrams from anyone (Xbox Live's peer-to-peer traffic on UDP
  * 3074). The phone's own loopback stays out of reach.
  *
+ * The console's UDP 3074 is bound to the host's natport (3074 by default):
+ * libslirp finds that forward for the console's datagrams from 3074 too, so
+ * they leave from the same host port, and peers reach the console before it
+ * has sent to them once the router forwards that port (by hand, or asked by
+ * UPnP: upnp.c). Insignia's NAT guide asks for both. If the port is taken,
+ * the console's 3074 leaves from any free port, as before.
+ *
  * Everything runs on the network thread: libslirp's descriptors join its
  * poll (fill/poll), its timers are checked there, and the guest's frames are
  * handed to it there (input).
@@ -22,11 +29,13 @@
 #include <libslirp.h>
 
 #include <arpa/inet.h>
+#include <errno.h>
 #include <poll.h>
 #include <string.h>
 #include <time.h>
 
 #define INSIGNIA_DNS "46.101.64.175"
+#define XBOX_LIVE_PORT 3074
 #define TIMERS 4
 
 typedef struct Timer {
@@ -120,6 +129,27 @@ static const SlirpCb g_cb = {
 
 /* ------------------------------------------------------------ backend */
 
+/* The console's UDP 3074 on the host's natport, and the router asked to
+ * forward that port to this device. */
+static void nat_forward(const NcNetConfig *c, struct in_addr guest)
+{
+    if (!c->nat_port) {
+        nc_log("hakuX-native-net", "nat: no UDP port forwarded to the console (natport=0)");
+        return;
+    }
+    const struct in_addr any = { .s_addr = htonl(INADDR_ANY) };
+    if (slirp_add_hostfwd(g_nat.slirp, 1, any, c->nat_port, guest, XBOX_LIVE_PORT) < 0) {
+        nc_log("hakuX-native-net", "nat: UDP %u unavailable (%s): the console's UDP %u uses any free port, "
+               "unreachable until it sends", c->nat_port, strerror(errno), XBOX_LIVE_PORT);
+        return;
+    }
+    nc_log("hakuX-native-net", "nat: UDP %u forwarded to the console's %u (Xbox Live)", c->nat_port,
+           XBOX_LIVE_PORT);
+    if (c->upnp) {
+        nc_upnp_start(c->nat_port);
+    }
+}
+
 static bool nat_init(void)
 {
     const NcNetConfig *c = nc_net_config();
@@ -147,6 +177,7 @@ static bool nat_init(void)
     char b[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &dns, b, sizeof(b));
     nc_log("hakuX-native-net", "nat: libslirp %s, 10.0.2.0/24, DNS %s", slirp_version_string(), b);
+    nat_forward(c, cfg.vdhcp_start);
     return true;
 }
 
@@ -220,10 +251,12 @@ static void nat_poll(struct pollfd *fds, int n)
     g_nat.overflow = 0;
 }
 
-/* After nc_net_stop joins the network thread, free the stack, host sockets
- * and timers, ready for nat_init on the next boot. */
+/* After nc_net_stop joins the network thread, remove the router's forward,
+ * free the stack, host sockets and timers, ready for nat_init on the next
+ * boot. */
 static void nat_close(void)
 {
+    nc_upnp_stop();
     if (g_nat.slirp) {
         slirp_cleanup(g_nat.slirp);
     }

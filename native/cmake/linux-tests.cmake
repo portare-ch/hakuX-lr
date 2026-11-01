@@ -30,6 +30,12 @@ target_link_libraries(apu-resample-smoke PRIVATE hakux_native m)
 target_link_options(apu-resample-smoke PRIVATE -Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc)
 add_test(NAME apu-resample-smoke COMMAND apu-resample-smoke)
 set_tests_properties(apu-resample-smoke PROPERTIES TIMEOUT 60)
+# The NAT backend with frames made as the console's: its UDP 3074 on the
+# host's natport both ways, and UPnP through a router made by the test.
+add_executable(nat-smoke "${NC_REPO}/tests/native/linux/nat.c")
+target_link_libraries(nat-smoke PRIVATE hakux_native Threads::Threads)
+add_test(NAME nat-smoke COMMAND nat-smoke)
+set_tests_properties(nat-smoke PROPERTIES TIMEOUT 60)
 # The USB stack driven as the guest's would: enumeration, input, rumble, and
 # controllers plugged in and pulled out.
 add_executable(usb-smoke "${NC_REPO}/tests/native/usb/usb_test.c" "${NC_REPO}/native/dev/usb.c"
