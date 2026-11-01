@@ -196,6 +196,12 @@ hakuX-native-kvm: guest CPU: KVM, CPL 3 with IOPL 3, TSC 733333 kHz on a 2445427
 **Compare like with like:**
 
 1. The same disc image, core options and RetroArch settings on both.
+   Audio is the exception the options can't fully remove: the x86-64 build
+   always resamples linearly (sinc is NEON's) and has no DSP JIT, so its
+   **Audio Processing** defaults to **Fast**, where the Nova's is **DSP**.
+   For a sound problem, set **Audio Resampler** to **Linear** and **Audio
+   Processing** to **Fast** on the Nova as well, and check the problem is
+   still there before comparing.
 2. Carry the game's progress over as in-game saves: copy the `hdd/` folder of
    RetroArch's save directory (`/storage/saves/xbox/hdd` on PortareOS) to the
    other machine's. Savestates don't cross between FEX and KVM.
@@ -212,7 +218,9 @@ build/linux-x86_64/libretro-harness build/linux-x86_64/hakux_libretro.so game.ch
 
 **Reading a difference:**
 
-- **Works under KVM, fails under FEX:** try FEX's switches on the Nova, set
+- **Works under KVM, fails under FEX:** first rule out what differs besides
+  the CPU (for sound, the audio settings above; for graphics, the GPU
+  driver). Then try FEX's switches on the Nova, set
   in RetroArch's environment: `NC_FEX_X87=80` (the full 80-bit x87 instead
   of FEX's reduced one), `NC_FEX_PC=0` (no x87 precision control),
   `NC_FEX_AFP=0` (no ARM alternate floating point). If one fixes it, that's
