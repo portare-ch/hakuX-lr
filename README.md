@@ -19,6 +19,32 @@ Android app from [upstream's releases](https://github.com/rfandango/hakuX/releas
 There are no paid subscriptions, unlocks or "premium" builds. If someone
 charged you for hakuX, request a refund and download it here for free.
 
+## How hakuX compares with xemu
+
+This compares xemu's default configuration with this fork's Linux libretro
+builds. ARM64 and AMD64 refer to the host CPU.
+
+| | xemu | hakuX-lr, ARM64 (including Nova) | hakuX-lr, AMD64 |
+| --- | --- | --- | --- |
+| **Built on QEMU** | Yes, a QEMU fork | No; uses hakuX's native core | Same as ARM64 |
+| **Machine model** | QEMU's framework extended with Xbox hardware | hakuX's memory and device model ([native/core](native/core/), [native/dev](native/dev/)) | Same as ARM64 |
+| **Runs the game's x86 code with** | QEMU's TCG: software translation | [FEXCore fork](native/cpu/cpu.cpp): JIT translation from x86 to ARM64 | [KVM](native/cpu/cpu_kvm.c): execution on the host's x86 CPU |
+| **Hardware virtualization** | Not used by default (TCG) | No; x86 code is translated in software | Yes; Linux KVM with Intel VT-x or AMD-V |
+| **Xbox kernel** | Xbox kernel booted from a compatible BIOS | hakuX's [reimplemented Xbox kernel](native/kernel/) | Same as ARM64 |
+| **BIOS / MCPX ROM / HDD image** | Required; BIOS must be debug or modified retail | Not required; storage is created automatically | Same as ARM64 |
+| **Device emulation** | QEMU infrastructure plus Xbox-specific device models | Devices implemented or adapted for hakuX's native core; accesses handled in software | Same devices; KVM exits send device accesses to hakuX |
+| **Graphics** | Low-level NV2A emulation rendered with Vulkan or OpenGL | NV2A push-buffer commands translated to Vulkan through hakuX's graphics HLE | Same as ARM64 |
+
+The native core reuses components adapted from xemu, including the
+[Xbox audio device](native/dev/apu/). The AMD64 build is experimental;
+see its [KVM requirements](#play-on-amd64-x86-64-linux-systems) below.
+
+For xemu's architecture and requirements, see its
+[project overview](https://xemu.app/docs/about/),
+[default CPU accelerator selection](https://github.com/xemu-project/xemu/blob/master/system/vl.c#L2299),
+[required files](https://xemu.app/docs/required-files/) and
+[graphics backends](https://github.com/xemu-project/xemu/blob/master/hw/xbox/nv2a/pgraph/meson.build).
+
 ## Play on PortareOS
 
 1. **Install or update PortareOS.** Follow the
