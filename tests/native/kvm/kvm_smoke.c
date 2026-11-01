@@ -10,13 +10,16 @@
  *   each thread's own;
  * - an interrupt delivered at IF=1, and held through CLI until STI;
  * - RDTSC at 733 MHz, and continuous across a pause the guest leaves out;
- * - a hooked address, its system op and the title's instruction after it.
+ * - a hooked address, its system op and the title's instruction after it;
+ * - a 16-byte MMIO store, which KVM splits; x87 state through a savestate's
+ *   export and import mid-calculation; the kick signal's handler given back.
  */
 #include "native/core/core.h"
 #include "native/core/mmio.h"
 #include "native/hle/hle_native.h"
 
 #include <pthread.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -49,6 +52,12 @@ static uint32_t irq_eip, irq_ecx;
 static uint16_t out_port;
 static uint32_t out_value;
 static uint64_t mmio_reg;
+static struct {
+    uint32_t off;
+    uint64_t value;
+    unsigned size;
+} mmio_writes[8];
+static unsigned nmmio_writes;
 static int (*core_fault)(void *, NcFrame *, uint32_t, bool, const char **);
 
 static void check(bool ok, const char *what)
@@ -86,6 +95,16 @@ static bool system_op(void *opaque, NcFrame *f, enum NcSysOp op, unsigned size)
             nc_cpu_cycle_offset_add(cpu, nc_cpu_host_cycles() - t0);
         } else if (v == 0x44) {
             usleep(50000); /* 50 ms it counts */
+        } else if (v == 0x45) {
+            /* the thread through a savestate's export and import */
+            NcCpuContext saved, back;
+            NcCpuState st;
+            nc_frame_set_eip(f, eip + size);
+            nc_frame_save(f, &saved);
+            nc_context_export(&saved, &st);
+            nc_context_import(&back, &st);
+            nc_frame_load(f, &back);
+            return true;
         }
         nc_frame_set_eip(f, eip + size);
         return true;
@@ -139,6 +158,12 @@ static uint64_t mmio_read(void *opaque, uint32_t off, unsigned size)
 static void mmio_write(void *opaque, uint32_t off, uint64_t value, unsigned size)
 {
     mmio_reg = value;
+    if (nmmio_writes < 8) {
+        mmio_writes[nmmio_writes].off = off;
+        mmio_writes[nmmio_writes].value = value;
+        mmio_writes[nmmio_writes].size = size;
+        nmmio_writes++;
+    }
 }
 
 /* A page the guest touches first maps on its fault; the rest is the core's. */
@@ -360,7 +385,48 @@ int main(void)
     }
     check(hooks == 2 && nreports == 1 && reports[0] == 10, "hook: its system op each time, the instruction run");
 
+    /* A 16-byte SSE store to a device: KVM hands it over as two 8-byte parts. */
+    const uint8_t wide[] = {
+        0x0F, 0x10, 0x0D, 0x00, 0x03, 0x02, 0x00, /* movups xmm1, [0x20300] */
+        0x0F, 0x11, 0x0D, 0x10, 0x00, 0x00, 0xFE, /* movups [0xFE000010], xmm1 */
+        0xCD, 0x42, 0xF4,
+    };
+    const uint64_t lo = 0x0123456789ABCDEFull, hi = 0xFEDCBA9876543210ull;
+    memcpy(nc_vm_host(&core.vm, DATA + 0x300), &lo, 8);
+    memcpy(nc_vm_host(&core.vm, DATA + 0x308), &hi, 8);
+    put(CODE + 0x900, wide, sizeof(wide));
+    nmmio_writes = 0;
+    run_at(CODE + 0x900);
+    uint64_t got_lo = 0, got_hi = 0;
+    for (unsigned i = 0; i < nmmio_writes; i++) {
+        printf("  MMIO write +%x: %016llx (%u bytes)\n", mmio_writes[i].off,
+               (unsigned long long)mmio_writes[i].value, mmio_writes[i].size);
+        if (mmio_writes[i].off == 0x10 && mmio_writes[i].size == 8) {
+            got_lo = mmio_writes[i].value;
+        } else if (mmio_writes[i].off == 0x18 && mmio_writes[i].size == 8) {
+            got_hi = mmio_writes[i].value;
+        }
+    }
+    check(got_lo == lo && got_hi == hi, "16-byte MMIO store: both halves reach the device");
+
+    /* x87 mid-calculation through a savestate: fld1, then export and import
+     * (int 45h), then fld1; faddp; fistp. TOP lost would make it garbage. */
+    const uint8_t x87[] = {
+        0xD9, 0xE8, 0xCD, 0x45,                   /* fld1; int 45h */
+        0xD9, 0xE8, 0xDE, 0xC1,                   /* fld1; faddp st(1), st */
+        0xDB, 0x1D, 0x20, 0x03, 0x02, 0x00,       /* fistp dword [0x20320] */
+        0xA1, 0x20, 0x03, 0x02, 0x00, 0xCD, 0x42, /* mov eax, [0x20320]; int 42h */
+        0xF4,
+    };
+    put(CODE + 0x980, x87, sizeof(x87));
+    nreports = 0;
+    run_at(CODE + 0x980);
+    check(nreports == 1 && reports[0] == 2, "x87 state, TOP included, through a savestate's export and import");
+
     nc_cpu_destroy(cpu);
+    struct sigaction kick;
+    sigaction(SIGRTMIN + 3, NULL, &kick);
+    check(kick.sa_handler == SIG_DFL, "the kick signal's handler given back on destroy");
     printf("%s: %u failed\n", failures ? "FAIL" : "PASS", failures);
     return failures ? 1 : 0;
 }

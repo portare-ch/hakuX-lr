@@ -128,6 +128,7 @@ struct NcCpu {
 };
 
 static NcCpu *g_cpu; /* the one CPU, for nc_vm_prot_hook */
+static struct sigaction g_prev_kick; /* the kick signal's handler before, given back */
 static void (*g_prev_hook)(uint32_t va, uint32_t len, int prot); /* chained */
 
 static inline uint64_t host_tsc(void)
@@ -491,7 +492,7 @@ NcCpu *nc_cpu_create(const NcCpuConfig *cfg, uint32_t fs_base)
 
     struct sigaction sa = {.sa_handler = kick_handler};
     sigemptyset(&sa.sa_mask);
-    sigaction(KICK_SIGNAL, &sa, NULL);
+    sigaction(KICK_SIGNAL, &sa, &g_prev_kick);
 
     g_cpu = cpu;
     g_prev_hook = nc_vm_prot_hook;
@@ -510,6 +511,7 @@ void nc_cpu_destroy(NcCpu *cpu)
         nc_vm_prot_hook = g_prev_hook;
         g_prev_hook = NULL;
         g_cpu = NULL;
+        sigaction(KICK_SIGNAL, &g_prev_kick, NULL);
     }
     if (cpu->run) {
         munmap(cpu->run, cpu->run_size);
@@ -567,9 +569,13 @@ void nc_context_export(const NcCpuContext *c, NcCpuState *s)
     for (int i = 0; i < 8; i++) {
         s->gregs[i] = (uint32_t)k->regs[i];
     }
-    for (int i = 0; i < 32 && i < (int)sizeof(s->flags); i++) {
+    for (int i = 0; i < 32; i++) {
         s->flags[i] = (k->eflags >> i) & 1;
     }
+    /* the x87 status word (TOP, C0-C3) after EFLAGS' bits: KVM's states
+     * only, as FEX keeps its own there */
+    s->flags[40] = (uint8_t)k->fpu.fsw;
+    s->flags[41] = (uint8_t)(k->fpu.fsw >> 8);
     for (int i = 0; i < 8; i++) {
         memcpy(s->mm[i], k->fpu.fpr[i], 16);
         memcpy(s->xmm[i], k->fpu.xmm[i], 16);
@@ -590,9 +596,10 @@ void nc_context_import(NcCpuContext *c, const NcCpuState *s)
     for (int i = 0; i < 8; i++) {
         k->regs[i] = (uint32_t)s->gregs[i];
     }
-    for (int i = 0; i < 32 && i < (int)sizeof(s->flags); i++) {
+    for (int i = 0; i < 32; i++) {
         k->eflags |= (uint32_t)(s->flags[i] & 1) << i;
     }
+    k->fpu.fsw = (uint16_t)(s->flags[40] | s->flags[41] << 8);
     k->eflags |= 2;
     for (int i = 0; i < 8; i++) {
         memcpy(k->fpu.fpr[i], s->mm[i], 16);
@@ -755,17 +762,22 @@ static bool guest_read(NcCpu *cpu, uint32_t va, void *out, unsigned n)
     return true;
 }
 
+/* A store the backend makes for the guest: through the host's view, after
+ * the write barrier (nc_vm_will_write: it may wait for the GPU, or bring a
+ * newer image in first). */
 static bool guest_write(NcCpu *cpu, uint32_t va, const void *in, unsigned n)
 {
-    const uint8_t *s = in;
     for (unsigned i = 0; i < n; i++) {
         const uint32_t pa = nc_vm_phys(cpu->vm, va + i);
         if (pa == UINT32_MAX || pa >= cpu->vm->ram_size) {
             return false;
         }
-        cpu->vm->phys[pa] = s[i];
     }
     nc_vm_will_write(va, n);
+    const uint8_t *s = in;
+    for (unsigned i = 0; i < n; i++) {
+        cpu->vm->phys[nc_vm_phys(cpu->vm, va + i)] = s[i];
+    }
     return true;
 }
 
@@ -1001,13 +1013,30 @@ static bool sysop(NcCpu *cpu, enum NcSysOp op, unsigned size)
     return cpu->cfg.sysop(cpu->cfg.opaque, &cpu->frame, op, size);
 }
 
+static void port_io(NcCpu *cpu);
+static void mmio(NcCpu *cpu);
+
 /* The access an IN, OUT or MMIO exit stopped at, completed by KVM without
- * running guest code. */
+ * running guest code. An access KVM splits (16 bytes of SSE, one across
+ * pages) comes back as another exit for its next part: served, until KVM
+ * returns EINTR. */
 static void complete(NcCpu *cpu)
 {
     __atomic_store_n(&cpu->run->immediate_exit, 1, __ATOMIC_RELEASE);
-    if (ioctl(cpu->vcpu, KVM_RUN, 0) == 0 || errno != EINTR) {
-        fatal(cpu, "completing an I/O exit");
+    for (;;) {
+        if (ioctl(cpu->vcpu, KVM_RUN, 0) < 0) {
+            if (errno != EINTR) {
+                fatal(cpu, "completing an I/O exit");
+            }
+            break;
+        }
+        if (cpu->run->exit_reason == KVM_EXIT_MMIO) {
+            mmio(cpu);
+        } else if (cpu->run->exit_reason == KVM_EXIT_IO) {
+            port_io(cpu);
+        } else {
+            fatal(cpu, "an exit while completing an I/O exit");
+        }
     }
     __atomic_store_n(&cpu->run->immediate_exit, 0, __ATOMIC_RELEASE);
 }
@@ -1219,20 +1248,14 @@ void nc_cpu_run(NcCpu *cpu, const NcCpuContext *c)
     for (;;) {
         __atomic_store_n(&cpu->run->immediate_exit, 0, __ATOMIC_RELEASE);
         tlb_flush(cpu);
-        const bool want_irq = __atomic_load_n(&cpu->irq, __ATOMIC_ACQUIRE);
-        cpu->run->request_interrupt_window = want_irq;
+        /* an interrupt waits for KVM's window: IF set and no STI or MOV SS
+         * shadow; none while a hooked instruction runs once (TF) */
+        cpu->run->request_interrupt_window = __atomic_load_n(&cpu->irq, __ATOMIC_ACQUIRE) && !cpu->stepping;
         if (ioctl(cpu->vcpu, KVM_RUN, 0) < 0) {
             if (errno != EINTR && errno != EAGAIN) {
                 fatal(cpu, "KVM_RUN");
             }
-            /* a kick: an interrupt at a ring-3 point with IF set, else at the window */
-            if (__atomic_load_n(&cpu->irq, __ATOMIC_ACQUIRE)) {
-                struct kvm_regs r;
-                if (ioctl(cpu->vcpu, KVM_GET_REGS, &r) == 0 && !in_stub_code(r.rip) && (r.rflags & EFL_IF) &&
-                    !cpu->stepping) {
-                    deliver_interrupt(cpu);
-                }
-            }
+            /* a kick: the next entry asks for the window */
             continue;
         }
         RunState st = RUN_ON;
@@ -1268,7 +1291,7 @@ void nc_cpu_run(NcCpu *cpu, const NcCpuContext *c)
             complete(cpu);
             break;
         case KVM_EXIT_IRQ_WINDOW_OPEN:
-            if (__atomic_load_n(&cpu->irq, __ATOMIC_ACQUIRE) && !cpu->stepping) {
+            if (__atomic_load_n(&cpu->irq, __ATOMIC_ACQUIRE) && !cpu->stepping && cpu->run->ready_for_interrupt_injection) {
                 deliver_interrupt(cpu);
             }
             break;
