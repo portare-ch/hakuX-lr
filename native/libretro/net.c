@@ -7,11 +7,11 @@
  * directory, including peers on another subnet or across a VPN. Use
  * insignia-dns.txt in that directory to select another DNS server, such as
  * insigniaDNS on the local network, if the provider blocks Insignia's server.
- * Insignia's accounts are made in the dashboard (no content, core.c): a game
- * on Insignia with none on the console says so, as does the dashboard booted
- * without Insignia. If another console has the same identity (for example,
- * after copying its hard disk), warn and request a new identity for this
- * console on the next game start, as the app's "New identity" does.
+ * Insignia accounts are created in the dashboard (no content, core.c).
+ * Warn game users if no account exists, and dashboard users if Insignia is
+ * disabled. If another console has the same identity (e.g. after copying
+ * its hard disk), warn and request a new identity at the next game start,
+ * as the app's "New identity" does.
  */
 #include "native/libretro/libretro_int.h"
 #include "native/kernel/kernel.h"
@@ -149,10 +149,10 @@ static void insignia_dns(char *out, size_t n)
     snprintf(out, n, "%s", first);
 }
 
-/* The config area's online accounts (<hdd>/raw-partition0.bin, as the app's
- * Insignia.accounts reads it): one a sector from 8, the gamertag at +0x18
- * (16 bytes) and its domain at +0x30 (20). Insignia's gamertags, comma
- * separated, in out; how many. */
+/* Read online accounts from <hdd>/raw-partition0.bin, like the app's
+ * Insignia.accounts: one per 512-byte sector starting at sector 8, with a
+ * 16-byte gamertag at +0x18 and a 20-byte domain at +0x30. Write comma-separated
+ * Insignia gamertags to out and return the account count. */
 #define ACCOUNT_SECTORS 32u
 
 static unsigned insignia_accounts(char *out, size_t n)
@@ -188,8 +188,8 @@ static unsigned insignia_accounts(char *out, size_t n)
     return count;
 }
 
-/* Insignia's state at boot: the accounts a game signs in with, or where to
- * make one (the dashboard, which is where they are made: not said there). */
+/* Log accounts at boot. Tell game users where to create one if needed;
+ * dashboard users are already in the right place. */
 static void insignia_status(void)
 {
     char names[200];
@@ -223,7 +223,7 @@ void nc_lr_net_apply(const char *mode)
         return;
     }
     if (nc_lr_dashboard()) {
-        /* its Xbox Live (account sign-up and recovery) reaches Insignia only through it */
+        /* Dashboard account sign-up and recovery require Insignia networking. */
         static const struct retro_message msg = {
             "Xbox Live in the dashboard needs Network set to Xbox Live (Insignia) in the core options", 480};
         nc_lr_env(RETRO_ENVIRONMENT_SET_MESSAGE, (void *)&msg);

@@ -4,8 +4,8 @@
  *   libretro-harness <core.so> [<disc image> <frames> <save directory>]
  *
  * Loads the core as RetroArch does (dlopen, every retro_* symbol), reports
- * its system and AV info, and with a disc loads it ("-": no content, as
- * RetroArch's Start Core loads the core) and calls retro_run at
+ * its system and AV info, loads a disc ("-" for Start Core without content)
+ * and calls retro_run at
  * the core's rate, checking that each call hands over exactly one video
  * frame. Core options are the core's defaults, or HARNESS_OPTIONS's
  * ("key=value;..."), and from the 30th call HARNESS_OPTIONS_LATER's, as
@@ -16,15 +16,13 @@
  * the process, or after a title's relaunch starts the harness again, as it
  * would RetroArch). HARNESS_LOAD_AGAIN: the core is opened again after it and
  * a second game loaded, as RetroArch would. HARNESS_THEN=<disc image or ->:
- * after it, the core opened again and that one played for as many frames, as
- * RetroArch plays the next game.
+ * reopen the core and play that content for the same number of frames.
  *
- * RetroArch's -L <core.so> names the core instead, -s <save directory>
- * overrides the save directory, and -c <config> and --menu are accepted;
- * with -L and no content, or with HARNESS_MENU_CORE=<core.so> and no
- * arguments (Load Core and Start Core in RetroArch's menu), the core starts
- * with no content for HARNESS_FRAMES frames, saving to -s's directory
- * (HARNESS_SAVES's without it).
+ * -L <core.so> can replace the positional core argument. -s/--save <directory>
+ * overrides the save directory; -c <config> and --menu are accepted but ignored.
+ * With no content arguments, -L or HARNESS_MENU_CORE=<core.so> simulates
+ * Load Core and Start Core for HARNESS_FRAMES frames. Supply the save
+ * directory via -s or, when -s is absent, HARNESS_SAVES.
  *
  * HARNESS_VULKAN=1: the core renders on a Vulkan device the harness's
  * frontend (vk.c) negotiates with it, as RetroArch does, without a window.
@@ -516,10 +514,9 @@ static int play(const struct retro_game_info *game, long frames)
 
 int main(int argc, char **argv)
 {
-    /* RetroArch's -c (its config, ignored here), -s (the save directory),
-     * --menu (ignored) and -L (the core); with -L or HARNESS_MENU_CORE and
-     * nothing else, Start Core: no content, for HARNESS_FRAMES frames, saving
-     * to -s's directory (HARNESS_SAVES's without it). */
+    /* Accept RetroArch options so the core can restart this harness.
+     * Without content arguments, use HARNESS_FRAMES and -s or HARNESS_SAVES
+     * to simulate Start Core. */
     char *pos[7] = {argv[0]};
     int npos = 1;
     const char *core_opt = NULL;
@@ -636,7 +633,7 @@ int main(int argc, char **argv)
         close_core();
     }
     const char *then = getenv("HARNESS_THEN");
-    if (then) {                             /* the next game played, the core opened again */
+    if (then) {
         const struct retro_game_info next = {.path = then};
         printf("then: %s\n", then);
         fflush(stdout);

@@ -22,8 +22,7 @@
  * HAKUX_LR_STOP=0 in PortareOS's build RetroArch's process ended, or started
  * again for a title's relaunch. */
 bool nc_lr_env(unsigned cmd, void *data);
-/* The content is the dashboard: started with none (Start Core), it boots
- * C:\xboxdash.xbe with the tray empty. */
+/* True for Start Core: boot C:\xboxdash.xbe with no disc. */
 bool nc_lr_dashboard(void);
 void nc_lr_fail(const char *why);
 bool nc_lr_start(void);
@@ -75,11 +74,11 @@ void nc_lr_options_run(void);
 
 /* net.c — apply the Network option before boot (options.c): "disabled"
  * (off), "lan" (local broadcasts and peers in lan-peers.txt) or "insignia"
- * (NAT with Insignia's DNS server or the first address in insignia-dns.txt;
- * the console's Insignia accounts logged, and a game told where to make one
- * when it has none). The dashboard without "insignia" is told Xbox Live
- * needs it. On a duplicate console identity, warn and request a new identity
- * for the next game start (retro_run). */
+ * (NAT with Insignia's DNS server or the first address in insignia-dns.txt).
+ * Log Insignia accounts; if none exist, tell game users where to create one.
+ * Warn dashboard users when Xbox Live needs "insignia" enabled. On a
+ * duplicate console identity, warn and request a new identity for the next
+ * game start (retro_run). */
 void nc_lr_net_apply(const char *mode);
 void nc_lr_net_run(void);
 

@@ -15,7 +15,7 @@
  *
  * Started with no content (RetroArch's Start Core), the core boots the Xbox
  * dashboard from the console disk's C: drive with the tray empty, as the
- * app's Dashboard does: Insignia's accounts are made there.
+ * app's Dashboard does. Insignia accounts are created there.
  *
  * Unloading, a reset, a title's relaunch or RetroArch letting its Vulkan
  * context go stops the core in RetroArch's process (stop_core, M2): the
@@ -317,8 +317,8 @@ RETRO_API void retro_reset(void)
     boot_again("reset", false);
 }
 
-/* The dashboard's XBE on the console disk's C: drive (<hdd>/Partition2,
- * names in any case); where its files go said when it isn't there. */
+/* Find the dashboard on C: (<hdd>/Partition2), ignoring filename case.
+ * If missing, tell the user where to install it. */
 static bool dashboard_installed(void)
 {
     char host[512];
@@ -595,9 +595,8 @@ static void stop_core(const char *why)
     nc_log("hakuX-libretro", "%s: the core stopped in %.0f ms", why, (double)(now_ns() - t0) / 1e6);
 }
 
-/* Stopped, then the same game (or the dashboard, with no disc) booted again
- * in the process: a reset, or a title's relaunch into the XBE its launch
- * data page names. */
+/* Stop and reboot the game or dashboard in process for a reset or a
+ * relaunch into the XBE named by the launch data page. */
 static bool boot_again(const char *why, bool relaunch)
 {
     stop_core(why);
@@ -634,10 +633,9 @@ static void close_on_exec(void)
     closedir(d);
 }
 
-/* RetroArch's options kept when it starts again for the dashboard: its
- * config, its save directory (-s: the console disk's), its log. Every other
- * argument is dropped (content, another core's -L, --menu). Returns how
- * many of argv's words the option at i takes (0: not kept). */
+/* Keep dashboard restart options, including -s for the console disk's
+ * directory. Drop all others (content, other cores, --menu). Return the
+ * number of argv entries consumed by the option at i, or 0 to drop it. */
 static unsigned kept_option(char *const *argv, unsigned i, unsigned argc)
 {
     static const char *const with_value[] = {"-c", "--config", "-s", "--save", "--appendconfig", "--log-file"};
@@ -666,14 +664,13 @@ static unsigned kept_option(char *const *argv, unsigned i, unsigned argc)
 /* A title's XLaunchNewImage (kernel.relaunch; the launch data page is in
  * relaunch.bin, beside the console disk): the core cannot boot again in this
  * process, so RetroArch starts again in its place, on the same command line,
- * with HAKUX_RELAUNCH naming the game (DASH_MARK for the dashboard, started
- * with no content). The dashboard's command line is made again, as its own
- * may name no core (Load Core, Start Core in RetroArch's menu) or ask for the
- * menu (--menu, which would start RetroArch on no core): RetroArch's config
- * kept (kept_option), then -L and this core. Its load boots the XBE the page
- * names, as Android's activity does with "relaunch". The process stays the same one to its parent
- * (runemu.sh), so the game does not go back to the launcher. Returns if
- * RetroArch can't start again for the game. */
+ * with HAKUX_RELAUNCH naming the game. For the dashboard, use DASH_MARK and
+ * always rebuild the command line: keep only kept_option's options, then
+ * add -L and this core. This handles menu-loaded cores and removes --menu,
+ * which would reopen RetroArch's menu without starting the core. Loading
+ * boots the XBE named by the page, as Android's activity does with
+ * "relaunch". The PID stays the same for the parent (runemu.sh), so the
+ * launcher does not reopen. Returns if RetroArch cannot restart. */
 static void relaunch(void)
 {
     static char cmd[64 * 1024];

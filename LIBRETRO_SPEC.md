@@ -221,8 +221,15 @@ RetroArch's process, as every closed game did before M2:
   as above.
 - `HAKUX_LR_STOP=0` in the environment brings back the way before M2, for
   one release: unloading, or RetroArch letting its Vulkan context go, ends
-  RetroArch's process, and a title's relaunch starts RetroArch again on the
-  same command line (#11). Other builds ignore it.
+  RetroArch's process. A game relaunch reuses the original command line
+  (#11); if it doesn't contain the game's path, the process ends instead.
+  A dashboard relaunch always rebuilds the command line, even if it already
+  named the core. It keeps only `-c/--config`, `-s/--save`, `--appendconfig`,
+  `--log-file`, `-v/--verbose` and `-f/--fullscreen`, including joined
+  `-cFILE`, `-sDIR` and `--opt=value` forms. It drops everything else
+  (content, other `-L` options and `--menu`), then adds `-L <core>`.
+  This also handles cores loaded through **Load Core → Start Core**.
+  Other builds ignore `HAKUX_LR_STOP=0`.
 
 `HAKUX_LR_END_PROCESS=0` or `1` in the environment overrides the build's
 choice for one run (the tests).

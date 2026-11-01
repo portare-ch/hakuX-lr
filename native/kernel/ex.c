@@ -845,8 +845,8 @@ bool nc_kernel_launch_xbe(const uint8_t page[NC_LAUNCH_PAGE], char *out, size_t 
 #define LDT_LAUNCH_DASHBOARD 1
 #define LAUNCH_DATA_OFF 0x400
 
-/* The running XBE is the dashboard's, on the hard disk's C: drive:
- * xboxdash.xbe, or Xbox Live's xodash\xonlinedash.xbe it launched. */
+/* Treat XBEs on the hard disk's C: drive as dashboard code, including
+ * xboxdash.xbe and Xbox Live's xodash\xonlinedash.xbe. */
 static bool in_dashboard(const NcKernel *k)
 {
     static const char c[] = "\\Device\\Harddisk0\\Partition2\\";
@@ -854,11 +854,10 @@ static bool in_dashboard(const NcKernel *k)
 }
 
 /* A quick reboot to the dashboard (no launch path, or the dashboard's) that
- * asks for one of its pages, a title's "create an Xbox Live account", or
- * that leaves one of the dashboard's own for its main menu (Xbox Live's
- * pages going back): true when the dashboard is there to boot, the page then
- * naming it. A title asking for the main menu closes, as without a
- * dashboard. */
+ * requests a page (e.g. a title's "create an Xbox Live account") or returns
+ * from dashboard code to its main menu. If installed, name the dashboard
+ * in the launch page and return true. A title requesting the main menu,
+ * or a missing dashboard, closes the game. */
 static bool dashboard_page(const NcKernel *k, uint8_t *page, char *xbe, size_t n)
 {
     char host[512];
@@ -890,7 +889,7 @@ void nc_kernel_launch_page_restore(NcKernel *k, const uint8_t page[NC_LAUNCH_PAG
  * lives for one run), so the page goes to a file and the app starts the core
  * again (NativeCoreActivity), which boots the XBE the page names: on the
  * disc, on the hard disk (when it's there), or the dashboard a title asked
- * a page of, or the dashboard's own pages left for (dashboard_page). */
+ * a page of, or returned to from Xbox Live's pages (dashboard_page). */
 static uint64_t HalReturnToFirmware(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
     const uint32_t slot = data_va(k, "LaunchDataPage");
