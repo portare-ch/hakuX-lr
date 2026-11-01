@@ -81,9 +81,12 @@ void nc_hle_hook(NcKernel *k, NcFrame *f);
 /* At the end of a system op: work the HLE layer asked for (a JIT flush). */
 void nc_hle_after_sysop(NcKernel *k);
 
-/* Guest-write tracking (dirty.c), from any thread's SIGSEGV/SIGBUS: a write
- * to a page protected for tracking. Returns false if it isn't one. */
-bool nc_hle_dirty_fault(const siginfo_t *info, void *ucontext);
+/* Guest-write tracking (dirty.c): a guest access to guest VA va faulted on a
+ * page protected for tracking or closed (nc_vm_noaccess). store: it stores,
+ * or the CPU backend can't tell. info and ucontext: the fault's signal, for
+ * the decoder that finds a closed page's access exactly (FEX's backend);
+ * NULL without one (KVM's). Returns false if the page isn't tracking's. */
+bool nc_hle_dirty_guest_fault(uint32_t va, bool store, const siginfo_t *info, void *ucontext);
 
 /* debug: NC_WATCHPA="pa:len[:seconds]" (hex, then decimal), stores to that
  * guest RAM logged (hakuX-native-watch), armed after the seconds: a guest

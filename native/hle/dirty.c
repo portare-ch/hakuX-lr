@@ -201,10 +201,9 @@ static void make_dirty(uint32_t pa)
  * RAM writable is the dear part of a fault: all three views 13.5 us a fault
  * on the Odin 3, this one 6.5 (DOA2 takes ~10k a second). A store through
  * another view faults once more and opens that one. */
-static void open_view(uint32_t pa, void *at)
+static void open_view(uint32_t pa, uint32_t va)
 {
-    void *page = (void *)((uintptr_t)at & ~(uintptr_t)(NC_PAGE - 1));
-    if (mprotect(page, NC_PAGE, PROT_READ | PROT_WRITE)) {
+    if (nc_vm_view_prot(g_vm, va & ~(NC_PAGE - 1), NC_PAGE, PROT_READ | PROT_WRITE)) {
         nc_vm_protect_page(g_vm, pa & ~(NC_PAGE - 1), false);   /* every view, as before */
         return;
     }
@@ -448,16 +447,12 @@ static void dirty_sample(uint32_t pa)
     }
 }
 
-bool nc_hle_dirty_fault(const siginfo_t *info, void *ucontext)
+bool nc_hle_dirty_guest_fault(uint32_t guest, bool store, const siginfo_t *info, void *ucontext)
 {
     if (!g_vm) {
         return false;
     }
-    const uint64_t guest = nc_vm_guest_of(g_vm, info->si_addr);
-    if (guest == UINT64_MAX) {
-        return false;
-    }
-    const uint32_t pa = nc_vm_phys(g_vm, (uint32_t)guest);
+    const uint32_t pa = nc_vm_phys(g_vm, guest);
     if (pa == UINT32_MAX || pa >= g_vm->ram_size) {
         return false;
     }
@@ -469,13 +464,13 @@ bool nc_hle_dirty_fault(const siginfo_t *info, void *ucontext)
          * the host's view instead: the page stays closed and nothing waits
          * for the GPU. */
         uint32_t lo, hi;
-        bool store = true;
-        const bool known = nc_ram_access_span(g_vm, info, ucontext, &lo, &hi, &store);
+        bool decoded = true;
+        const bool known = info && nc_ram_access_span(g_vm, info, ucontext, &lo, &hi, &decoded);
         const int nb = known ? hle_mem_stale_neighbour(lo, hi) : 0;
         if (nb == 2 || (nb == 1 && nc_ram_emulate(g_vm, info, ucontext, guest_stored))) {
             return true;                    /* (2: the page given back, the access runs again) */
         }
-        hle_mem_stale_access_rw(pa, !known || store);
+        hle_mem_stale_access_rw(pa, known ? decoded : store);
         return true;
     }
     const uint8_t wp = __atomic_load_n(&g_vm->wp[pa / NC_PAGE], __ATOMIC_ACQUIRE);
@@ -485,12 +480,12 @@ bool nc_hle_dirty_fault(const siginfo_t *info, void *ucontext)
         static unsigned s_logged;
         if (s_logged++ < 8) {
             nc_log("hakuX-native-watch", "write fault at guest %08x (pa %08x), a page tracking "
-                   "doesn't hold protected", (uint32_t)guest, pa);
+                   "doesn't hold protected", guest, pa);
         }
         return false;
     }
     if (wp == NC_WP_WRITTEN) {
-        open_view(pa, info->si_addr);   /* written through another view already */
+        open_view(pa, guest);           /* written through another view already */
         return true;
     }
     dirty_sample(pa);
@@ -503,6 +498,6 @@ bool nc_hle_dirty_fault(const siginfo_t *info, void *ucontext)
         return true;
     }
     hle_mem_first_write(pa, 4);
-    open_view(pa, info->si_addr);
+    open_view(pa, guest);
     return true;
 }

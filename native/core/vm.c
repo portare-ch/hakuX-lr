@@ -7,6 +7,7 @@
 #include <dlfcn.h>
 
 #include <errno.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <sys/mman.h>
@@ -14,6 +15,10 @@
 #include <unistd.h>
 
 static uint8_t *g_na;   /* per physical page: no guest access (nc_vm_noaccess), made on first use */
+/* Every change of a guest view's host protection, with vm->vprot and
+ * nc_vm_prot_hook: the guest's thread opening a view (dirty.c) and the
+ * decode thread closing it again must leave the table as the host has it. */
+static pthread_mutex_t g_prot_lock = PTHREAD_MUTEX_INITIALIZER;
 
 #ifndef MFD_CLOEXEC
 #define MFD_CLOEXEC 1u
@@ -21,6 +26,7 @@ static uint8_t *g_na;   /* per physical page: no guest access (nc_vm_noaccess), 
 
 #define NC_GUARD (64u * 1024u)
 #define PTE_BYTES ((size_t)((1ull << 32) / NC_PAGE) * sizeof(uint32_t))
+#define VPROT_BYTES ((size_t)((1ull << 32) / NC_PAGE))
 
 static int memfd(const char *name)
 {
@@ -78,10 +84,11 @@ bool nc_vm_init(NcVm *vm, uint32_t ram_size)
     vm->ram_size = ram_size;
     vm->page_used = calloc(ram_size / NC_PAGE, 1);
     vm->pte = nc_big_alloc(PTE_BYTES);
+    vm->vprot = nc_big_alloc(VPROT_BYTES);
     vm->rmap = calloc(ram_size / NC_PAGE, sizeof(uint32_t));
     vm->wp = calloc(ram_size / NC_PAGE, 1);
     vm->pin = calloc(ram_size / NC_PAGE, 1);
-    if (!vm->page_used || !vm->pte || !vm->rmap || !vm->wp || !vm->pin) {
+    if (!vm->page_used || !vm->pte || !vm->vprot || !vm->rmap || !vm->wp || !vm->pin) {
         return false;
     }
 
@@ -123,6 +130,7 @@ void nc_vm_destroy(NcVm *vm)
     }
     free(vm->page_used);
     nc_big_free(vm->pte, PTE_BYTES);
+    nc_big_free(vm->vprot, VPROT_BYTES);
     free(vm->rmap);
     free(vm->wp);
     free(vm->pin);
@@ -131,7 +139,39 @@ void nc_vm_destroy(NcVm *vm)
     memset(vm, 0, sizeof(*vm));
     vm->ram_fd = -1;
     nc_vm_write_hook = NULL;
+    nc_vm_prot_hook = NULL;
     memset(&nc_vm_dma, 0, sizeof(nc_vm_dma));
+}
+
+void (*nc_vm_prot_hook)(uint32_t va, uint32_t len, int prot);
+
+/* [va, va + len) now has prot in the host: the table and the hook told.
+ * Under g_prot_lock. */
+static void prot_set(NcVm *vm, uint32_t va, uint32_t len, int prot)
+{
+    memset(vm->vprot + va / NC_PAGE, prot, len / NC_PAGE);
+    if (nc_vm_prot_hook) {
+        nc_vm_prot_hook(va, len, prot);
+    }
+}
+
+/* A guest view's protection: mprotect, the table and the hook together.
+ * Under g_prot_lock. */
+static int view_prot(NcVm *vm, uint32_t va, uint32_t len, int prot)
+{
+    const int r = mprotect(vm->base + va, len, prot);
+    if (r == 0) {
+        prot_set(vm, va, len, prot);
+    }
+    return r;
+}
+
+int nc_vm_view_prot(NcVm *vm, uint32_t va, uint32_t len, int prot)
+{
+    pthread_mutex_lock(&g_prot_lock);
+    const int r = view_prot(vm, va, len, prot);
+    pthread_mutex_unlock(&g_prot_lock);
+    return r;
 }
 
 bool nc_vm_map(NcVm *vm, uint32_t va, uint32_t pa, uint32_t len)
@@ -142,12 +182,15 @@ bool nc_vm_map(NcVm *vm, uint32_t va, uint32_t pa, uint32_t len)
         return false;
     }
     void *want = vm->base + va;
+    pthread_mutex_lock(&g_prot_lock);
     void *m = mmap(want, len, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, vm->ram_fd, pa);
     if (m != want) {
+        pthread_mutex_unlock(&g_prot_lock);
         nc_log("hakuX-native", "vm: map va=%08x pa=%08x len=%x failed: %s", va, pa, len,
                strerror(errno));
         return false;
     }
+    prot_set(vm, va, len, PROT_READ | PROT_WRITE);
     const bool window = va == NC_CONTIG_WINDOW || va == NC_GPU_WINDOW;
     for (uint32_t off = 0; off < len; off += NC_PAGE) {
         const uint32_t page = (pa + off) / NC_PAGE;
@@ -165,11 +208,12 @@ bool nc_vm_map(NcVm *vm, uint32_t va, uint32_t pa, uint32_t len)
             vm->rmap[page] = va + off;
         }
         if (g_na && g_na[page]) {
-            mprotect(vm->base + va + off, NC_PAGE, PROT_NONE); /* still no access (nc_vm_noaccess) */
+            view_prot(vm, va + off, NC_PAGE, PROT_NONE); /* still no access (nc_vm_noaccess) */
         } else if (vm->wp[page] == NC_WP_CLEAN) {
-            mprotect(vm->base + va + off, NC_PAGE, PROT_READ); /* still tracked */
+            view_prot(vm, va + off, NC_PAGE, PROT_READ); /* still tracked */
         }
     }
+    pthread_mutex_unlock(&g_prot_lock);
     return true;
 }
 
@@ -183,8 +227,9 @@ NcVmDma nc_vm_dma;
 
 static void prot_views(NcVm *vm, uint32_t page, uint32_t n, int prot)
 {
-    mprotect(vm->base + NC_CONTIG_WINDOW + page * NC_PAGE, (size_t)n * NC_PAGE, prot);
-    mprotect(vm->base + NC_GPU_WINDOW + page * NC_PAGE, (size_t)n * NC_PAGE, prot);
+    pthread_mutex_lock(&g_prot_lock);
+    view_prot(vm, NC_CONTIG_WINDOW + page * NC_PAGE, n * NC_PAGE, prot);
+    view_prot(vm, NC_GPU_WINDOW + page * NC_PAGE, n * NC_PAGE, prot);
     uint32_t run_va = 0, run_n = 0;
     for (uint32_t i = 0; i <= n; i++) {
         uint32_t va = 0;
@@ -199,11 +244,12 @@ static void prot_views(NcVm *vm, uint32_t page, uint32_t n, int prot)
             continue;
         }
         if (run_n) {
-            mprotect(vm->base + run_va, (size_t)run_n * NC_PAGE, prot);
+            view_prot(vm, run_va, run_n * NC_PAGE, prot);
         }
         run_va = va;
         run_n = va ? 1 : 0;
     }
+    pthread_mutex_unlock(&g_prot_lock);
 }
 
 void nc_vm_protect_pages(NcVm *vm, uint32_t pa, uint32_t n, bool ro)
@@ -301,10 +347,14 @@ void nc_vm_protect_page(NcVm *vm, uint32_t pa, bool ro)
 bool nc_vm_unmap(NcVm *vm, uint32_t va, uint32_t len)
 {
     void *want = vm->base + va;
+    pthread_mutex_lock(&g_prot_lock);
     if (mmap(want, len, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED | MAP_NORESERVE, -1,
              0) != want) {
+        pthread_mutex_unlock(&g_prot_lock);
         return false;
     }
+    prot_set(vm, va, len, PROT_NONE);
+    pthread_mutex_unlock(&g_prot_lock);
     for (uint32_t off = 0; off < len; off += NC_PAGE) {
         const uint32_t e = vm->pte[(va + off) / NC_PAGE];
         if ((e & NC_PTE_VALID) && vm->rmap[e / NC_PAGE] == va + off) {

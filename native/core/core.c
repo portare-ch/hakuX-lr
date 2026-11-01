@@ -397,6 +397,107 @@ void nc_mmio_fault_sites(char *buf, size_t len)
     memset(g_mfs, 0, sizeof(g_mfs));
 }
 
+enum NcGuestFault nc_core_guest_fault(NcCore *c, const NcGuestAccess *a, const char **why)
+{
+    *why = NULL;
+    if (!a->wrapped) {
+        /* NC_WATCHPA: a guest store to the watched RAM, with its EIP */
+        const uint32_t gpa = nc_vm_phys(&c->vm, a->va);
+        if (gpa != UINT32_MAX && nc_hle_watch_pa(gpa)) {
+            nc_hle_watch_store(a->va, gpa, a->eip(a->opaque), 0);
+            static unsigned framed;
+            NcFrame *wf = framed < 20 ? a->frame(a->opaque) : NULL;
+            if (wf) {
+                /* the stack's words that look like the title's code: return addresses */
+                framed++;
+                char fr[400];
+                int n = 0;
+                const uint32_t esp = nc_frame_gpr(wf, NC_ESP);
+                for (uint32_t i = 0; i < 160 && n < (int)sizeof(fr) - 12; i++) {
+                    const uint32_t w_at = esp + 4 * i;
+                    if (nc_vm_phys(&c->vm, w_at) == UINT32_MAX) {
+                        break;
+                    }
+                    const uint32_t w = nc_vm_rd32(&c->vm, w_at);
+                    if (w >= 0x11000 && w < 0x160000) {
+                        n += snprintf(fr + n, sizeof(fr) - (size_t)n, " %x:%08x", i * 4, w);
+                    }
+                }
+                nc_log("hakuX-native-watch", "  esp %08x stack%s", esp, fr);
+            }
+        }
+        /* With a decoder (FEX's backend), an access it can't decode counts
+         * as a store; without one, the CPU's write bit is the answer. */
+        if (nc_hle_dirty_guest_fault(a->va, a->info ? true : a->write, a->info, a->ucontext)) {
+            __atomic_fetch_add(&g_nc_faults_dirty, 1, __ATOMIC_RELAXED);
+            return NC_GF_RETRY;
+        }
+        if (a->info && nc_mmio_fault(&c->vm, a->info, a->ucontext)) {
+            __atomic_fetch_add(&g_nc_faults_mmio, 1, __ATOMIC_RELAXED);
+            const uint32_t eip = a->eip(a->opaque);
+            mmio_fault_sample(eip);
+            /* From translated code: that instruction is hooked from now on. */
+            nc_x86mmio_note(eip);
+            return NC_GF_RETRY;
+        }
+    }
+    if (!a->page_fault) {
+        *why = "outside the guest";
+        return NC_GF_DECLINED;
+    }
+    /* A guest page the guest doesn't have: the title's page tables may map
+     * it since the last flush (the access runs again), or else from
+     * translated code the title's page-fault handler, if it has one, maps it.
+     * An access past the window's ends is the guest's at the wrapped address
+     * (Forza after a race: [0xFFFFFFC4 + 0x60], a NULL list entry's field):
+     * the title's fault when that page is missing, as on the Xbox. */
+    if (nc_vm_phys(&c->vm, a->va) != UINT32_MAX) {
+        *why = a->wrapped ? "wrapped, to a mapped page" : "mapped page";
+        return NC_GF_DECLINED;
+    }
+    if (nc_paging_fault(&c->kernel, a->va)) {
+        /* mapped now; the wrapped access would only fault again */
+        if (a->wrapped) {
+            *why = "wrapped, to a page the tables map";
+            return NC_GF_DECLINED;
+        }
+        return NC_GF_RETRY;
+    }
+    NcFrame *f = a->frame(a->opaque);
+    if (!f) {
+        nc_kernel_call_fault(&c->kernel, a->va, a->write);
+        return NC_GF_DECLINED;
+    }
+    if (a->wrapped) {
+        nc_log("hakuX-native-frontier", "guest fault at %08x (wrapped address), eip %08x", a->va,
+               nc_frame_eip(f));
+    }
+    if (!nc_kernel_page_fault(&c->kernel, f, a->va, a->write)) {
+        *why = "the title doesn't handle it";
+        return NC_GF_DECLINED;
+    }
+    return NC_GF_FRAME;
+}
+
+/* FEX's backend: a fault's guest frame and EIP, from its signal */
+typedef struct FexFault {
+    NcCpu *cpu;
+    void *ucontext;
+    uintptr_t pc;
+} FexFault;
+
+static NcFrame *fex_fault_frame(void *opaque)
+{
+    const FexFault *x = opaque;
+    return nc_cpu_fault_frame(x->cpu, x->ucontext);
+}
+
+static uint32_t fex_fault_eip(void *opaque)
+{
+    const FexFault *x = opaque;
+    return nc_cpu_guest_eip_at(x->cpu, x->pc);
+}
+
 bool nc_core_fault(NcCore *c, int sig, siginfo_t *info, void *ucontext)
 {
     if (sig == SIGILL) {
@@ -416,79 +517,37 @@ bool nc_core_fault(NcCore *c, int sig, siginfo_t *info, void *ucontext)
         __atomic_fetch_add(&g_nc_faults_callret, 1, __ATOMIC_RELAXED);
         return true;
     }
-    {   /* NC_WATCHPA: a guest store to the watched RAM, with its EIP */
-        const uint64_t gva = nc_vm_guest_of(&c->vm, info->si_addr);
-        const uint32_t gpa = gva != UINT64_MAX ? nc_vm_phys(&c->vm, (uint32_t)gva) : UINT32_MAX;
-        if (gpa != UINT32_MAX && nc_hle_watch_pa(gpa)) {
-            nc_hle_watch_store((uint32_t)gva, gpa, nc_cpu_guest_eip_at(c->cpu, pc), 0);
-            static unsigned framed;
-            NcFrame *wf = framed < 20 ? nc_cpu_fault_frame(c->cpu, ucontext) : NULL;
-            if (wf) {
-                /* the stack's words that look like the title's code: return addresses */
-                framed++;
-                char fr[400];
-                int n = 0;
-                const uint32_t esp = nc_frame_gpr(wf, NC_ESP);
-                for (uint32_t i = 0; i < 160 && n < (int)sizeof(fr) - 12; i++) {
-                    const uint32_t a = esp + 4 * i;
-                    if (nc_vm_phys(&c->vm, a) == UINT32_MAX) {
-                        break;
-                    }
-                    const uint32_t w = nc_vm_rd32(&c->vm, a);
-                    if (w >= 0x11000 && w < 0x160000) {
-                        n += snprintf(fr + n, sizeof(fr) - (size_t)n, " %x:%08x", i * 4, w);
-                    }
-                }
-                nc_log("hakuX-native-watch", "  esp %08x stack%s", esp, fr);
-            }
-        }
-    }
-    if (nc_hle_dirty_fault(info, ucontext)) {
-        __atomic_fetch_add(&g_nc_faults_dirty, 1, __ATOMIC_RELAXED);
-        return true;
-    }
-    if (nc_mmio_fault(&c->vm, info, ucontext)) {
-        __atomic_fetch_add(&g_nc_faults_mmio, 1, __ATOMIC_RELAXED);
-        mmio_fault_sample(nc_cpu_guest_eip_at(c->cpu, pc));
-        /* From translated code: that instruction is hooked from now on. */
-        nc_x86mmio_note(nc_cpu_guest_eip_at(c->cpu, pc));
-        return true;
-    }
-    /* A guest page the guest doesn't have: the title's page tables may map
-     * it since the last flush (the access runs again), or else from
-     * translated code the title's page-fault handler, if it has one, maps it.
-     * An access past the window's ends is the guest's at the wrapped address
-     * (Forza after a race: [0xFFFFFFC4 + 0x60], a NULL list entry's field):
-     * the title's fault when that page is missing, as on the Xbox. */
-    uint64_t va = nc_vm_guest_of(&c->vm, info->si_addr);
-    const uint64_t wrapped = va == UINT64_MAX ? nc_vm_guest_of_wrapped(&c->vm, info->si_addr) : UINT64_MAX;
-    if (wrapped != UINT64_MAX) {
-        va = wrapped;
-    }
-    if (sig != SIGSEGV || va == UINT64_MAX) {
+    const uint64_t guest = nc_vm_guest_of(&c->vm, info->si_addr);
+    const uint64_t wrapped = guest == UINT64_MAX ? nc_vm_guest_of_wrapped(&c->vm, info->si_addr) : UINT64_MAX;
+    if (guest == UINT64_MAX && wrapped == UINT64_MAX) {
         return fault_report(c, pc, (uint64_t)(uintptr_t)info->si_addr, "outside the guest");
     }
-    if (nc_vm_phys(&c->vm, (uint32_t)va) != UINT32_MAX) {
-        return fault_report(c, pc, va, wrapped != UINT64_MAX ? "wrapped, to a mapped page" : "mapped page");
+    FexFault x = {c->cpu, ucontext, pc};
+    const NcGuestAccess a = {
+        .va = (uint32_t)(wrapped != UINT64_MAX ? wrapped : guest),
+        .wrapped = wrapped != UINT64_MAX,
+        .page_fault = sig == SIGSEGV,
+        .write = nc_cpu_fault_is_write(ucontext),
+        .info = info,
+        .ucontext = ucontext,
+        .frame = fex_fault_frame,
+        .eip = fex_fault_eip,
+        .opaque = &x,
+    };
+    const char *why;
+    switch (nc_core_guest_fault(c, &a, &why)) {
+    case NC_GF_RETRY:
+        return true;
+    case NC_GF_FRAME:
+        nc_cpu_fault_resume(c->cpu, ucontext);
+        return true;
+    case NC_GF_DECLINED:
+        break;
     }
-    if (nc_paging_fault(&c->kernel, (uint32_t)va)) {
-        /* mapped now; the wrapped access would only fault again */
-        return wrapped == UINT64_MAX || fault_report(c, pc, va, "wrapped, to a page the tables map");
-    }
-    NcFrame *f = nc_cpu_fault_frame(c->cpu, ucontext);
-    if (!f) {
-        nc_kernel_call_fault(&c->kernel, (uint32_t)va, nc_cpu_fault_is_write(ucontext));
+    if (!why) {
         return false;
     }
-    if (wrapped != UINT64_MAX) {
-        nc_log("hakuX-native-frontier", "guest fault at %08x (wrapped address), eip %08x", (uint32_t)va,
-               nc_frame_eip(f));
-    }
-    if (!nc_kernel_page_fault(&c->kernel, f, (uint32_t)va, nc_cpu_fault_is_write(ucontext))) {
-        return fault_report(c, pc, va, "the title doesn't handle it");
-    }
-    nc_cpu_fault_resume(c->cpu, ucontext);
-    return true;
+    return fault_report(c, pc, a.page_fault ? a.va : (uint64_t)(uintptr_t)info->si_addr, why);
 }
 
 /* ---------------------------------------------------------------- stop */

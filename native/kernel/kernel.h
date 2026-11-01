@@ -684,6 +684,11 @@ void nc_x86mmio_flush(NcKernel *k);
 bool nc_x86mmio_is_site(uint32_t eip);
 bool nc_x86mmio_hook(NcKernel *k, NcFrame *f, uint32_t eip);
 
+/* CPUID as the Xbox's Pentium III answers it: EAX, EBX, ECX, EDX of a leaf
+ * (and subleaf, which no leaf it has uses). Zeros past its highest, leaf 2.
+ * A CPU backend that answers CPUID itself takes its table from here. */
+void nc_kernel_cpuid(uint32_t leaf, uint32_t subleaf, uint32_t r[4]);
+
 /* The CPU's system-op callback (opaque = NcKernel). */
 bool nc_kernel_sysop(void *opaque, NcFrame *f, enum NcSysOp op, unsigned size);
 

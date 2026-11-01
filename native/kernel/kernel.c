@@ -1330,31 +1330,38 @@ static void kcall(NcKernel *k, NcFrame *f, unsigned ordinal)
 }
 
 /* The Xbox CPU: Pentium III (Coppermine), GenuineIntel, max leaf 2. */
-static void cpuid(NcFrame *f)
+void nc_kernel_cpuid(uint32_t leaf, uint32_t subleaf, uint32_t r[4])
 {
-    uint32_t a = 0, b = 0, c = 0, d = 0;
-    switch (nc_frame_gpr(f, NC_EAX)) {
+    (void)subleaf;
+    r[0] = r[1] = r[2] = r[3] = 0;
+    switch (leaf) {
     case 0:
-        a = 2;
-        b = 0x756E6547; /* Genu */
-        d = 0x49656E69; /* ineI */
-        c = 0x6C65746E; /* ntel */
+        r[0] = 2;
+        r[1] = 0x756E6547; /* Genu */
+        r[3] = 0x49656E69; /* ineI */
+        r[2] = 0x6C65746E; /* ntel */
         break;
     case 1:
-        a = 0x068A;     /* family 6, model 8, stepping 10 */
-        d = 0x0383F9FF; /* FPU..CMOV, PAT, PSE36, MMX, FXSR, SSE */
+        r[0] = 0x068A;     /* family 6, model 8, stepping 10 */
+        r[3] = 0x0383F9FF; /* FPU..CMOV, PAT, PSE36, MMX, FXSR, SSE */
         break;
     case 2:
-        a = 0x03020101;
-        d = 0x0C040843;
+        r[0] = 0x03020101;
+        r[3] = 0x0C040843;
         break;
     default:
         break;
     }
-    nc_frame_set_gpr(f, NC_EAX, a);
-    nc_frame_set_gpr(f, NC_EBX, b);
-    nc_frame_set_gpr(f, NC_ECX, c);
-    nc_frame_set_gpr(f, NC_EDX, d);
+}
+
+static void cpuid(NcFrame *f)
+{
+    uint32_t r[4];
+    nc_kernel_cpuid(nc_frame_gpr(f, NC_EAX), nc_frame_gpr(f, NC_ECX), r);
+    nc_frame_set_gpr(f, NC_EAX, r[0]);
+    nc_frame_set_gpr(f, NC_EBX, r[1]);
+    nc_frame_set_gpr(f, NC_ECX, r[2]);
+    nc_frame_set_gpr(f, NC_EDX, r[3]);
 }
 
 /* RDMSR / WRMSR (ECX the register, EDX:EAX the value). nxdk's runtime reads
