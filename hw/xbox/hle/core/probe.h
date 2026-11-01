@@ -21,6 +21,8 @@ unsigned hle_probe_register(void);
 void hle_probe_reset(void);
 /* Whether a probe is at va (the host hooks it). */
 bool hle_probe_at(uint32_t va);
+/* The probed addresses, up to max of them. */
+unsigned hle_probe_list(uint32_t *vas, unsigned max);
 /* Execution reached a probe: the registers at it (eip the probe's VA). */
 void hle_probe_hit(const struct HleCpu *c);
 

@@ -41,10 +41,14 @@ including a sysroot or toolchain file.
 The same build runs on an x86-64 Linux host (`sh tools/native/linux-ci-x86_64.sh`,
 or `container run --arch amd64` with the image built for amd64). FEX translates
 for ARM64 only, so there the guest CPU is the KVM backend (`HAKUX_CPU=kvm`,
-issue #56). Until that backend exists the core builds but refuses to start a
-game, and the tests that run guest code (`linux-smoke`, `linux-boundaries`,
-`libretro-smoke`) are not run. Without NEON, voices resample linearly, and the
-DSP JIT is off. It is a debugging build: releases are ARM64's.
+issue #56): the title's code runs on the host CPU, at CPL 3 with IOPL 3, and
+its system instructions come to the kernel as they do from FEX. It needs
+`/dev/kvm` with TSC scaling and UMIP (`container run` on a Mac has neither:
+build there, run on an x86-64 Linux machine or in CI, which hands the
+container its runner's `/dev/kvm`). `kvm-smoke` checks the backend itself;
+`libretro-smoke` waits for the shootdown that keeps the decode thread's page
+protections in step (#56, PR 4). Without NEON, voices resample linearly, and
+the DSP JIT is off. It is a debugging build: releases are ARM64's.
 
 The Linux ARM64 build enables `HAKUX_DSP_JIT` by default. It builds
 dsp56300 0.1.3 from pinned sources using Cargo's locked dependencies;

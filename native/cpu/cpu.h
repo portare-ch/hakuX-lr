@@ -58,6 +58,10 @@ enum NcSysOp {
 
 typedef struct NcCpu NcCpu;
 typedef struct NcFrame NcFrame; /* the guest register file while in a system op */
+struct NcVm;
+
+/* The backend this build has: "fex" or "kvm" (#56). */
+extern const char nc_cpu_backend[];
 
 /* A guest thread's architectural CPU state while it isn't running (opaque;
  * big enough for the JIT's register file). */
@@ -110,6 +114,22 @@ typedef struct NcCpuConfig {
     bool (*hook_query)(void *opaque, uint32_t eip);
     uint32_t idt_base; /* what SIDT reports */
     uint16_t idt_limit;
+
+    /* The KVM backend's (x86-64, #56), which FEX ignores: what FEX reaches
+     * through host faults and system ops comes out of KVM's exits, and the
+     * core hands it on (nc_core_cpu_backend). */
+    struct NcVm *vm;   /* guest memory: frames and protections (vm.c) */
+    /* A guest page fault at va: an NcGuestFault (core.h), 0 declined (why
+     * says why), 1 the access runs again, 2 the frame was changed. */
+    int (*fault)(void *opaque, NcFrame *f, uint32_t va, bool write, const char **why);
+    bool (*mmio)(uint32_t addr, unsigned bytes, bool store, uint64_t *v);
+    bool (*mmio_window)(uint32_t addr); /* a device's register window is there */
+    uint32_t (*port_in)(uint16_t port, unsigned bytes);
+    void (*port_out)(uint16_t port, unsigned bytes, uint32_t value);
+    void (*cpuid)(uint32_t leaf, uint32_t subleaf, uint32_t r[4]);
+    /* The hooked addresses, all of them (hook_query answers one at a time,
+     * which a backend that never translates can't use). */
+    unsigned (*hook_list)(void *opaque, uint32_t *eips, unsigned max);
 } NcCpuConfig;
 
 /* Creates the JIT and its one host thread state: flat segments, FS at

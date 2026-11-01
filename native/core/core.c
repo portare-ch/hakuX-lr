@@ -12,6 +12,7 @@
 #include "native/net/net.h"
 #include "native/state/save.h"
 
+#include <sched.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -244,6 +245,7 @@ bool nc_core_boot(NcCore *c, int disc_fd)
         .idt_base = c->kernel.idt_va,
         .idt_limit = 0x7FF,
     };
+    nc_core_cpu_backend(c, &cfg);
     c->cpu = nc_cpu_create(&cfg, c->kernel.kpcr_va);
     if (!c->cpu || fail_at("cpu")) {
         return boot_failed("The emulated CPU couldn't start.");
@@ -307,6 +309,60 @@ void nc_core_run(NcCore *c)
     nc_log("hakuX-native-frontier", "summary stage=%s kernel_calls=%llu first_call=%s threads=%u",
            k->first_ordinal ? "S2" : "S1", (unsigned long long)k->calls,
            first ? first->name : "-", threads);
+}
+
+/* The KVM backend's view of the core (#56; FEX ignores it): guest memory,
+ * the fault path, the devices, CPUID and the hooked addresses. */
+static NcCore *g_cpu_core;
+
+static NcFrame *kvm_access_frame(void *opaque)
+{
+    return opaque;
+}
+
+static uint32_t kvm_access_eip(void *opaque)
+{
+    return nc_frame_eip(opaque);
+}
+
+static int kvm_fault(void *opaque, NcFrame *f, uint32_t va, bool write, const char **why)
+{
+    const NcGuestAccess a = {.va = va, .page_fault = true, .write = write,
+                             .frame = kvm_access_frame, .eip = kvm_access_eip, .opaque = f};
+    return (int)nc_core_guest_fault(g_cpu_core, &a, why);
+}
+
+/* A device store that asks to run again (the APU's voice locks, which FEX's
+ * x86mmio sites re-run with interrupts taken in between) is made again
+ * here: KVM has already completed the guest's instruction. */
+static bool kvm_mmio(uint32_t addr, unsigned bytes, bool store, uint64_t *v)
+{
+    const uint64_t value = *v;
+    for (unsigned tries = 0;; tries++) {
+        if (!nc_mmio_access(addr, bytes, store, v)) {
+            return false;
+        }
+        if (!store || !nc_mmio_take_retry()) {
+            return true;
+        }
+        *v = value;
+        if (tries > 16) {
+            sched_yield();
+        }
+    }
+}
+
+void nc_core_cpu_backend(NcCore *c, NcCpuConfig *cfg)
+{
+    g_cpu_core = c;
+    cfg->vm = &c->vm;
+    cfg->fault = kvm_fault;
+    cfg->mmio = kvm_mmio;
+    cfg->mmio_window = nc_mmio_window;
+    cfg->port_in = nc_port_in;
+    cfg->port_out = nc_port_out;
+    cfg->cpuid = nc_kernel_cpuid;
+    cfg->hook_list = nc_hle_hook_list;
 }
 
 /* Hooked guest addresses: the HLE GPU's functions and device-access sites. */

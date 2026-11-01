@@ -149,8 +149,10 @@ int main(int argc, char **argv)
     nc_wr32(code + 23, alias);
     memcpy(nc_vm_host(&core.vm, 0x10000), code, sizeof(code));
     NcCpuConfig cfg = {.membase = core.vm.base, .sysop = system_op};
+    nc_core_cpu_backend(&core, &cfg);
     core.cpu = nc_cpu_create(&cfg, core.kernel.kpcr_va);
-    check(core.cpu != NULL, "actual NcCpu/FEX embedding initialized");
+    const bool kvm = !strcmp(nc_cpu_backend, "kvm");
+    check(core.cpu != NULL, kvm ? "actual NcCpu/KVM guest initialized" : "actual NcCpu/FEX embedding initialized");
     NcCpuContext context;
     nc_context_init(core.cpu, &context, 0x10000, 0);
     nc_cpu_run(core.cpu, &context);
@@ -159,7 +161,9 @@ int main(int argc, char **argv)
           "translated arithmetic, branch and registers");
     check(*(volatile uint32_t *)nc_vm_host(&core.vm, alias) == 13, "translated write visible through alias");
     check(g_nc_faults_dirty == 1 && hle_host_mem_dirty(pa), "translated write fault resumed and dirtied page");
-    check(g_nc_faults_mmio == 2 && mmio_value == 13, "translated MMIO read/write faults resumed");
+    /* FEX's MMIO is a host fault each; KVM's an exit, counted by the device layer */
+    check((kvm ? nc_mmio_total() == 2 : g_nc_faults_mmio == 2) && mmio_value == 13,
+          "translated MMIO read/write faults resumed");
     /* x86 permits a locked dword at an odd address. Older ARM hosts need
      * the SIGBUS handler; newer ones may execute it directly. */
     const uint8_t unaligned[] = {0xf0, 0xff, 0x05, 3, 0, 2, 0, 0xf4}; /* lock inc [0x20003]; hlt */
@@ -172,7 +176,7 @@ int main(int argc, char **argv)
 
     /* CPUID as the kernel's table answers it: leaf 0's vendor, leaf 1's
      * signature, zeros past the highest leaf (7). */
-    const struct {
+    struct {
         uint32_t leaf;
         uint8_t then[6];
         uint32_t want;
@@ -182,6 +186,7 @@ int main(int argc, char **argv)
         {1, {0x90, 0x90, 0x90, 0x90, 0x90, 0x90}, 0x068A, "CPUID leaf 1: the Pentium III's signature"},
         {7, {0x09, 0xd8, 0x09, 0xc8, 0x09, 0xd0}, 0, "CPUID leaf 7: zeros past leaf 2"}, /* or eax, ebx/ecx/edx */
     };
+    leaves[2].want = kvm ? 4 : 0; /* KVM's one difference: UMIP (ECX bit 2), which CR4.UMIP needs */
     for (unsigned i = 0; i < sizeof(leaves) / sizeof(leaves[0]); i++) {
         /* mov eax, leaf; xor ecx, ecx; cpuid; <then>; int 42h; hlt */
         uint8_t prog[18] = {0xb8, 0, 0, 0, 0, 0x31, 0xc9, 0x0f, 0xa2};
