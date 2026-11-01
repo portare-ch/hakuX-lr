@@ -16,8 +16,28 @@ add_library(nc_platform INTERFACE)
 target_link_libraries(nc_platform INTERFACE Threads::Threads ${CMAKE_DL_LIBS})
 if(ANDROID)
   target_link_libraries(nc_platform INTERFACE android log)
-elseif(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
-  message(FATAL_ERROR "The native core requires Android arm64 or AArch64 Linux")
+elseif(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|x86_64|AMD64)$")
+  message(FATAL_ERROR "The native core requires Android arm64, or Linux on AArch64 or x86-64")
+endif()
+# The guest CPU (native/cpu): FEX translates on ARM64; on x86-64 Linux, KVM
+# runs the guest's code on the host CPU (cpu_kvm.c, #56).
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
+  set(NC_CPU_DEFAULT kvm)
+else()
+  set(NC_CPU_DEFAULT fex)
+endif()
+set(HAKUX_CPU "${NC_CPU_DEFAULT}" CACHE STRING "The guest CPU: fex (ARM64) or kvm (x86-64 Linux)")
+set_property(CACHE HAKUX_CPU PROPERTY STRINGS fex kvm)
+if(HAKUX_CPU STREQUAL "fex")
+  if(NOT ANDROID AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
+    message(FATAL_ERROR "HAKUX_CPU=fex: FEX's JIT emits ARM64 code only")
+  endif()
+elseif(HAKUX_CPU STREQUAL "kvm")
+  if(ANDROID OR NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
+    message(FATAL_ERROR "HAKUX_CPU=kvm: runs x86 guest code on an x86-64 Linux host only")
+  endif()
+else()
+  message(FATAL_ERROR "HAKUX_CPU must be fex or kvm, not ${HAKUX_CPU}")
 endif()
 if(NOT ANDROID)
   target_compile_definitions(nc_platform INTERFACE _GNU_SOURCE)
@@ -48,7 +68,12 @@ if(HAKUX_LTO AND CMAKE_BUILD_TYPE STREQUAL "Release")
 endif()
 
 get_filename_component(NC_REPO "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
-include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/fex.cmake")
+if(HAKUX_CPU STREQUAL "fex")
+  include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/fex.cmake")
+else()
+  # FEX's source is still where xxhash comes from (state/cache.c, hle.cmake).
+  set(HAKUX_FEX_DIR "${CMAKE_CURRENT_LIST_DIR}/../external/fex" CACHE PATH "Checkout of the FEX fork (branch hakuX)")
+endif()
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/hle.cmake")
 
 # libslirp (NC_DEPS/libslirp, 4.7.0, unmodified): the NAT backend's TCP/IP
@@ -127,15 +152,20 @@ add_library(hakux_native STATIC
   state/vm_state.c
   state/save.c
   state/cache.c
-  cpu/cpu.cpp
   "${NC_REPO}/hw/xbox/hle/core/xbe.c"
 )
+if(HAKUX_CPU STREQUAL "fex")
+  target_sources(hakux_native PRIVATE cpu/cpu.cpp)
+  target_link_libraries(hakux_native PUBLIC nc_fex)
+else()
+  target_sources(hakux_native PRIVATE cpu/cpu_kvm.c)
+endif()
 target_include_directories(hakux_native PUBLIC "${NC_REPO}")
 # xxhash (single header, FEX's copy): the savestates' blob store (state/cache.c)
 target_include_directories(hakux_native PRIVATE "${HAKUX_FEX_DIR}/External/xxhash")
 # The HLE layer's pure modules build without QEMU in this mode.
 target_compile_definitions(hakux_native PRIVATE HLE_HOST_TEST)
-target_link_libraries(hakux_native PUBLIC nc_fex hakux_hle hakux_apu nc_slirp nc_platform z)
+target_link_libraries(hakux_native PUBLIC hakux_hle hakux_apu nc_slirp nc_platform z)
 target_compile_options(hakux_native PRIVATE -Wall -Wno-unused-parameter)
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/chd.cmake")
 

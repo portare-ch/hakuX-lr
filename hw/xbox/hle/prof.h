@@ -8,6 +8,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#if !defined(__aarch64__)
+#include "hw/xbox/hle/util/thread.h"
+#endif
+
 enum {
     HLE_PROF_BACK,      /* back-end command processing (render thread) */
     HLE_PROF_SUBMIT,    /* back-end queue submits */

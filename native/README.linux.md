@@ -36,6 +36,16 @@ dependencies fetched with `linux-deps.py --dest <directory>`, and `JOBS` to
 set parallelism. Extra `linux-build.sh` arguments pass through to CMake,
 including a sysroot or toolchain file.
 
+### x86-64
+
+The same build runs on an x86-64 Linux host (`sh tools/native/linux-ci-x86_64.sh`,
+or `container run --arch amd64` with the image built for amd64). FEX translates
+for ARM64 only, so there the guest CPU is the KVM backend (`HAKUX_CPU=kvm`,
+issue #56). Until that backend exists the core builds but refuses to start a
+game, and the tests that run guest code (`linux-smoke`, `linux-boundaries`,
+`libretro-smoke`) are not run. Without NEON, voices resample linearly, and the
+DSP JIT is off. It is a debugging build: releases are ARM64's.
+
 The Linux ARM64 build enables `HAKUX_DSP_JIT` by default. It builds
 dsp56300 0.1.3 from pinned sources using Cargo's locked dependencies;
 release archives include their license notices and Rust toolchain version.

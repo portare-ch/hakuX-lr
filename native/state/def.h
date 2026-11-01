@@ -32,6 +32,10 @@
 #ifndef NC_ABI_SIZE
 #ifdef __ANDROID__
 #define NC_ABI_SIZE(android_size, linux_size) (android_size)
+#elif defined(__x86_64__)
+/* x86-64 (the KVM backend's build, #56): glibc's objects have other sizes
+ * there, and the lock is the AArch64 builds' (CI checks it): not checked. */
+#define NC_ABI_SIZE(android_size, linux_size) 0
 #else
 #define NC_ABI_SIZE(android_size, linux_size) (linux_size)
 #endif
@@ -41,6 +45,8 @@
 #define NC_STATE_PROBE_ABI
 #ifdef __ANDROID__
 const unsigned long nc_probe_host_abi = 1;
+#elif defined(__x86_64__)
+const unsigned long nc_probe_host_abi = 3; /* no slot: statelock.py --sizes refuses it */
 #else
 const unsigned long nc_probe_host_abi = 2;
 #endif
@@ -56,7 +62,7 @@ const unsigned long nc_probe_host_abi = 2;
 #define NC_REC(T, size) const unsigned long nc_probe_size_##T = sizeof(T);
 #else
 #define NC_REC(T, size)                                                                            \
-    _Static_assert(sizeof(T) == (size), #T " changed size: list its new member in its .def (NC_F or " \
+    _Static_assert((size) == 0 || sizeof(T) == (size), #T " changed size: list its new member in its .def (NC_F or " \
                                            "NC_SKIP), then tools/native/statelock.py --sizes");
 #endif
 #define NC_F(T, m, ty, n, s, u)                                                                    \

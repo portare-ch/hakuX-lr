@@ -9,6 +9,7 @@
  * code is translated.
  */
 #include "native/hle/hle_native.h"
+#include "native/core/hostctx.h"
 
 #include "hw/xbox/hle/base.h"
 #include "hw/xbox/hle/hle.h"
@@ -163,7 +164,7 @@ static pthread_mutex_t g_smp_mu = PTHREAD_MUTEX_INITIALIZER;
 
 static void smp_signal(int sig, siginfo_t *si, void *uc)
 {
-    const uintptr_t pc = (uintptr_t)((ucontext_t *)uc)->uc_mcontext.pc;
+    const uintptr_t pc = nc_host_pc(uc);
     uint32_t eip;
     uint32_t v;
     if (g_nc_idle_waiting) {

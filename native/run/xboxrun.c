@@ -29,6 +29,7 @@
  */
 #include "native/app/app.h"
 #include "native/core/core.h"
+#include "native/core/hostctx.h"
 #include "native/core/mmio.h"
 #include "native/core/options.h"
 #include "native/hle/hle_native.h"
@@ -77,6 +78,7 @@ static void dump_guest(const NcVm *vm, const char *what, uint32_t va, unsigned l
  * esi x10, edi x11). */
 static void report_guest(const mcontext_t *mc, uint32_t eip)
 {
+#if defined(__aarch64__)
     if (eip) {
         static const char *const names[8] = {"eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"};
         static const int regs[8] = {4, 7, 5, 6, 8, 9, 10, 11};
@@ -90,6 +92,7 @@ static void report_guest(const mcontext_t *mc, uint32_t eip)
         dump_guest(&g_core.vm, "code", eip - 32, 64);
         dump_guest(&g_core.vm, "stack", (uint32_t)mc->regs[8], 64);
     }
+#endif
     nc_mmio_dump_stats(2);
     nc_kernel_dump_recent(2);
     nc_kernel_dump_threads(&g_core.kernel, 2);
@@ -139,31 +142,34 @@ static void fault(int sig, siginfo_t *info, void *ctx)
         return;
     }
     const mcontext_t *mc = &((ucontext_t *)ctx)->uc_mcontext;
+    const uintptr_t pc = nc_host_pc(ctx);
     uint64_t guest = nc_vm_guest_of(&g_core.vm, info->si_addr);
-    uint32_t eip = nc_cpu_guest_eip_at(g_core.cpu, (uintptr_t)mc->pc);
+    uint32_t eip = nc_cpu_guest_eip_at(g_core.cpu, pc);
     char buf[256];
     int n = snprintf(buf, sizeof(buf),
                      "hakuX-native-frontier: fault sig=%d host_pc=%llx addr=%p guest_addr=%s%llx "
                      "guest_eip=%08x\n",
-                     sig, (unsigned long long)mc->pc, info->si_addr,
+                     sig, (unsigned long long)pc, info->si_addr,
                      guest == UINT64_MAX ? "host:" : "", (unsigned long long)(guest == UINT64_MAX ? 0 : guest),
                      eip);
     write(2, buf, (size_t)n);
-    report_host_thread((uintptr_t)mc->pc, (uintptr_t)mc->sp, (uintptr_t)info->si_addr);
+    report_host_thread(pc, nc_host_sp(ctx), (uintptr_t)info->si_addr);
     if (eip) {
-        n = snprintf(buf, sizeof(buf), "hakuX-native-frontier:   host insn %08x\n", *(const uint32_t *)(uintptr_t)mc->pc);
+        n = snprintf(buf, sizeof(buf), "hakuX-native-frontier:   host insn %08x\n", *(const uint32_t *)pc);
         write(2, buf, (size_t)n);
     }
     /* Host code: where in which image (llvm-addr2line on the unstripped build). */
     Dl_info dl;
-    if (!eip && dladdr((void *)(uintptr_t)mc->pc, &dl) && dl.dli_fbase) {
+    if (!eip && dladdr((void *)pc, &dl) && dl.dli_fbase) {
         n = snprintf(buf, sizeof(buf), "hakuX-native-frontier:   host %s+0x%llx (%s)\n", dl.dli_fname,
-                     (unsigned long long)((uintptr_t)mc->pc - (uintptr_t)dl.dli_fbase),
+                     (unsigned long long)(pc - (uintptr_t)dl.dli_fbase),
                      dl.dli_sname ? dl.dli_sname : "?");
         write(2, buf, (size_t)n);
+#if defined(__aarch64__)
         n = snprintf(buf, sizeof(buf), "hakuX-native-frontier:   host lr +0x%llx\n",
                      (unsigned long long)((uintptr_t)mc->regs[30] - (uintptr_t)dl.dli_fbase));
         write(2, buf, (size_t)n);
+#endif
     }
     if (g_core.kernel.in_call && g_core.kernel.frame) {
         /* Inside a kernel function: the guest state is the call's frame. */
@@ -196,10 +202,11 @@ static unsigned g_timeout;
 static void timeout(int sig, siginfo_t *info, void *ctx)
 {
     const mcontext_t *mc = &((ucontext_t *)ctx)->uc_mcontext;
-    uint32_t eip = nc_cpu_guest_eip_at(g_core.cpu, (uintptr_t)mc->pc);
+    const uintptr_t pc = nc_host_pc(ctx);
+    uint32_t eip = nc_cpu_guest_eip_at(g_core.cpu, pc);
     char buf[160];
     int n = snprintf(buf, sizeof(buf), "hakuX-native-frontier: timeout after %u s: host_pc=%llx guest_eip=%08x%s\n",
-                     g_timeout, (unsigned long long)mc->pc, eip, eip ? "" : " (not in guest code)");
+                     g_timeout, (unsigned long long)pc, eip, eip ? "" : " (not in guest code)");
     write(2, buf, (size_t)n);
     report_guest(mc, eip);
     dump_ranges(getenv("NC_FAULT_DUMP"));
