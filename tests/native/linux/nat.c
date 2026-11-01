@@ -95,6 +95,7 @@ static struct {
     unsigned fail_from, fail_to;        /* AddPortMappings [from, to) (counted from 1) answered 500 */
     char owner[INET_ADDRSTRLEN];        /* the forward's internal client, "" none */
     unsigned queries;                   /* GetSpecificPortMappingEntry */
+    bool fail_queries;                  /* GetSpecificPortMappingEntry answered 500 (ActionFailed) */
     char last_add[8192], last_delete[8192];
 } g_igd = { .lock = PTHREAD_MUTEX_INITIALIZER };
 
@@ -221,7 +222,10 @@ static void serve(int fd)
     } else if (control && strstr(req, "#GetSpecificPortMappingEntry\"")) {
         g_igd.queries++;
         char out[1024];
-        if (g_igd.owner[0]) {
+        if (g_igd.fail_queries) {
+            snprintf(out, sizeof(out), UPNP_ERROR, 501);
+            reply(fd, "500 Internal Server Error", out, false);
+        } else if (g_igd.owner[0]) {
             snprintf(out, sizeof(out),
                      "<?xml version=\"1.0\"?><s:Envelope><s:Body><u:GetSpecificPortMappingEntryResponse>"
                      "<NewInternalPort>%u</NewInternalPort><NewInternalClient>%s</NewInternalClient>"
@@ -333,6 +337,7 @@ static void igd_reset(bool only_permanent)
     g_igd.fail_from = g_igd.fail_to = 0;
     g_igd.owner[0] = 0;
     g_igd.queries = 0;
+    g_igd.fail_queries = false;
     g_igd.searches = g_igd.descriptions = g_igd.adds = g_igd.deletes = g_igd.externals = 0;
     g_igd.last_add[0] = g_igd.last_delete[0] = 0;
     g_igd.only_permanent = only_permanent;
@@ -598,6 +603,17 @@ int main(void)
     sleep_ms(300);
     CHECK(igd_count(&g_igd.deletes) == 0 && has(g_igd.owner, "192.168.1.99"),
           "UPnP: another console's forward left alone");
+
+    /* the ownership query fails (not "no such entry"): a forward the router
+     * said yes to is still removed */
+    igd_reset(false);
+    g_igd.fail_queries = true;
+    nc_net_start();
+    CHECK(igd_wait(&g_igd.adds, 1, 5000), "UPnP: AddPortMapping asked (ownership query to fail)");
+    sleep_ms(100);
+    nc_net_stop();
+    CHECK(igd_count(&g_igd.queries) == 1 && igd_count(&g_igd.deletes) == 1,
+          "UPnP: a confirmed forward removed though the ownership query failed");
 
     /* renewals: two fail, the next succeeds; the forward is kept meanwhile */
     igd_reset(false);

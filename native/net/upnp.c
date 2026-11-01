@@ -614,8 +614,9 @@ static int add_mapping(unsigned lease, int *error)
 }
 
 /* Whether the router's forward of the port is this device's: 1 yes, 0 no
- * (another device's, or none), -1 no answer. DeletePortMapping names only
- * the external port, so another console's forward must not be removed. */
+ * (another device's, or none: error 714), -1 unknown (no answer, another
+ * error, an entry without its client). DeletePortMapping names only the
+ * external port, so another console's forward must not be removed. */
 static int mapping_is_ours(void)
 {
     char args[256], client[INET_ADDRSTRLEN], port[8];
@@ -623,13 +624,15 @@ static int mapping_is_ours(void)
              "<NewRemoteHost></NewRemoteHost><NewExternalPort>%u</NewExternalPort><NewProtocol>UDP</NewProtocol>",
              g_upnp.port);
     const int status = soap("GetSpecificPortMappingEntry", args, DELETE_MS);
-    if (!status) {
-        return -1;
+    if (status != 200) {
+        return status && soap_error() == 714 ? 0 : -1;      /* NoSuchEntryInArray */
     }
     const char *b = g_upnp.buf, *end = b + strlen(b);
-    return status == 200 && xml_text(b, end, "NewInternalClient", client, sizeof(client)) &&
-           xml_text(b, end, "NewInternalPort", port, sizeof(port)) && !strcmp(client, g_upnp.local) &&
-           atoi(port) == g_upnp.port;
+    if (!xml_text(b, end, "NewInternalClient", client, sizeof(client)) ||
+        !xml_text(b, end, "NewInternalPort", port, sizeof(port))) {
+        return -1;
+    }
+    return !strcmp(client, g_upnp.local) && atoi(port) == g_upnp.port;
 }
 
 /* owned: the router's last answer to AddPortMapping was yes. Otherwise the
@@ -639,7 +642,7 @@ static void delete_mapping(bool owned)
     const int ours = mapping_is_ours();
     if (!ours || (ours < 0 && !owned)) {
         nc_log(TAG, "nat: UPnP: the router's UDP %u forward left alone: %s", g_upnp.port,
-               ours ? "no answer whether it is this device's" : "not this device's");
+               ours ? "unknown whether it is this device's" : "not this device's");
         return;
     }
     char args[256];
