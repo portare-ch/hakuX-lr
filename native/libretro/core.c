@@ -634,9 +634,9 @@ static void close_on_exec(void)
     closedir(d);
 }
 
-/* RetroArch's options kept when it starts again on a command line that did
- * not name the core (Load Core and Start Core in its menu): its config, its
- * log. Every other argument is dropped (content, --menu). Returns how many
+/* RetroArch's options kept when it starts again for the dashboard: its
+ * config, its log. Every other argument is dropped (content, another core's
+ * -L, --menu). Returns how many
  * of argv's words the option at i takes (0: not kept). */
 static unsigned kept_option(char *const *argv, unsigned i, unsigned argc)
 {
@@ -667,11 +667,11 @@ static unsigned kept_option(char *const *argv, unsigned i, unsigned argc)
  * relaunch.bin, beside the console disk): the core cannot boot again in this
  * process, so RetroArch starts again in its place, on the same command line,
  * with HAKUX_RELAUNCH naming the game (DASH_MARK for the dashboard, started
- * with no content: the command line names this core). The dashboard started
- * from RetroArch's menu (Load Core, Start Core), whose command line names no
- * core, starts again with -L and this core, RetroArch's config kept
- * (kept_option). Its load boots the XBE the page names, as Android's activity
- * does with "relaunch". The process stays the same one to its parent
+ * with no content). The dashboard's command line is made again, as its own
+ * may name no core (Load Core, Start Core in RetroArch's menu) or ask for the
+ * menu (--menu, which would start RetroArch on no core): RetroArch's config
+ * kept (kept_option), then -L and this core. Its load boots the XBE the page
+ * names, as Android's activity does with "relaunch". The process stays the same one to its parent
  * (runemu.sh), so the game does not go back to the launcher. Returns if
  * RetroArch can't start again for the game. */
 static void relaunch(void)
@@ -707,7 +707,7 @@ static void relaunch(void)
     }
     argv[argc] = NULL;
     char *const *start = argv;
-    if (!on_game && g_dash && *want && argc > 0) {
+    if (g_dash && *want && argc > 0) {
         unsigned m = 0;
         menu_argv[m++] = argv[0];
         for (unsigned i = 1; i < argc;) {
@@ -721,7 +721,7 @@ static void relaunch(void)
         menu_argv[m++] = want;
         menu_argv[m] = NULL;
         start = menu_argv;
-        nc_log("hakuX-libretro", "relaunch: RetroArch was started without the core; it starts again with -L %s", want);
+        nc_log("hakuX-libretro", "relaunch: RetroArch starts again with its config and -L %s", want);
     } else if (!on_game) {
         nc_log("hakuX-libretro", "relaunch: RetroArch was not started on the %s; it can't start again for it",
                g_dash ? "core" : "game");
