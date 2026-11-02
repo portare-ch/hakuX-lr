@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Fixes
+
+- **Overscan crop preserves the aspect ratio** — Crop Overscan now removes
+  3.75% from each edge. At 2x, a 640 x 480 game produces 1184 x 888,
+  exactly 4:3, while still hiding Burnout 3's black border. RetroArch also
+  receives an aspect ratio adjusted for the crop, avoiding distortion when
+  crop sizes are rounded to whole pixels.
+
 ## linux-v0.17.0 (Linux, aarch64 and x86-64)
 
 Adds an experimental AMD64 (x86-64) Linux core alongside the ARM64 build

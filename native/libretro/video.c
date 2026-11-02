@@ -1,20 +1,13 @@
 /*
- * hakuX native core — the frames to RetroArch, in the libretro core.
+ * hakuX libretro video output.
  *
- * Through Vulkan when RetroArch took the renderer's device (vulkan.c: the
- * front image copied on the GPU). Otherwise, for a frontend without Vulkan,
- * the front frame is read back, as xboxrun's captures are
- * (hle_disp_read_front), and handed over as XRGB8888; a retro_run with no new
- * frame then shows the last one again. Either way the gamma ramp is in the
- * frame (the render thread bakes it), and RetroArch letterboxes it at the
- * aspect reported here.
+ * Frames use Vulkan when available, otherwise CPU readback as XRGB8888.
+ * If no new frame is ready, the previous frame is shown again. The renderer
+ * applies gamma; RetroArch handles letterboxing using the reported aspect.
  *
- * A standard-definition frame loses its overscan, as a TV hid it, unless the
- * core option says otherwise: 1/30 of its height at the top and bottom and
- * of its width at each side, so the picture keeps its shape and fills a 4:3
- * screen. Titles left that band
- * black (Burnout 3: 16 lines above and below its 448) or kept their HUD
- * clear of it (the title-safe area).
+ * Crop Overscan removes 3/80 of each edge from standard-definition frames.
+ * This gives whole-pixel crops at 640x480 and 720x480 at every render scale
+ * and hides borders such as Burnout 3's 16 black lines at the top and bottom.
  */
 #include "native/libretro/libretro_int.h"
 #include "native/dev/dev.h"
@@ -29,7 +22,8 @@
 #define MAX_H 2160
 
 static struct {
-    uint32_t w, h;           /* the frame shown, without its overscan */
+    uint32_t w, h;           /* cropped frame size */
+    uint32_t fw, fh;         /* original frame size */
     bool have;
     uint32_t *buf;           /* the read-back frame */
     size_t cap;              /* pixels */
@@ -39,13 +33,14 @@ static struct {
     bool full;               /* the overscan shown, not cropped */
 } g_v;
 
-/* As present.c's auto: the frame's own shape, but a standard-definition
- * frame (640x480, 720x480: under 16:10) is shown 4:3, or 16:9 when the
- * console is set to widescreen (the title renders anamorphic into it). */
-static float aspect_of(uint32_t w, uint32_t h)
+/* Match present.c's automatic aspect: SD frames use 4:3 or the console's
+ * 16:9 setting; other frames use their width/height ratio. Adjust for the
+ * cropped size (ow x oh) so rounding does not change pixel proportions. */
+static float aspect_of(uint32_t w, uint32_t h, uint32_t ow, uint32_t oh)
 {
     const float fa = (float)w / (float)h;
-    return fa >= 1.6f ? fa : g_v.widescreen ? 16.0f / 9.0f : 4.0f / 3.0f;
+    const float a = fa >= 1.6f ? fa : g_v.widescreen ? 16.0f / 9.0f : 4.0f / 3.0f;
+    return a * ((float)ow / (float)w) * ((float)h / (float)oh);
 }
 
 void nc_lr_video_reset(void)
@@ -65,7 +60,7 @@ void nc_lr_video_geometry(struct retro_game_geometry *g)
     g->base_height = g_v.have ? g_v.h : 480;
     g->max_width = MAX_W;
     g->max_height = MAX_H;
-    g->aspect_ratio = aspect_of(g->base_width, g->base_height);
+    g->aspect_ratio = g_v.have ? aspect_of(g_v.fw, g_v.fh, g_v.w, g_v.h) : aspect_of(640, 480, 640, 480);
 }
 
 void nc_lr_video_set_crop(bool on)
@@ -76,17 +71,19 @@ void nc_lr_video_set_crop(bool on)
 void nc_lr_overscan(uint32_t w, uint32_t h, uint32_t *cx, uint32_t *cy)
 {
     const bool sd = !g_v.full && (float)w / (float)h < 1.6f;
-    *cx = sd ? w / 30 : 0;
-    *cy = sd ? h / 30 : 0;
+    *cx = sd ? w * 3 / 80 : 0;
+    *cy = sd ? h * 3 / 80 : 0;
 }
 
 void nc_lr_video_size(uint32_t w, uint32_t h, uint32_t ow, uint32_t oh)
 {
-    if (g_v.have && ow == g_v.w && oh == g_v.h) {
+    if (g_v.have && ow == g_v.w && oh == g_v.h && w == g_v.fw && h == g_v.fh) {
         return;
     }
     g_v.w = ow;
     g_v.h = oh;
+    g_v.fw = w;
+    g_v.fh = h;
     g_v.have = true;
     struct retro_game_geometry geo;
     nc_lr_video_geometry(&geo);
