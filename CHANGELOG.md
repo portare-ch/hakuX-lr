@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## linux-v0.17.1 (Linux, aarch64 and x86-64)
+
 ### Fixes
 
 - **Overscan crop preserves the aspect ratio** — Crop Overscan now removes
