@@ -34,7 +34,7 @@ static struct retro_core_option_v2_definition g_defs[OPT_COUNT + 1] = {
         "2"},
     [OPT_CROP] = {
         "hakux_crop_overscan", "Crop Overscan", NULL,
-        "Crops the TV overscan border (1/30 of each edge) to fill a 4:3 screen. Off shows the full frame.",
+        "Removes 3.75% from each edge to hide the TV overscan border. Off shows the full frame.",
         NULL, NULL,
         {{"enabled", "On"}, {"disabled", "Off"}, {NULL, NULL}},
         "enabled"},

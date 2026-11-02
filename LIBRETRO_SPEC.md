@@ -259,14 +259,19 @@ the readiness semaphore; queue family ownership; per-sync-index retention
 (`wait_sync_index`) before an image is overwritten or destroyed; recreation
 when the sync mask or context changes.
 
-Keep the Xbox's gamma ramp (present.c lets the presenter apply it: the export
-pass must), the source size and the aspect; RetroArch letterboxes, so no
-1280 x 960 box in the image. A standard-definition frame loses the overscan
-a TV hid, 1/30 of each side (640 x 480 shows 598 x 448 at 4:3): titles left
-that band black (Burnout 3's 16 lines above and below), and with it the
-picture fills the 4:3 panel (owner's requirement). `context_destroy` stops the core before its
-resources go (section 6); `context_reset` rebuilds them, or stops the content with an
-error.
+Apply the Xbox's gamma ramp in the export pass, as the presenter does in
+present.c. Preserve the source size and aspect ratio; RetroArch handles
+letterboxing, so do not pad the image to 1280 x 960.
+
+With Crop Overscan enabled, remove 3/80 (3.75%) from each edge of a
+standard-definition frame. This gives whole-pixel crops at 640 x 480 and
+720 x 480 at every render scale: 640 x 480 becomes 592 x 444, exactly 4:3.
+It also hides Burnout 3's 16 black lines at the top and bottom. Adjust the
+reported aspect ratio for the crop to preserve pixel proportions when
+rounding is needed, such as with 576-line PAL frames.
+
+`context_destroy` stops the core before its resources are released (section
+6). `context_reset` rebuilds them or stops the content with an error.
 
 CPU readback (`hle_disp_read_front`) is for bring-up and diagnostics only.
 
