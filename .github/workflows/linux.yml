@@ -137,7 +137,7 @@ jobs:
         run: |
           previous=$(git describe --tags --abbrev=0 --match 'linux-v*' --exclude "$GITHUB_REF_NAME" "$GITHUB_SHA" 2>/dev/null || true)
           python3 tools/native/linux-release-notes.py "$VERSION" "$GITHUB_SHA" "$previous" "$RUN_URL" > notes.md
-          title="hakuX $VERSION for Linux (aarch64, x86-64)"
+          title="hakuX-lr $VERSION for Linux (aarch64, x86-64)"
           case "$VERSION" in
             *-exp*) title="$title — experimental" ;;
           esac

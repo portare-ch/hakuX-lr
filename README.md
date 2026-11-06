@@ -5,6 +5,8 @@ AMD64 (x86-64) Linux, with an experimental build for RetroArch on Android. It
 is based on [hakuX](https://github.com/rfandango/hakuX) and comes with
 [PortareOS](https://github.com/portare-ch/portareos) on the Retroid Pocket Nova.
 
+See the [game compatibility list](https://hakuxlr.portareos.org/) for per-title results.
+
 You need your own game images. To play games, you do not need a BIOS,
 MCPX ROM or Xbox hard disk image. hakuX creates its storage when you first
 start a game.

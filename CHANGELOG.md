@@ -2,27 +2,34 @@
 
 ## Unreleased
 
+## linux-v0.20.0 (Linux, aarch64 and x86-64, and Android)
+
 ### What's new
 
-- **DXT textures as ETC2 on GPUs without BC** — Mali (and PowerVR) drivers
-  don't sample BC1-3, so hakuX decoded every DXT texture to A8R8G8B8: four
-  times the bytes for DXT3/5, eight for DXT1, in GPU memory the process
-  doesn't see. Voodoo Vince's first level held 125 MB of textures that way
-  and ran a 1 GB RG DS Plus out of memory. Where the driver samples ETC2,
-  each DXT block is now decoded and encoded again as ETC2 of the same size
-  (DXT1 as RGB, or RGB with punch-through alpha; DXT3/5 as RGBA with EAC
-  alpha), 21 MB for the same level. `HAKUX_HLE_DXT_ETC2=0` (`debug.hakux.dxt_etc2=0`) keeps the
-  decode; `=1` encodes on a GPU with BC too. The caps log line shows
-  `etc2=` and `dxt_etc2=`.
+- **ETC2 textures on GPUs without BC** — Re-encode DXT textures as ETC2
+  instead of expanding to RGBA where ETC2 is supported. Voodoo Vince's
+  first-level textures drop from about 125 MB to 21 MB on a 1 GB RG DS Plus.
+  `HAKUX_HLE_DXT_ETC2=0` disables this; `=1` also enables it on GPUs with BC.
+  Android uses `debug.hakux.dxt_etc2`. Volume textures still expand to RGBA.
+- **Texture-memory budget** — Evict older cached textures above 96 MiB on
+  hosts with at most 1.5 GiB of RAM. Other hosts have no default limit.
+  Set `HAKUX_HLE_TEX_BUDGET_MB` (`debug.hakux.tex_budget_mb` on Android), or
+  use `0` to disable the budget. Textures needed by the current draw are kept.
+- **Compatibility list** — Link the [game compatibility list](https://hakuxlr.portareos.org/)
+  from the README.
 
-- **A budget for texture images** — The push-buffer decoder drops its
-  least recently used textures when their images pass a byte budget, as it
-  did when their table filled (a dropped texture is defined again when a
-  draw next samples it; those the draw being built samples are kept, the
-  budget passed until the frame ends): 96 MB on a host with 1.5 GB of RAM or less, none
-  elsewhere; `HAKUX_HLE_TEX_BUDGET_MB` (`debug.hakux.tex_budget_mb`) sets
-  it, 0 for none. The periodic `hakuX-hle-pb` line shows the textures held
-  and their bytes.
+### Fixes
+
+- Reserve the top 128 KiB of RAM at boot, preventing early heap-guard faults
+  in Conflict: Desert Storm, Desert Storm II, and The Great Escape.
+- Seed the guest page directory and support RAM aliases created from its
+  4 MiB entries, fixing Hitman 2's early heap accesses. Preserve page
+  ownership and dirty tracking when alias tracking fills.
+- Map a zeroed page above each kernel stack, fixing reads past the stack
+  top in Dave Mirra Freestyle BMX 2 and Tomb Raider: Legend.
+- Build `vm-alias-test` before running CTest in clean Linux builds.
+
+A separate intermittent Tomb Raider: Legend heap crash remains under investigation.
 
 ## linux-v0.19.2 (Linux, aarch64 and x86-64, and Android)
 
