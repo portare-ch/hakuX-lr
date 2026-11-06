@@ -56,6 +56,41 @@ static unsigned g_ncontig;
 static pthread_mutex_t g_contig_mu = PTHREAD_MUTEX_INITIALIZER;
 static uint32_t g_gpu_instance_end;
 
+/* Reserve the top 128 KiB at boot: the 64 KiB page-frame database and
+ * 16 GPU instance pages. This keeps early contiguous allocations below
+ * RAM's limit, where some titles write a guard just past their heap. */
+#define TOP_PAD        0x10000u
+#define INSTANCE_PAGES 16u
+static uint32_t g_instance_held;    /* bit i: instance page i (from the lowest) still held */
+
+static uint32_t instance_lo(const NcKernel *k)
+{
+    return k->vm->ram_size - TOP_PAD - INSTANCE_PAGES * NC_PAGE;
+}
+
+bool nc_mm_hold_top(NcKernel *k)
+{
+    g_instance_held = 0;
+    if (!nc_vm_claim_phys(k->vm, instance_lo(k), INSTANCE_PAGES * NC_PAGE + TOP_PAD)) {
+        return false;
+    }
+    g_instance_held = (1u << INSTANCE_PAGES) - 1;
+    return true;
+}
+
+/* Release instance-page reservations needed by a previous title's kept block. */
+static void instance_release(NcKernel *k, uint32_t pa, uint32_t size)
+{
+    const uint32_t lo = instance_lo(k);
+    for (unsigned i = 0; i < INSTANCE_PAGES; i++) {
+        const uint32_t p = lo + i * NC_PAGE;
+        if ((g_instance_held & (1u << i)) && p + NC_PAGE > pa && p < pa + size) {
+            nc_vm_free_phys(k->vm, p, NC_PAGE);
+            g_instance_held &= ~(1u << i);
+        }
+    }
+}
+
 uint32_t nc_mm_contig_end(uint32_t pa)
 {
     uint32_t end = 0;
@@ -1022,6 +1057,9 @@ uint32_t nc_mm_keep_restore(NcKernel *k)
         const uint32_t size = nc_align_up(len ? len : 1, NC_PAGE);
         const bool fits = (va & NC_CONTIG_WINDOW) && pa < k->vm->ram_size && size <= k->vm->ram_size - pa &&
                           g_ncontig < MAX_CONTIG;
+        if (fits) {
+            instance_release(k, pa, size);
+        }
         if (!fits || !nc_vm_claim_phys(k->vm, pa, size) || fread(k->vm->ram + pa, 1, len, fp) != len) {
             nc_log("hakuX-native-mm", "kept memory %08x+%u: not restored", va, len);
             if (fits) {
@@ -1079,19 +1117,27 @@ static uint64_t MmSetAddressProtect(NcKernel *k, NcFrame *f, const uint32_t *a)
     return 0;
 }
 
-/* MmClaimGpuInstanceMemory(NumberOfBytes, NumberOfPaddingBytes): the GPU's
- * instance memory sits at the top of RAM below a 64 KiB pad; the result is
- * the end of that block. */
+/* MmClaimGpuInstanceMemory(Bytes, PaddingBytes) returns the block end
+ * below the 64 KiB pad. Free unused instance pages; UINT32_MAX keeps all. */
 static uint64_t MmClaimGpuInstanceMemory(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
-    const uint32_t pad = 0x10000;
     if (a[1]) {
-        nc_vm_wr32(k->vm, a[1], pad);
+        nc_vm_wr32(k->vm, a[1], TOP_PAD);
     }
     if (!g_gpu_instance_end) {
-        g_gpu_instance_end = k->vm->ram_size - pad;
-        uint32_t size = nc_align_up(a[0], NC_PAGE);
-        nc_vm_claim_phys(k->vm, g_gpu_instance_end - size, size + pad);
+        g_gpu_instance_end = k->vm->ram_size - TOP_PAD;
+        if (a[0] != UINT32_MAX) {
+            const uint32_t size = nc_align_up(a[0], NC_PAGE), pages = size / NC_PAGE;
+            for (unsigned i = 0; i + pages < INSTANCE_PAGES; i++) {
+                if (g_instance_held & (1u << i)) {
+                    nc_vm_free_phys(k->vm, instance_lo(k) + i * NC_PAGE, NC_PAGE);
+                    g_instance_held &= ~(1u << i);
+                }
+            }
+            if (pages > INSTANCE_PAGES) {
+                nc_vm_claim_phys(k->vm, g_gpu_instance_end - size, size - INSTANCE_PAGES * NC_PAGE);
+            }
+        }
     }
     return NC_CONTIG_WINDOW | g_gpu_instance_end;
 }
@@ -1116,7 +1162,7 @@ static uint64_t MmCreateKernelStack(NcKernel *k, NcFrame *f, const uint32_t *a)
 /* MmDeleteKernelStack(StackBase, StackLimit) */
 static uint64_t MmDeleteKernelStack(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
-    decommit(k, a[1], a[0] - a[1]);
+    decommit(k, a[1], a[0] - a[1] + NC_PAGE);   /* include the extra stack page */
     if (a[0] > a[1]) {
         nc_ps_stack_free(k, a[1], a[0] - a[1]);
     }

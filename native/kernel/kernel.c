@@ -435,6 +435,10 @@ bool nc_kernel_init(NcKernel *k, NcVm *vm)
                NC_KERNEL_PA + NC_KERNEL_SIZE);
         return false;
     }
+    if (!nc_mm_hold_top(k)) {
+        nc_log("hakuX-native", "kernel: the top of RAM is taken");
+        return false;
+    }
     uint8_t *km = nc_vm_host(vm, NC_KERNEL_VA);
     memset(km, 0, NC_KERNEL_SIZE);
     memset(km + K_STUBS, 0xCC, K_DATA - K_STUBS);

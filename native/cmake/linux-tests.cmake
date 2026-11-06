@@ -65,6 +65,12 @@ target_include_directories(xdvdfs-test PRIVATE "${NC_REPO}")
 target_link_libraries(xdvdfs-test PRIVATE hakux_native Threads::Threads)
 add_test(NAME xdvdfs-test COMMAND xdvdfs-test)
 set_tests_properties(xdvdfs-test PROPERTIES TIMEOUT 10)
+# Alias-table overflow must preserve page ownership and protection.
+add_executable(vm-alias-test "${NC_REPO}/tests/native/linux/vm_alias.c")
+target_include_directories(vm-alias-test PRIVATE "${NC_REPO}")
+target_link_libraries(vm-alias-test PRIVATE hakux_native Threads::Threads)
+add_test(NAME vm-alias-test COMMAND vm-alias-test)
+set_tests_properties(vm-alias-test PROPERTIES TIMEOUT 10)
 # Exercise NAT with console frames and a fake UPnP router.
 add_executable(nat-smoke "${NC_REPO}/tests/native/linux/nat.c")
 target_link_libraries(nat-smoke PRIVATE hakux_native Threads::Threads)
@@ -95,6 +101,11 @@ if(NC_GUEST_TESTS)
            COMMAND "${Python3_EXECUTABLE}" "${NC_REPO}/tests/native/linux/kernel_mm.py" "$<TARGET_FILE_DIR:xboxrun>"
                    "${CMAKE_C_COMPILER}")
   set_tests_properties(kernel-mm PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
+  # Boot RAM reservations, page-table aliases, and stack padding.
+  add_test(NAME kernel-boot-mem
+           COMMAND "${Python3_EXECUTABLE}" "${NC_REPO}/tests/native/linux/kernel_boot_mem.py" "$<TARGET_FILE_DIR:xboxrun>"
+                   "${CMAKE_C_COMPILER}")
+  set_tests_properties(kernel-boot-mem PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
 endif()
 if(TARGET hakux_libretro)
   # The APU made again in one process (a relaunch), its EP's samples through
