@@ -106,9 +106,9 @@ or `--core` to install a specific release or local build; see
 
 #### AMD64: set up KVM first
 
-The AMD64 build is experimental. It uses Linux KVM to run Xbox code on
-your CPU and requires TSC scaling and UMIP support. AMD Zen 2 and newer
-CPUs meet these requirements; on Intel, KVM can provide UMIP itself.
+The AMD64 build uses Linux KVM to run Xbox code on your CPU and requires
+TSC scaling and UMIP support. AMD Zen 2 and newer CPUs meet these
+requirements; on Intel, KVM can provide UMIP itself.
 
 1. Enable **Intel VT-x** or **AMD SVM / AMD-V** in BIOS/UEFI.
 2. Load the KVM driver: `sudo modprobe kvm_intel` for Intel, or
