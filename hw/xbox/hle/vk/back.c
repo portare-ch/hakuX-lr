@@ -2671,7 +2671,9 @@ int hle_back_start(void)
         }
         return r;
     }
-    /* DXT decoded on the way in (no BC: pbres.c) takes four to eight times the bytes */
+    /* DXT decoded on the way in (no BC: pbres.c) takes four to eight times
+     * the bytes; a DXT volume is decoded even where the rest is encoded as
+     * ETC2, and a level is uploaded whole, so the arena stays 64 MiB */
     const char *what = hle_vk_guest_ram_init() ? "guest RAM" :
                        hle_vk_arena_init(g_hvk.caps.bc ? 32u << 20 : 64u << 20) ? "the upload arena" :
                        hle_vk_land_init(16u << 20) ? "the readback buffer" :
