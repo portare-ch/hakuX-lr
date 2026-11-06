@@ -20,9 +20,9 @@ static uint8_t *g_na;   /* per physical page: no guest access (nc_vm_noaccess), 
  * decode thread closing it again must leave the table as the host has it. */
 static pthread_mutex_t g_prot_lock = PTHREAD_MUTEX_INITIALIZER;
 
-/* Large-PDE RAM aliases stay outside rmap, preserving physical-page
- * ownership. Page protections also apply to each alias. */
-#define MAX_ALIASES 64
+/* Large-PDE RAM aliases stay outside rmap and share page protections.
+ * One slot per PDE covers the full 4 GiB address space. */
+#define MAX_ALIASES 1024
 typedef struct Alias {
     uint32_t va, pa, len;
 } Alias;
@@ -230,9 +230,17 @@ bool nc_vm_map_alias(NcVm *vm, uint32_t va, uint32_t pa, uint32_t len)
     }
     pthread_mutex_unlock(&g_prot_lock);
     if (!room) {
-        nc_log("hakuX-native", "vm: no room for another view of RAM: %08x -> pa %08x mapped as pages", va, pa);
+        /* A normal mapping would overwrite the physical page owner in rmap. */
+        nc_log("hakuX-native", "vm: no room for another view of RAM: %08x -> pa %08x left unmapped", va, pa);
+        return false;
     }
-    return map_range(vm, va, pa, len, room);
+    if (!map_range(vm, va, pa, len, true)) {
+        pthread_mutex_lock(&g_prot_lock);
+        alias_drop(va, len);
+        pthread_mutex_unlock(&g_prot_lock);
+        return false;
+    }
+    return true;
 }
 
 /* Windows and aliases are views, not physical-page owners. */

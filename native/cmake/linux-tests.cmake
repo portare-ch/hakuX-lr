@@ -65,6 +65,12 @@ target_include_directories(xdvdfs-test PRIVATE "${NC_REPO}")
 target_link_libraries(xdvdfs-test PRIVATE hakux_native Threads::Threads)
 add_test(NAME xdvdfs-test COMMAND xdvdfs-test)
 set_tests_properties(xdvdfs-test PROPERTIES TIMEOUT 10)
+# Alias-table overflow must preserve page ownership and protection.
+add_executable(vm-alias-test "${NC_REPO}/tests/native/linux/vm_alias.c")
+target_include_directories(vm-alias-test PRIVATE "${NC_REPO}")
+target_link_libraries(vm-alias-test PRIVATE hakux_native Threads::Threads)
+add_test(NAME vm-alias-test COMMAND vm-alias-test)
+set_tests_properties(vm-alias-test PROPERTIES TIMEOUT 10)
 # Exercise NAT with console frames and a fake UPnP router.
 add_executable(nat-smoke "${NC_REPO}/tests/native/linux/nat.c")
 target_link_libraries(nat-smoke PRIVATE hakux_native Threads::Threads)
