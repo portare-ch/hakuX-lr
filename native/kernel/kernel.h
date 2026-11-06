@@ -386,6 +386,8 @@ uint32_t nc_ex_alloc(NcKernel *k, uint32_t size);
 void nc_ex_free(NcKernel *k, uint32_t p);
 /* mm.c, ex.c, rtl.c */
 void nc_mm_register(NcKernel *k);
+/* Reserve the page-frame database and GPU instance pages at boot. */
+bool nc_mm_hold_top(NcKernel *k);
 void nc_mm_note_image(uint32_t base, uint32_t size);
 void nc_ex_register(NcKernel *k);
 void nc_rtl_register(NcKernel *k);
