@@ -78,20 +78,26 @@ static void list_init(NcVm *vm, uint32_t head)
     nc_vm_wr32(vm, head + 4, head);
 }
 
-/* Stack slots in the kernel stack region, each with an unmapped guard below.
- * A slot given back (a thread's end, MmDeleteKernelStack) is taken again by
- * a stack it holds, what it has over kept as a slot of its own; the region
- * ends at the GPU's view of RAM, where an allocation fails instead of
- * mapping over it (titles start a thread per movie and load). */
+/* Stack slots have an unmapped guard below and a zeroed page above.
+ * Some titles read past StackBase expecting the console's adjacent
+ * system allocation (Dave Mirra 2 and Tomb Raider: Legend). Reuse free
+ * slots, split spare space, and keep the region below the GPU window. */
+#define STACK_OVER NC_PAGE
+
+static uint32_t stack_span(uint32_t size)
+{
+    return STACK_GUARD + nc_align_up(size + STACK_OVER, STACK_GUARD);
+}
+
 bool nc_ps_stack_alloc(NcKernel *k, uint32_t size, uint32_t *base)
 {
     if (!k->next_stack_va) {
         k->next_stack_va = STACK_REGION;
     }
-    const uint32_t span = STACK_GUARD + nc_align_up(size, STACK_GUARD);
+    const uint32_t span = stack_span(size);
     for (unsigned i = 0; i < k->nstack_free; i++) {
         const uint32_t va = k->stack_free[i].va, have = k->stack_free[i].span;
-        if (have < span || !nc_vm_alloc_at(k->vm, va + STACK_GUARD, size, NULL)) {
+        if (have < span || !nc_vm_alloc_at(k->vm, va + STACK_GUARD, size + STACK_OVER, NULL)) {
             continue;
         }
         k->stack_free[i] = k->stack_free[--k->nstack_free];
@@ -100,6 +106,7 @@ bool nc_ps_stack_alloc(NcKernel *k, uint32_t size, uint32_t *base)
             k->stack_free[k->nstack_free++].span = have - span;
         }
         *base = va + STACK_GUARD;
+        memset(nc_vm_host(k->vm, *base + size), 0, STACK_OVER);
         return true;
     }
     const uint32_t slot = k->next_stack_va;
@@ -107,17 +114,18 @@ bool nc_ps_stack_alloc(NcKernel *k, uint32_t size, uint32_t *base)
         nc_log("hakuX-native", "ps: the stack region is full (%u KiB more asked)", size >> 10);
         return false;
     }
-    if (!nc_vm_alloc_at(k->vm, slot + STACK_GUARD, size, NULL)) {
+    if (!nc_vm_alloc_at(k->vm, slot + STACK_GUARD, size + STACK_OVER, NULL)) {
         return false;
     }
     k->next_stack_va = slot + span;
     *base = slot + STACK_GUARD;
+    memset(nc_vm_host(k->vm, *base + size), 0, STACK_OVER);
     return true;
 }
 
 void nc_ps_stack_free(NcKernel *k, uint32_t base, uint32_t size)
 {
-    const uint32_t slot = base - STACK_GUARD, span = STACK_GUARD + nc_align_up(size, STACK_GUARD);
+    const uint32_t slot = base - STACK_GUARD, span = stack_span(size);
     if (base < STACK_REGION + STACK_GUARD || base % STACK_GUARD || !size || span > k->next_stack_va - slot ||
         k->nstack_free == sizeof(k->stack_free) / sizeof(k->stack_free[0])) {
         return;     /* not a slot of the region, or no room to keep it: its addresses stay used */
@@ -462,7 +470,7 @@ void nc_ps_schedule(NcKernel *k, NcFrame *f)
         /* Off its stack for good: the pages go back (titles start threads per
          * movie and load), the slot can hold a new thread. Its ETHREAD stays,
          * signaled, for whoever still holds a handle. */
-        const uint32_t end = cur->stack_base + (cur->tib_base ? 0 : NC_PAGE);  /* nc_ps_old_stacks's page */
+        const uint32_t end = cur->stack_base + STACK_OVER;  /* extra page, including legacy padding */
         for (uint32_t p = cur->stack_limit; p < end; p += NC_PAGE) {
             const uint32_t pa = nc_vm_phys(k->vm, p);
             if (pa != UINT32_MAX) {
