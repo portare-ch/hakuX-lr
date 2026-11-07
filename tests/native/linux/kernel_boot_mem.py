@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (C) 2026-present PortareOS
+# SPDX-License-Identifier: GPL-2.0-or-later
 """Run the boot memory regression test on xboxrun.
 
 Assembles kernel_boot_mem.s for i386 with clang and ld.lld; skips (exit 77) if

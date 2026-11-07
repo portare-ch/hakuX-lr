@@ -1,5 +1,6 @@
 #!/bin/sh
 # Copyright (C) 2026-present PortareOS
+# SPDX-License-Identifier: GPL-2.0-or-later
 # Sets up RetroArch with hakuX-lr for testing on an ARM64 or AMD64 Linux
 # machine, then writes start-hakux.sh, which starts games with it.
 #

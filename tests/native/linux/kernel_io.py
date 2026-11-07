@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (C) 2026-present PortareOS
+# SPDX-License-Identifier: GPL-2.0-or-later
 """Runs kernel_io.s, a guest test of the kernel's queues, I/O completion
 ports, IRPs and drivers, on xboxrun: assembled for i386 by clang and linked
 by ld.lld at the synthetic disc's code address (check.py's disc). Exit 77

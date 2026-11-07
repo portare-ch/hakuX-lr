@@ -1,4 +1,5 @@
 /* Copyright (C) 2026-present PortareOS */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* The VP's vector paths against scalar models of their arithmetic, bit for
  * bit: the mix (vp/mix_inline.h) and the HRTF filter's dot product
  * (vp/hrtf.h), NEON's and AVX2's fused multiply-adds against fmaf in NEON's

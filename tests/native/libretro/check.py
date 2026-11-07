@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (C) 2026-present PortareOS
+# SPDX-License-Identifier: GPL-2.0-or-later
 """Check the libretro core: its exports, its info, and a synthetic title run through it."""
 import argparse
 import os

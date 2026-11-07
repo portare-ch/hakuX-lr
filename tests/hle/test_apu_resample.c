@@ -1,4 +1,5 @@
 /* Copyright (C) 2026-present PortareOS */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* The voices' resamplers (native/dev/apu/vp/resample.h) measured: linear,
  * and band-limited sinc (resample_sinc.c; AArch64 and x86-64, there at each
  * vector level the host has). Their

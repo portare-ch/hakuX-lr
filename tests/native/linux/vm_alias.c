@@ -1,4 +1,5 @@
 /* Copyright (C) 2026-present PortareOS */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* Alias overflow must reject new mappings without changing physical-page
  * ownership or protection. */
 #include "native/core/vm.h"

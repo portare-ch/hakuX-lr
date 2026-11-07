@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Host test of native/kernel/rtl_text.c, the runtime library's string,
  * number and formatted-output routines (RtlCharToInteger, RtlIntegerToChar,

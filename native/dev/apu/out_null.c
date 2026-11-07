@@ -1,4 +1,5 @@
 /* Copyright (C) 2026-present PortareOS */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* Paced silent output for Linux diagnostics. The emulated APU stays active.
  * NC_AUDIO_DUMP=<file>: the mixed output is also written there, raw 48 kHz
  * 16-bit stereo little-endian (ffmpeg -f s16le -ar 48000 -ac 2 -i <file>). */

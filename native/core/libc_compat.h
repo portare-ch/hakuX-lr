@@ -1,4 +1,5 @@
 /* Copyright (C) 2026-present PortareOS */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* Compatibility functions for older glibc versions.
  * AMD64 releases target Ubuntu 22.04 (glibc 2.35).
  * Newer glibc and Android's bionic use their own implementations. */

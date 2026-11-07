@@ -1,4 +1,5 @@
 /* Copyright (C) 2026-present PortareOS */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* Guest test of the kernel's queues, I/O completion ports, IRPs and drivers
  * (a driver with StartIo and completion routines, IRPs to \Device\CdRom0),
  * thread notify routines and RtlSprintf, run by kernel_io.py. Linked at
