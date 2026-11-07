@@ -47,9 +47,9 @@ Back up your [saves](#saves) before changing versions.
 
 ### RetroArch on other Linux systems
 
-Install 64-bit RetroArch and zlib. Vulkan 1.3 is recommended; Vulkan 1.2
-works through a compatibility path, which may be slower. The Vulkan loader
-(`libvulkan.so.1`) must be version 1.3 or newer.
+Install 64-bit RetroArch and zlib. Vulkan 1.4 is recommended; 1.3 is
+also supported, and 1.2 works through a compatibility path that may be
+slower. The Vulkan loader (`libvulkan.so.1`) must support 1.3 or newer.
 
 The ARM64 core requires glibc 2.38+ and GCC 13's libstdc++. The AMD64 core
 requires glibc 2.35+ and GCC 11's libstdc++ (Ubuntu 22.04, Debian 12 or
@@ -145,7 +145,8 @@ KVM is ready, follow the
 
 The Android build is experimental and has seen little testing on devices.
 It needs a 64-bit (arm64-v8a) device with Android 9 or newer, a GPU driver
-with Vulkan 1.2 or newer (1.3 recommended), and RetroArch from the Play Store
+with Vulkan 1.2 or newer (1.4 recommended, 1.3 supported), and RetroArch
+from the Play Store
 or [retroarch.com](https://www.retroarch.com/?page=platforms).
 
 1. Download `hakux-<version>-android-arm64.zip` from the

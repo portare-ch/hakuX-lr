@@ -132,6 +132,7 @@ typedef struct HlePshKey {
     uint8_t zclamp;                     /* a DOT_ZW draw's ZCLAMP_EN: its depth clamped to
                                            the range, else a fragment outside it rejected
                                            (0 for every other draw: no split key) */
+    uint8_t poly_smooth;                /* Smooth triangle edges using barycentric coverage. */
 } HlePshKey;
 #define HLE_PSH_RECT 0x10u              /* HlePshKey.vol: a linear texture kept to its size */
 

@@ -43,14 +43,13 @@ static struct {
 
 static const VkApplicationInfo *application_info(void)
 {
-    static const VkApplicationInfo app = {
+    static VkApplicationInfo app = {
         .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
         .pApplicationName = "hakuX",
         .pEngineName = "hakuX",
-        /* RetroArch requires a 1.3 loader for this instance version.
-         * Vulkan 1.2 devices use vk/compat.c. */
-        .apiVersion = VK_API_VERSION_1_3,
     };
+    /* Match the Vulkan loader's supported API version. */
+    app.apiVersion = hle_vk_instance_version();
     return &app;
 }
 
