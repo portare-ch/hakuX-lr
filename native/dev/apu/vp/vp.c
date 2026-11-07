@@ -156,6 +156,7 @@ static void voice_reset_filters(MCPXAPUState *d, uint16_t v)
     d->vp.filters[v].dls2_set = false;
     d->vp.filters[v].peq_set = false;
     d->vp.filters[v].gains = false;
+    d->vp.filters[v].pitched = false;
     memset(&d->vp.filters[v].lfo_phase, 0, sizeof(d->vp.filters[v].lfo_phase));
     d->vp.filters[v].lfo_armed = false;
     d->vp.filters[v].ending = false;
@@ -1705,9 +1706,10 @@ static long voice_resample_callback(void *cb_data, float **data)
     return sample_count;
 }
 
+/* Hardware mode takes one 16.16 step per sample. Other modes use rate. */
 static int voice_resample(MCPXAPUState *d, uint8_t *c, uint16_t v,
                           float samples[][2],
-                          int requested_num, float rate)
+                          int requested_num, float rate, const uint32_t *steps)
 {
     assert(v < MCPX_HW_MAX_VOICES);
     MCPXAPUVoiceFilter *filter = &d->vp.filters[v];
@@ -1727,8 +1729,8 @@ static int voice_resample(MCPXAPUState *d, uint8_t *c, uint16_t v,
      * signature we cannot extend), for the synchronous duration of
      * vp_resample_read. */
     filter->cb_voice_cache = c;
-    int count = vp_resample_read(filter->resampler, rate, requested_num,
-                                 (float *)samples);
+    int count = vp_resample_read_steps(filter->resampler, steps, rate, requested_num,
+                                       (float *)samples);
     filter->cb_voice_cache = NULL;
     if (count == -1) {
         DPRINTF("resample error\n");
@@ -1833,6 +1835,18 @@ static void voice_process(MCPXAPUState *d, uint8_t *c,
     double pitch = p + ps * 32.0 * ef_value + lfo_pitch;
     float rate = 1.0 / powf(2.0f, pitch / 4096.0f);
 
+    /* Ramp in log-pitch units. A 0 to -0x1000 ramp advanced 23 samples
+     * on hardware. */
+    MCPXAPUVoiceFilter *vfl = &d->vp.filters[v];
+    double pitch_from = vfl->pitched ? vfl->pitch : pitch;
+    uint32_t steps[NUM_SAMPLES_PER_FRAME];
+    for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
+        double p_i = pitch_from + (pitch - pitch_from) * i / 32.0;
+        steps[i] = exp2(p_i / 4096.0) * 65536.0;
+    }
+    vfl->pitch = pitch;
+    vfl->pitched = true;
+
     float ea_value = voice_step_envelope(
         d, c, v, NV_PAVS_VOICE_CFG_ENV0, NV_PAVS_VOICE_CFG_ENVA,
         NV_PAVS_VOICE_TAR_LFO_ENV, NV_PAVS_VOICE_TAR_LFO_ENV_EA_RELEASERATE,
@@ -1876,7 +1890,8 @@ static void voice_process(MCPXAPUState *d, uint8_t *c,
             }
             int count =
                 voice_resample(d, c, v, &samples[sample_count],
-                               NUM_SAMPLES_PER_FRAME - sample_count, rate);
+                               NUM_SAMPLES_PER_FRAME - sample_count, rate,
+                               &steps[sample_count]);
             if (count < 0) {
                 break;
             }
@@ -2072,7 +2087,6 @@ static void voice_process(MCPXAPUState *d, uint8_t *c,
     int8_t fc_scale = voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_CFG_ENV1,
                                             NV_PAVS_VOICE_CFG_ENV1_EF_FCSCALE);
     double fc_bend = fc_scale * 256.0 * ef_value + lfo_cutoff;
-    MCPXAPUVoiceFilter *vfl = &d->vp.filters[v];
 
     if (lpf) {
         for (int ch = 0; ch < 2; ch++) {
@@ -2875,7 +2889,8 @@ void mcpx_apu_vp_init(MCPXAPUState *d)
     /* The voices' resampler quality: the content's (g_apu_config.resampler),
      * for the session; each voice's is made at its first VOICE_ON
      * (voice_reset_filters) */
-    const int quality = vp_resample_sinc_available() ? g_apu_config.resampler : VP_RESAMPLE_LINEAR;
+    const int quality = g_apu_config.resampler == VP_RESAMPLE_SINC && !vp_resample_sinc_available()
+                            ? VP_RESAMPLE_LINEAR : g_apu_config.resampler;
     if (quality != g_apu_config.resampler) {
         nc_log("hakuX-apu", "resampler: %s not in this build, %s", vp_resample_name(g_apu_config.resampler),
                vp_resample_name(quality));

@@ -515,6 +515,77 @@ static void test_levels_agree(void)
 }
 #endif
 
+/* ---- hardware: the Xbox's 8-point Lagrange interpolation (xemu #3105) */
+static float g_hw_in[256][2];
+static int g_hw_pos;
+static float g_hw_frame[32 * 2];
+
+static long hw_cb(void *cb_data, float **data)
+{
+    (void)cb_data;
+    for (int i = 0; i < 32; i++) {
+        const int k = g_hw_pos + i;
+        g_hw_frame[2 * i] = k < 256 ? g_hw_in[k][0] : 0.0f;
+        g_hw_frame[2 * i + 1] = k < 256 ? g_hw_in[k][1] : 0.0f;
+    }
+    g_hw_pos += 32;
+    *data = g_hw_frame;
+    return 32;
+}
+
+static void hw_read(const uint32_t step, int n, float out[][2])
+{
+    uint32_t steps[256];
+    for (int i = 0; i < n; i++) {
+        steps[i] = step;
+    }
+    g_hw_pos = 0;
+    VpResampler *r = vp_resample_new(hw_cb, VP_RESAMPLE_HARDWARE, 2, NULL);
+    HT_CHECK(r && vp_resample_quality(r) == VP_RESAMPLE_HARDWARE);
+    HT_EQ_INT(vp_resample_read_steps(r, steps, 1.0, n, &out[0][0]), n);
+    vp_resample_delete(r);
+}
+
+static void test_hardware(void)
+{
+    HT_EQ_INT(vp_resample_quality_named("hardware"), VP_RESAMPLE_HARDWARE);
+    HT_EQ_INT(vp_resample_quality_named("sinc"), VP_RESAMPLE_SINC);
+    HT_EQ_INT(vp_resample_quality_named("linear"), VP_RESAMPLE_LINEAR);
+    HT_EQ_INT(vp_resample_quality_named("cubic"), -1);
+    /* whole steps: the input itself, from its first frame */
+    static float out[256][2];
+    for (int k = 0; k < 256; k++) {
+        g_hw_in[k][0] = (k % 17) / 17.0f - 0.5f;
+        g_hw_in[k][1] = -g_hw_in[k][0] * 0.25f;
+    }
+    hw_read(0x10000, 64, out);
+    HT_CHECK(memcmp(out, g_hw_in, sizeof(float[64][2])) == 0);
+    /* half steps through an impulse at frame 10: the measured weights at
+     * half a sample, 1225, -245, 49 and -5 / 2048 each side */
+    memset(g_hw_in, 0, sizeof(g_hw_in));
+    g_hw_in[10][0] = 1.0f;
+    hw_read(0x8000, 48, out);
+    static const float half[4] = {1225 / 2048.0f, -245 / 2048.0f, 49 / 2048.0f, -5 / 2048.0f};
+    for (int n = 0; n < 48; n++) {
+        float want = 0.0f;
+        if (n == 20) {
+            want = 1.0f;
+        } else if (n & 1) {
+            const int d = n < 20 ? (20 - n) / 2 : (n - 21) / 2;     /* 9.5, 10.5: 0 */
+            want = d < 4 ? half[d] : 0.0f;
+        }
+        HT_CHECK(fabsf(out[n][0] - want) < 1e-7f && out[n][1] == 0.0f);
+    }
+    /* DC through thirds of a sample: unity within the weights' rounding */
+    for (int k = 0; k < 256; k++) {
+        g_hw_in[k][0] = g_hw_in[k][1] = 0.5f;
+    }
+    hw_read(0x5555, 96, out);
+    for (int n = 16; n < 96; n++) {
+        HT_CHECK(fabsf(out[n][0] - 0.5f) < 1e-4f && fabsf(out[n][1] - 0.5f) < 1e-4f);
+    }
+}
+
 static void run_suite(void)
 {
     HT_RUN(test_passband_22k);
@@ -529,6 +600,7 @@ static void run_suite(void)
     HT_RUN(test_extremes);
     HT_RUN(test_rate);
     HT_RUN(test_reuse);
+    HT_RUN(test_hardware);
 }
 
 int main(int argc, char **argv)

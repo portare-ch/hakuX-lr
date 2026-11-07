@@ -55,6 +55,8 @@ typedef struct MCPXAPUVoiceFilter {
     bool gains;                 /* previous gains valid */
     uint16_t lfo_phase[2], lfo_wait[2];     /* LFO phases and remaining delays */
     bool lfo_armed;             /* LFO delays initialized */
+    float pitch;                /* last frame's pitch (4096ths of an octave) */
+    bool pitched;               /* previous pitch valid */
     HrtfFilter hrtf;
     /* The voice table for voice_resample_callback (the resampler's callback
      * signature cannot be extended). Set by voice_resample before
