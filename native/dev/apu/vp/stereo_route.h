@@ -166,13 +166,24 @@ static inline void vp_stereo_gains(const int bin[VP_SENDS], const float att[VP_S
 
 /* The voice's frame into the speakers by its gains (vp_stereo_gains), added
  * to out: a mono voice's one channel, a stereo voice's two, a 3D voice's
- * ears and room path (ears, room: NULL without). */
-static inline void vp_stereo_mix(float out[NUM_SAMPLES_PER_FRAME][2],
-                                 const float in[NUM_SAMPLES_PER_FRAME][2],
-                                 const float (*ears)[2], const float *room,
-                                 const float g[2][VP_SOURCES], unsigned channels)
+ * ears and room path (ears, room: NULL without). The gains move from
+ * the last frame's (from) to this frame's (to) across the frame, sample i
+ * i/32 of the way, as the routes' gains do in the mix bins (without
+ * their rounding to 1/16384). */
+static inline void vp_stereo_mix_ramp(float out[NUM_SAMPLES_PER_FRAME][2],
+                                      const float in[NUM_SAMPLES_PER_FRAME][2],
+                                      const float (*ears)[2], const float *room,
+                                      const float from[2][VP_SOURCES],
+                                      const float to[2][VP_SOURCES], unsigned channels)
 {
     for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
+        const float t = i / (float)NUM_SAMPLES_PER_FRAME;
+        float g[2][VP_SOURCES];
+        for (int o = 0; o < 2; o++) {
+            for (int s = 0; s < VP_SOURCES; s++) {
+                g[o][s] = from[o][s] + (to[o][s] - from[o][s]) * t;
+            }
+        }
         float l = g[0][0] * in[i][0], r = g[1][0] * in[i][0];
         if (channels == 2) {
             l += g[0][1] * in[i][1];
@@ -189,6 +200,15 @@ static inline void vp_stereo_mix(float out[NUM_SAMPLES_PER_FRAME][2],
         out[i][0] += l;
         out[i][1] += r;
     }
+}
+
+/* Mix with constant gains. */
+static inline void vp_stereo_mix(float out[NUM_SAMPLES_PER_FRAME][2],
+                                 const float in[NUM_SAMPLES_PER_FRAME][2],
+                                 const float (*ears)[2], const float *room,
+                                 const float g[2][VP_SOURCES], unsigned channels)
+{
+    vp_stereo_mix_ramp(out, in, ears, room, g, g, channels);
 }
 
 #endif

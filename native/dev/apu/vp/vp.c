@@ -2228,20 +2228,23 @@ static void voice_process(MCPXAPUState *d, uint8_t *c,
          * with its bin's headroom, as the mix-bin path above. The route is
          * its sound's, chosen at the first frame with an audible send. */
         if (!multipass && voice_list != NV1BA0_PIO_SET_ANTECEDENT_VOICE_LIST_MP_TOP - 1) {
-            float att[VP_SENDS];
+            float att[VP_SENDS], att_from[VP_SENDS];
             uint8_t shift[VP_SENDS];
             for (int b = 0; b < VP_SENDS; b++) {
                 att[b] = route_to[b] / 16384.0f;    /* the envelope's level included */
+                att_from[b] = route_from[b] / 16384.0f;
                 shift[b] = d->vp.submix_headroom[bin[b]];
             }
             if (d->vp.route[v] == VP_ROUTE_UNDECIDED) {
                 d->vp.route[v] = (uint8_t)vp_stereo_classify(bin, att);
             }
             if (d->vp.route[v] == VP_ROUTE_SPEAKERS) {
-                float g2[2][VP_SOURCES];
-                vp_stereo_gains(bin, att, shift, channels, three_d, i3dl2, 1.0f, g2);
-                vp_stereo_mix(sample_buf, samples, three_d ? (const float (*)[2])ears : NULL,
-                              i3dl2 ? room : NULL, g2, channels);
+                /* Ramp the monitor gain like the mix-bin gains. */
+                float g_from[2][VP_SOURCES], g_to[2][VP_SOURCES];
+                vp_stereo_gains(bin, att_from, shift, channels, three_d, i3dl2, 1.0f, g_from);
+                vp_stereo_gains(bin, att, shift, channels, three_d, i3dl2, 1.0f, g_to);
+                vp_stereo_mix_ramp(sample_buf, samples, three_d ? (const float (*)[2])ears : NULL,
+                                   i3dl2 ? room : NULL, g_from, g_to, channels);
                 return;
             }
         }
@@ -2268,20 +2271,20 @@ static void voice_process(MCPXAPUState *d, uint8_t *c,
             mp_bin = peek_ahead_multipass_bin(d, c, v, &mp_dst_voice);
         }
 
-        /* the routes' gains as the mix bins take them (the envelope's
-         * level included, a 3D voice's HRTF routes silent without an
-         * entry) */
-        float g = 0.0f;
+        /* Apply the same route-gain ramps to the fallback mix. */
+        float g = 0.0f, g_from = 0.0f;
         for (int b = 0; b < 8; b++) {
             if (bin[b] == mp_bin) {
                 continue;
             }
             float hr = 1 << d->vp.submix_headroom[bin[b]];
             g = fmax(g, route_to[b] / 16384.0f / hr);
+            g_from = fmax(g_from, route_from[b] / 16384.0f / hr);
         }
         for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
-            sample_buf[i][0] += g*samples[i][0];
-            sample_buf[i][1] += g*samples[i][1];
+            const float gi = g_from + (g - g_from) * (i / 32.0f);
+            sample_buf[i][0] += gi*samples[i][0];
+            sample_buf[i][1] += gi*samples[i][1];
         }
     }
 }
