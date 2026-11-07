@@ -1790,9 +1790,14 @@ static void get_multipass_samples(MCPXAPUState *d, uint8_t *c,
     int mp_bin = voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_CFG_FMT,
                                 NV_PAVS_VOICE_CFG_FMT_MULTIPASS_BIN);
 
+    /* Scale 24-bit multipass input by 2^headroom to undo the bin's headroom. */
+    int headroom = voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_CFG_FMT,
+                                         NV_PAVS_VOICE_CFG_FMT_HEADROOM);
     for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
-        samples[i][0] = mixbins[mp_bin][i];
-        samples[i][1] = mixbins[mp_bin][i];
+        float x = floorf(mixbins[mp_bin][i] * 8388608.0f + 0.5f);
+        x = fminf(fmaxf(x, -8388608.0f), 8388607.0f) / 8388608.0f;
+        samples[i][0] = ldexpf(x, headroom);
+        samples[i][1] = samples[i][0];
     }
 
     // DirectSound sets clear mix to true
