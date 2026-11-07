@@ -955,7 +955,9 @@ static void test_precision_mode(void)
 {
     uint32_t rs[HLE_PS_REGS] = { 0 };
     HlePshKey k;
-    HT_EQ_U32(offsetof(HlePshKey, precise) + 1, offsetof(HlePshKey, ckey_col));
+    HT_EQ_U32(sizeof(HlePshKey), 216);
+    HT_EQ_U32(offsetof(HlePshKey, precise), offsetof(HlePshKey, fb_op) + sizeof(uint16_t));
+    HT_EQ_U32(offsetof(HlePshKey, fb_const), 208);
     hle_psh_set_precision(false);
     hle_psh_key(rs, &k);
     HT_EQ_U32(k.precise, 0);

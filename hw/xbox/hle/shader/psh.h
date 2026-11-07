@@ -102,7 +102,6 @@ typedef struct HlePshKey {
      * 3 4444), alpha included where the format has one (ckey_alpha, a bit a
      * stage; an X format's is not compared). */
     uint8_t ckey, ckey_bits, ckey_alpha;
-    uint8_t precise;                    /* Round combiner stages to 9-bit registers. */
     uint32_t ckey_col[4];               /* SET_COLOR_KEY_COLOR per stage (D3DCOLOR) */
     /* The NV2A's convolution filters (CONVOLUTION_2D_LOD0), 2 bits a stage:
      * conv the kernel (1 quincunx, 2 gaussian 3 x 3), conv_mm where it
@@ -123,6 +122,7 @@ typedef struct HlePshKey {
      * dithers the result, as the NV2A dithers what the blend leaves. */
     uint8_t fblend;
     uint16_t fb_src, fb_dst, fb_op;
+    uint8_t precise;                    /* Reuse padding; keep the shader key size stable. */
     uint32_t fb_const;
     /* SET_ANTI_ALIASING_CONTROL on an antialiased target, which is emulated
      * as an image aa_grid's times as large (bits 0-1 xs, 2-3 ys; 0: no
