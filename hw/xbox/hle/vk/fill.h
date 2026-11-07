@@ -30,7 +30,8 @@ static inline unsigned hle_fill_mode(uint32_t v)
 
 /* A pipeline has one polygon mode: a triangle draw whose front and back faces
  * are filled differently is recorded twice when neither kind is culled, once
- * for each (the other culled). */
+ * for each (the other culled), the front faces first (not in the guest's
+ * primitive order). */
 static inline bool hle_fill_split(unsigned topo, uint32_t front, uint32_t back, unsigned cull)
 {
     return topo == HLE_TOPO_TRIS && cull == HLE_CULL_NONE &&

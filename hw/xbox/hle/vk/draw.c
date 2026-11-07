@@ -2343,15 +2343,29 @@ static bool dyn_kept(VkDynamicState d)
     }
 }
 
+/* The device features key's pipeline needs: the draw sets those bits only
+ * with them, but the record is shared by sessions whose debug.hakux.caps
+ * turns fillmodes, smoothlines or bary off */
+static bool key_supported(const PipeKey *k)
+{
+    const HleCaps *c = &g_hvk.caps;
+    return ((k->raster & 3) == VK_POLYGON_MODE_FILL || c->fill_modes) &&
+           (!(k->raster & 4) || c->smooth_lines) && (!k->psh || !k->pk.poly_smooth || c->bary);
+}
+
 /* key's pipeline: GLSL from the key (and the vertex program's tokens),
  * SPIR-V, the Vulkan pipeline. No render-thread state: the workers and the
  * prebuild run it too. cache_only: SPIR-V from the disk cache and the
- * pipeline from the driver's cache, HLE_PB_COMPILE when either would compile. */
+ * pipeline from the driver's cache, HLE_PB_COMPILE when either would compile.
+ * HLE_PB_UNSUPPORTED for a recorded key this device's features can't build. */
 static HlePbResult pipeline_build(const void *key, const uint32_t *tok, uint32_t nslots,
                                   bool cache_only, VkPipeline *out)
 {
     const PipeKey *k = key;
     *out = VK_NULL_HANDLE;
+    if (!key_supported(k)) {
+        return HLE_PB_UNSUPPORTED;
+    }
     if (cache_only && !g_hvk.caps.cache_control) {
         return HLE_PB_COMPILE;
     }
@@ -4348,8 +4362,12 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
      * approximation: the blend factors scale the dither). Not the signed
      * equations, below: with ONE / ONE the shader does them and dithers
      * their result (sblend reads the target by fbfetch's 0x10 as well, so
-     * that bit doesn't tell the two apart) */
-    if (k.blend_en && s->psh && k.pk.dither && k.op != 0xF005 && k.op != 0xF006) {
+     * that bit doesn't tell the two apart). Smoothed lines blend after the
+     * shader too: Vulkan's coverage multiplies the shader's alpha, too late
+     * for a blend in the shader. (The signed equations' ONE / ONE doesn't
+     * read alpha; only the alpha written differs.) */
+    const bool vk_cov = lsmooth && g_hvk.caps.smooth_lines;
+    if (k.blend_en && s->psh && k.pk.dither && k.op != 0xF005 && k.op != 0xF006 && !vk_cov) {
         if (dither_blend(s, rt_id)) {
             const bool cst = (k.src >= 0x8001 && k.src <= 0x8004) ||
                              (k.dst >= 0x8001 && k.dst <= 0x8004);
@@ -4967,7 +4985,11 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
     /* Front and back faces in fill modes of their own (D3D's BACKFILLMODE):
      * a pipeline has one polygon mode, so with neither kind culled the draw
      * is recorded for the front faces (the back ones culled), then for the
-     * back ones; with one kind culled, once in the other's mode. */
+     * back ones; with one kind culled, once in the other's mode. An
+     * approximation: all front faces come before all back faces, not in the
+     * guest's order, so where they overlap without a depth test that decides
+     * (depth test off, equal depths, blending or stencil counting), the
+     * later pass's faces show where the NV2A's later primitive would. */
     uint32_t fmode, bmode;
     fill_regs(g_dr.st.rs, &fmode, &bmode);
     if (g_dr.ready && g_dr.st_valid && g_hvk.caps.fill_modes &&
