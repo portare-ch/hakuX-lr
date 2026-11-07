@@ -14,7 +14,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if defined(__GLIBC__) && !__GLIBC_PREREQ(2, 36)
+/* __GLIBC_PREREQ only under __GLIBC__: elsewhere (bionic) the preprocessor
+ * still parses a #if's whole expression */
+#ifdef __GLIBC__
+#if !__GLIBC_PREREQ(2, 36)
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/random.h>
@@ -68,7 +71,7 @@ static inline uint32_t arc4random_uniform(uint32_t upper)
 }
 #endif
 
-#if defined(__GLIBC__) && !__GLIBC_PREREQ(2, 38)
+#if !__GLIBC_PREREQ(2, 38)
 /* src's length; at most size - 1 bytes of it copied, terminated */
 static inline size_t strlcpy(char *dst, const char *src, size_t size)
 {
@@ -80,6 +83,7 @@ static inline size_t strlcpy(char *dst, const char *src, size_t size)
     }
     return n;
 }
+#endif
 #endif
 
 #endif
