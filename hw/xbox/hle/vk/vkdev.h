@@ -108,6 +108,12 @@ typedef struct HleCaps {
     bool wide_lines;            /* enabled when present: lines as wide as SET_LINE_WIDTH
                                    times the resolution scale (vk/draw.c), else 1.0
                                    (Turnip on the Adreno 650 has none) */
+    bool fill_modes;            /* fillModeNonSolid: SET_FRONT / BACK_POLYGON_MODE's
+                                   points and lines (vk/draw.c), else filled */
+    bool smooth_lines;          /* VK_KHR / EXT_line_rasterization's smoothLines: line
+                                   smoothing (RADV; Turnip has none: aliased) */
+    bool bary;                  /* fragmentShaderBarycentric: polygon smoothing's
+                                   coverage (shader/psh.c; Turnip has none) */
     bool cache_control;         /* pipelineCreationCacheControl: a pipeline asked of the
                                    cache only (vk/draw.c, asynchronous builds) */
     bool swapchain;             /* the Android surface and VK_KHR_swapchain: the window's

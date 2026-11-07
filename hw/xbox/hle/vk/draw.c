@@ -23,6 +23,7 @@
 #include "hw/xbox/hle/shader/vsh.h"
 #include "hw/xbox/hle/vk/back_int.h"
 #include "hw/xbox/hle/vk/batch.h"
+#include "hw/xbox/hle/vk/fill.h"
 #include "hw/xbox/hle/vk/quirks.h"
 #include "hw/xbox/hle/vk/guest_ram.h"
 #include "hw/xbox/hle/vk/pcache.h"
@@ -51,6 +52,10 @@ enum {
     RS_NORMALIZENORMALS = 142, RS_FOGCOLOR = 138, RS_ZENABLE = 143, RS_STENCILENABLE = 144,
     RS_STENCILFAIL = 145, RS_FRONTFACE = 146, RS_CULLMODE = 147, RS_TEXTUREFACTOR = 148,
     RS_SHADOWFUNC = 156, RS_LINEWIDTH = 157,
+    /* SET_FRONT / BACK_POLYGON_MODE (0x1B00 points, 0x1B01 lines, 0x1B02 fill);
+     * SET_LINE_SMOOTH_ENABLE (bit 0) and SET_POLY_SMOOTH_ENABLE (bit 1), HLE's
+     * encoding (pb/kelvin.c) */
+    RS_FILLMODE = 139, RS_BACKFILLMODE = 140, RS_EDGEANTIALIAS = 151,
     /* polygon offset (ZBias writes these: slope -0.25 * bias, offset -bias) */
     RS_ZSLOPESCALE = 77, RS_ZOFFSET = 78, RS_POINTOFFSETENABLE = 79,
     RS_WIREFRAMEOFFSETENABLE = 80, RS_SOLIDOFFSETENABLE = 81,
@@ -2104,6 +2109,10 @@ typedef struct PipeKey {
     HleVshKey vk;
     uint32_t psh;                       /* 1 = register combiners (pk), else FF stages */
     HlePshKey pk;
+    /* bits 0-1 the polygon mode (VkPolygonMode: a triangle draw's fill mode),
+     * bit 2 smooth lines; in the padding before vi (its offset unchanged, so
+     * recorded keys, whose padding is 0, are filled, unsmoothed draws) */
+    uint8_t raster;
     /* Last, 8-aligned: on a device with dynamic vertex input the key ends
      * before it (g_key_bytes), its bytes, hash and record as they were */
     ViKey vi;
@@ -2409,7 +2418,16 @@ static HlePbResult pipeline_build(const void *key, const uint32_t *tok, uint32_t
             .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
             /* without depthClamp the vertex shader clamps (HLE_ZCLAMP_GLSL) */
             .depthClampEnable = (k->vsh ? k->vk.zclamp : k->vs.zclamp) && g_hvk.caps.depth_clamp,
-            .polygonMode = VK_POLYGON_MODE_FILL, .lineWidth = 1.0f };
+            .polygonMode = (VkPolygonMode)(k->raster & 3), .lineWidth = 1.0f };
+        /* smooth lines: each pixel's coverage by the line's rectangle
+         * multiplies its alpha (VK_KHR_line_rasterization), as the NV2A's
+         * line smoothing does */
+        VkPipelineRasterizationLineStateCreateInfoKHR ls = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_LINE_STATE_CREATE_INFO_KHR,
+            .lineRasterizationMode = VK_LINE_RASTERIZATION_MODE_RECTANGULAR_SMOOTH_KHR };
+        if (k->raster & 4) {
+            rs.pNext = &ls;
+        }
         VkPipelineMultisampleStateCreateInfo ms = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
             .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT };
@@ -2568,6 +2586,7 @@ static void pipe_async_init(void)
     /* up to vi: the key as it was before vi (8-aligned for its uint64_t) */
     HLE_BUILD_BUG_ON(offsetof(PipeKey, vi) !=
                      ((offsetof(PipeKey, pk) + sizeof(HlePshKey) + 7) & ~(size_t)7));
+    HLE_BUILD_BUG_ON(offsetof(PipeKey, raster) >= offsetof(PipeKey, vi));
     /* up to ds: the key as it was before ds */
     HLE_BUILD_BUG_ON(offsetof(PipeKey, ds) != offsetof(PipeKey, vi) + sizeof(ViKey));
     const HleCaps *c = &g_hvk.caps;
@@ -3744,8 +3763,46 @@ static void record_draw(VkCommandBuffer cb, const HleCmdDraw *c, uint32_t vfirst
     }
 }
 
-void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, uint32_t ds_id,
-                       const HleCmdViewport *vpc)
+/* HAKUX_HLE_DBGFLAGS (debug): 1 stencil test off, 2 depth test off on
+ * stencil-tested draws, 4 polygon offset off, 8 W-buffering off, 16 fog off,
+ * 32 culling off, 64 triangles as lines (wireframe), 128 as points, 256
+ * those for back faces only (the front ones keep their fill mode) */
+static int dbg_flags(void)
+{
+    static int dbgf = -1;
+    if (dbgf < 0) {
+        const char *e = getenv("HAKUX_HLE_DBGFLAGS");
+        dbgf = e ? (int)strtol(e, NULL, 0) : 0;
+    }
+    return dbgf;
+}
+
+/* The faces culled: CULLMODE is the winding culled, FRONTFACE the front one */
+static unsigned cull_bits(const uint32_t *rs)
+{
+    return rs[RS_CULLMODE] == 0 || (dbg_flags() & 32) ? VK_CULL_MODE_NONE :
+           rs[RS_CULLMODE] == rs[RS_FRONTFACE] ? VK_CULL_MODE_FRONT_BIT : VK_CULL_MODE_BACK_BIT;
+}
+
+/* The front and back fill modes (SET_FRONT / BACK_POLYGON_MODE) */
+static void fill_regs(const uint32_t *rs, uint32_t *front, uint32_t *back)
+{
+    *front = rs[RS_FILLMODE];
+    *back = rs[RS_BACKFILLMODE];
+    if (dbg_flags() & 192) {            /* debug: triangles as lines or points */
+        *back = dbg_flags() & 64 ? 0x1B01 : 0x1B00;
+        *front = dbg_flags() & 256 ? *front : *back;
+    }
+}
+
+/* the topology's class (vk/fill.h) */
+static unsigned topo_class(uint32_t prim)
+{
+    return prim == 0 ? HLE_TOPO_POINTS : prim <= 2 ? HLE_TOPO_LINES : HLE_TOPO_TRIS;
+}
+
+static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, uint32_t ds_id,
+                       const HleCmdViewport *vpc, unsigned faces)
 {
     if (!g_dr.ready || !g_dr.st_valid) {
         drop(DROP_STATE, c, rt_id, ds_id);
@@ -3757,10 +3814,48 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         drop(DROP_TARGET, c, rt_id, ds_id);
         return;
     }
-    if ((c->prim == VK_PRIMITIVE_TOPOLOGY_LINE_LIST ||
-         c->prim == VK_PRIMITIVE_TOPOLOGY_LINE_STRIP) && !(s->rs[RS_LINEWIDTH] & 0x1FF)) {
-        /* SET_LINE_WIDTH 0: the NV2A rasterizes no line fragments (the Xbox's
-         * reference images); Vulkan's lines are at least 1 wide */
+    /* Fill modes: a triangle draw's faces as points, as lines (their edges:
+     * quads and polygons show the diagonals they were split along, which the
+     * NV2A doesn't draw) or filled. Lines take the line width and smoothing,
+     * points the point size and sprites, as line and point lists do (the
+     * Xbox's reference images: nxdk_pgraph_tests' Line width, Edge flag,
+     * PolygonMode_Point). Line and polygon smoothing (EDGEANTIALIAS) act with
+     * multisampling off only (Smoothing control); Tenchu: Return from
+     * Darkness smooths polygons with it off. vk/fill.h */
+    const bool tris = c->prim >= VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    uint32_t fmode, bmode;
+    fill_regs(s->rs, &fmode, &bmode);
+    const HleFill fl = hle_fill(topo_class(c->prim), fmode, bmode, cull_bits(s->rs), faces,
+                                s->rs[RS_EDGEANTIALIAS], s->aactl, g_hvk.caps.fill_modes);
+    const VkPolygonMode pm = (VkPolygonMode)fl.mode;
+    const bool lines = fl.lines, points = fl.points, lsmooth = fl.lsmooth, psmooth = fl.psmooth;
+    {   /* a title's first use of each (which titles use them: NV2A_ACCURACY) */
+        static uint8_t s_seen;
+        const uint8_t use = (pm == VK_POLYGON_MODE_LINE ? 1 : 0) |
+                            (pm == VK_POLYGON_MODE_POINT ? 2 : 0) | (lsmooth ? 4 : 0) |
+                            (psmooth ? 8 : 0);
+        if (use & ~s_seen) {
+            s_seen |= use;
+            hle_log("hakuX-hle-back", "fill mode %s%s%s%s first used (front %x back %x, "
+                    "smoothing %x, antialiasing control %08x)",
+                    use & 1 ? "lines " : "", use & 2 ? "points " : "",
+                    use & 4 ? "line-smoothing " : "", use & 8 ? "polygon-smoothing " : "",
+                    s->rs[RS_FILLMODE], s->rs[RS_BACKFILLMODE], s->rs[RS_EDGEANTIALIAS],
+                    s->aactl);
+        }
+    }
+    if ((lsmooth && !g_hvk.caps.smooth_lines) || (psmooth && !g_hvk.caps.bary)) {
+        static unsigned s_logged;
+        if (s_logged++ < 4) {
+            hle_log("hakuX-hle-back", "%s smoothing drawn unsmoothed: the device has no %s",
+                    lsmooth ? "line" : "polygon",
+                    lsmooth ? "smoothLines" : "fragmentShaderBarycentric");
+        }
+    }
+    if (lines && !(s->rs[RS_LINEWIDTH] & 0x1FF)) {
+        /* SET_LINE_WIDTH 0: the NV2A rasterizes no line fragments, a fill
+         * mode's lines neither (the Xbox's reference images); Vulkan's lines
+         * are at least 1 wide */
         static unsigned s_logged;
         if (s_logged++ < 4) {
             hle_log("hakuX-hle-back", "line draw at SET_LINE_WIDTH 0: no fragments (n=%u)",
@@ -3923,7 +4018,7 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         k.pk.fog = s->rs[RS_FOGENABLE] ? (s->rs[RS_FOGTABLEMODE] & 3) + 1 : 0;
         k.pk.fog_abs = (s->rs[RS_FOGTABLEMODE] >> 8) & 1;
         k.pk.specular = s->rs[RS_SPECULARENABLE] != 0;
-        k.pk.point_sprite = c->prim == 0 && s->rs[RS_POINTSPRITEENABLE] != 0;
+        k.pk.point_sprite = points && s->rs[RS_POINTSPRITEENABLE] != 0;
         k.pk.out_bgra = rt && hle_surf_out_bgra(rt->fmt);
         /* SET_DITHER_ENABLE into a 16-bit target: the NV2A dithers what it
          * writes there (8-bit channels lose nothing to it) */
@@ -3938,6 +4033,8 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         /* two-sided lighting: back faces take the back colours a vertex
          * program's shader passes (shader/vsh.c; not the D3D-model FF's) */
         k.pk.two_side = prog && s->rs[RS_TWOSIDEDLIGHTING] != 0;
+        /* polygon smoothing: alpha times the pixel's coverage (shader/psh.c) */
+        k.pk.poly_smooth = psmooth && g_hvk.caps.bary;
         for (unsigned st = 0; st < 4; st++) {
             k.pk.alpha_kill |= (c->tex[st] && s->tss[st][TSS_ALPHAKILL] != 0) << st;
         }
@@ -4196,7 +4293,7 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         if (c->ff_ubo != HLE_DRAW_NO_UBO) {
             /* point lists: the size from the block (scaled by distance for
              * transformed vertices with POINTSCALEENABLE) */
-            if (c->prim == 0) {
+            if (points) {
                 k.vs.points = !rhw && s->rs[RS_POINTSCALEENABLE] ? 2 : 1;
             }
             if (!rhw) {
@@ -4230,7 +4327,7 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         k.ps.alpha_func = s->rs[RS_ALPHAFUNC] >= 0x200 ? (s->rs[RS_ALPHAFUNC] - 0x200) & 7 : 7;
         k.ps.specular = s->rs[RS_SPECULARENABLE] != 0;
         k.ps.fog = s->rs[RS_FOGENABLE] ? (s->rs[RS_FOGTABLEMODE] & 3) + 1 : 0;
-        k.ps.point_sprite = c->prim == 0 && s->rs[RS_POINTSPRITEENABLE] != 0;
+        k.ps.point_sprite = points && s->rs[RS_POINTSPRITEENABLE] != 0;
         k.ps.out_bgra = rt && hle_surf_out_bgra(rt->fmt);
     }
     k.blend_en = s->rs[RS_ALPHABLENDENABLE] != 0 &&
@@ -4295,15 +4392,9 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
               ((cw >> 24) & 1 ? VK_COLOR_COMPONENT_A_BIT : 0);
     k.cfmt = rt ? rt->fmt : 0;
     k.dfmt = ds ? ds->fmt : 0;
-    k.topo_class = c->prim == 0 ? 0 : c->prim <= 2 ? 1 : 2;
-    /* HAKUX_HLE_DBGFLAGS (debug): 1 stencil test off, 2 depth test off on
-     * stencil-tested draws, 4 polygon offset off, 8 W-buffering off, 16 fog
-     * off, 32 culling off */
-    static int dbgf = -1;
-    if (dbgf < 0) {
-        const char *e = getenv("HAKUX_HLE_DBGFLAGS");
-        dbgf = e ? (int)strtol(e, NULL, 0) : 0;
-    }
+    k.topo_class = topo_class(c->prim);
+    k.raster = (uint8_t)(pm | (lsmooth && g_hvk.caps.smooth_lines ? 4 : 0));
+    const int dbgf = dbg_flags();
     if (dbgf & 16) {
         k.pk.fog = 0;
         k.ps.fog = 0;
@@ -4346,8 +4437,11 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
     float zslope, zofs;
     memcpy(&zslope, &s->rs[RS_ZSLOPESCALE], 4);
     memcpy(&zofs, &s->rs[RS_ZOFFSET], 4);
-    bool tri = c->prim >= VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    bool bias = zt && tri && !(dbgf & 4) && s->rs[RS_SOLIDOFFSETENABLE] && isfinite(zslope) &&
+    /* the offset's enable is the fill mode's (SOLID, WIREFRAME or POINT) */
+    HLE_BUILD_BUG_ON(RS_SOLIDOFFSETENABLE - 1 != RS_WIREFRAMEOFFSETENABLE ||
+                     RS_SOLIDOFFSETENABLE - 2 != RS_POINTOFFSETENABLE);
+    const uint32_t ofs_en = s->rs[RS_SOLIDOFFSETENABLE - fl.offset];
+    bool bias = zt && tris && !(dbgf & 4) && ofs_en && isfinite(zslope) &&
                 isfinite(zofs) && (zslope != 0.0f || zofs != 0.0f);
     /* Passes that test without writing (LESSEQUAL / GREATEREQUAL) redraw
      * surfaces already in the depth buffer: the NV2A gives the same program
@@ -4355,7 +4449,7 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
      * strips' vertex order, the clip-space round trip), and the pass then
      * fails in hatched rows (Fable's terrain layers over its depth prepass).
      * One step toward the eye absorbs it. */
-    if (zt && tri && !(dbgf & 4) && !s->rs[RS_ZWRITEENABLE] &&
+    if (zt && tris && !(dbgf & 4) && !s->rs[RS_ZWRITEENABLE] &&
         (s->rs[RS_ZFUNC] == 0x203 || s->rs[RS_ZFUNC] == 0x206)) {
         zslope = bias ? zslope : 0.0f;
         zofs = (bias ? zofs : 0.0f) + (s->rs[RS_ZFUNC] == 0x203 ? -1.0f : 1.0f);
@@ -4370,7 +4464,7 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
      * either way and still fails hidden surfaces; the shader discards what
      * is further in front (hle_draw_zeq, bound by back.c). Only on the drivers
      * with HLE_QUIRK_EQ_DEPTH_STEP; debug.hakux.eqtol=0 turns it off (live). */
-    bool eq_tol = zt && tri && !(dbgf & 4) && !s->rs[RS_ZWRITEENABLE] &&
+    bool eq_tol = zt && tris && !(dbgf & 4) && !s->rs[RS_ZWRITEENABLE] &&
                   s->rs[RS_ZFUNC] == 0x202 && hle_quirk(HLE_QUIRK_EQ_DEPTH_STEP) && !g_eqtol_off;
     if (eq_tol) {
         zslope = bias ? zslope : 0.0f;
@@ -4404,7 +4498,9 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
     if (dbgf & 32) {
         cull = 0;                       /* debug: culling off */
     }
-    const uint32_t cullv = cull == 0 ? VK_CULL_MODE_NONE :
+    const uint32_t cullv = faces == HLE_FACES_FRONT ? VK_CULL_MODE_BACK_BIT :
+                           faces == HLE_FACES_BACK ? VK_CULL_MODE_FRONT_BIT :
+                           cull == 0 ? VK_CULL_MODE_NONE :
                            cull == ff ? VK_CULL_MODE_FRONT_BIT : VK_CULL_MODE_BACK_BIT;
     const uint32_t ffv = ff == 0x901 ? VK_FRONT_FACE_COUNTER_CLOCKWISE : VK_FRONT_FACE_CLOCKWISE;
     const uint32_t zwv = zt && s->rs[RS_ZWRITEENABLE];
@@ -4603,8 +4699,7 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
          * approximation of the NV2A's subpixel lines (0.125 .. 0.875 at 1x
          * all look alike) */
         const uint32_t lr = s->rs[RS_LINEWIDTH] & 0x1FF;
-        const bool line = c->prim == VK_PRIMITIVE_TOPOLOGY_LINE_LIST ||
-                          c->prim == VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
+        const bool line = lines;
         float lw = lr / 8.0f * (float)MAX(rs, 1u);
         lw = MAX(MIN(lw, g_hvk.caps.max_line_width), 1.0f);
         if (!line && g_rec.valid) {
@@ -4864,6 +4959,24 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
                 r[RS_ALPHABLENDENABLE], r[RS_SRCBLEND], r[RS_DESTBLEND], r[RS_ZENABLE],
                 r[RS_ZWRITEENABLE]);
     }
+}
+
+void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, uint32_t ds_id,
+                       const HleCmdViewport *vpc)
+{
+    /* Front and back faces in fill modes of their own (D3D's BACKFILLMODE):
+     * a pipeline has one polygon mode, so with neither kind culled the draw
+     * is recorded for the front faces (the back ones culled), then for the
+     * back ones; with one kind culled, once in the other's mode. */
+    uint32_t fmode, bmode;
+    fill_regs(g_dr.st.rs, &fmode, &bmode);
+    if (g_dr.ready && g_dr.st_valid && g_hvk.caps.fill_modes &&
+        hle_fill_split(topo_class(c->prim), fmode, bmode, cull_bits(g_dr.st.rs))) {
+        draw_faces(c, cb, rt_id, ds_id, vpc, HLE_FACES_FRONT);
+        draw_faces(c, cb, rt_id, ds_id, vpc, HLE_FACES_BACK);
+        return;
+    }
+    draw_faces(c, cb, rt_id, ds_id, vpc, HLE_FACES_BOTH);
 }
 
 /* hle_draw_ff_diag: the counts at its last log (its lines are per second) */

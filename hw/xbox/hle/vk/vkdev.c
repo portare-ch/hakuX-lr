@@ -188,6 +188,10 @@ static const struct { VkStructureType s; const char *name; unsigned n; } k_feat[
          graphicsPipelineLibrary),
     FEAT(DYNAMIC_RENDERING_LOCAL_READ_FEATURES_KHR, VkPhysicalDeviceDynamicRenderingLocalReadFeaturesKHR,
          dynamicRenderingLocalRead),
+    FEAT(LINE_RASTERIZATION_FEATURES_KHR, VkPhysicalDeviceLineRasterizationFeaturesKHR,
+         stippledSmoothLines),
+    FEAT(FRAGMENT_SHADER_BARYCENTRIC_FEATURES_KHR,
+         VkPhysicalDeviceFragmentShaderBarycentricFeaturesKHR, fragmentShaderBarycentric),
     FEAT(RASTERIZATION_ORDER_ATTACHMENT_ACCESS_FEATURES_EXT,
          VkPhysicalDeviceRasterizationOrderAttachmentAccessFeaturesEXT,
          rasterizationOrderStencilAttachmentAccess),
@@ -274,6 +278,8 @@ static void caps_override(HleCaps *c)
         { "eds1", offsetof(HleCaps, eds1) },         { "eds2", offsetof(HleCaps, eds2) },
         { "aniso", offsetof(HleCaps, aniso) },
         { "widelines", offsetof(HleCaps, wide_lines) },
+        { "fillmodes", offsetof(HleCaps, fill_modes) },
+        { "smoothlines", offsetof(HleCaps, smooth_lines) }, { "bary", offsetof(HleCaps, bary) },
     };
     for (char *save = NULL, *t = strtok_r(v, ", ", &save); t; t = strtok_r(NULL, ", ", &save)) {
         const char *name = *t == '-' ? t + 1 : t;
@@ -444,6 +450,11 @@ static int vk_init(PFN_vkGetInstanceProcAddr gipa_shared, VkInstance inst_shared
                  has_ext(ext, ne, VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME);
     bool e_lr = has_ext(ext, ne, VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME);
     bool e_roa = has_ext(ext, ne, VK_EXT_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_EXTENSION_NAME);
+    /* line rasterization: the KHR extension, or the EXT one it promoted
+     * (the same structures and values) */
+    bool e_lrk = has_ext(ext, ne, VK_KHR_LINE_RASTERIZATION_EXTENSION_NAME);
+    bool e_lrast = e_lrk || has_ext(ext, ne, VK_EXT_LINE_RASTERIZATION_EXTENSION_NAME);
+    bool e_bary = has_ext(ext, ne, VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME);
     bool e_pd = has_ext(ext, ne, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
     /* Below 1.3 (vk/compat.c): what 1.2 and 1.3 made core, from extensions;
      * a 1.2 device has 1.2's in its core (the structs are core 1.2's then) */
@@ -506,6 +517,10 @@ static int vk_init(PFN_vkGetInstanceProcAddr gipa_shared, VkInstance inst_shared
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_FEATURES_EXT };
     VkPhysicalDeviceDynamicRenderingLocalReadFeaturesKHR q_lr = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES_KHR };
+    VkPhysicalDeviceLineRasterizationFeaturesKHR q_lrast = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_LINE_RASTERIZATION_FEATURES_KHR };
+    VkPhysicalDeviceFragmentShaderBarycentricFeaturesKHR q_bary = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_BARYCENTRIC_FEATURES_KHR };
     VkPhysicalDeviceRasterizationOrderAttachmentAccessFeaturesEXT q_roa = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_FEATURES_EXT };
     VkPhysicalDeviceVulkan13Features q13 = {
@@ -554,6 +569,8 @@ static int vk_init(PFN_vkGetInstanceProcAddr gipa_shared, VkInstance inst_shared
     if (e_gpl) chain(&tail, &q_gpl);
     if (e_lr) chain(&tail, &q_lr);
     if (e_roa) chain(&tail, &q_roa);
+    if (e_lrast) chain(&tail, &q_lrast);
+    if (e_bary) chain(&tail, &q_bary);
     vkGetPhysicalDeviceFeatures2(v->phys, &q);
     /* the limits the bindless set and the samplers need (Vulkan 1.2's: a 1.1
      * device fails the floor without them) */
@@ -597,6 +614,9 @@ static int vk_init(PFN_vkGetInstanceProcAddr gipa_shared, VkInstance inst_shared
     need(c, v->qfam != UINT32_MAX, "graphics queue");
     c->wide_lines = q.features.wideLines;
     c->max_line_width = c->wide_lines ? v->props.limits.lineWidthRange[1] : 1.0f;
+    c->fill_modes = q.features.fillModeNonSolid;
+    c->smooth_lines = e_lrast && q_lrast.smoothLines;
+    c->bary = e_bary && q_bary.fragmentShaderBarycentric;
     need(c, q.features.largePoints, "largePoints");
     c->depth_clamp = q.features.depthClamp;
     need(c, ok_tl, "timelineSemaphore");
@@ -815,6 +835,7 @@ static int vk_init(PFN_vkGetInstanceProcAddr gipa_shared, VkInstance inst_shared
     VkPhysicalDevicePipelineCreationCacheControlFeatures f_pcc = {
         .sType = q_pcc.sType, .pipelineCreationCacheControl = VK_TRUE };
     f.features.wideLines = c->wide_lines;
+    f.features.fillModeNonSolid = c->fill_modes;
     f.features.largePoints = VK_TRUE;
     f.features.depthClamp = c->depth_clamp;
     f.features.shaderSampledImageArrayDynamicIndexing = !c->bindless;
@@ -848,6 +869,12 @@ static int vk_init(PFN_vkGetInstanceProcAddr gipa_shared, VkInstance inst_shared
     if (c->gpl) chain(&tail, &f_gpl);
     if (c->fbfetch) chain(&tail, &f_lr);
     if (c->raster_order) chain(&tail, &f_roa);
+    VkPhysicalDeviceLineRasterizationFeaturesKHR f_lrast = {
+        .sType = q_lrast.sType, .smoothLines = VK_TRUE };
+    VkPhysicalDeviceFragmentShaderBarycentricFeaturesKHR f_bary = {
+        .sType = q_bary.sType, .fragmentShaderBarycentric = VK_TRUE };
+    if (c->smooth_lines) chain(&tail, &f_lrast);
+    if (c->bary) chain(&tail, &f_bary);
 
     const char *exts[32];
     uint32_t nx = 0;
@@ -891,6 +918,11 @@ static int vk_init(PFN_vkGetInstanceProcAddr gipa_shared, VkInstance inst_shared
     if (c->raster_order) {
         exts[nx++] = VK_EXT_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_EXTENSION_NAME;
     }
+    if (c->smooth_lines) {
+        exts[nx++] = e_lrk ? VK_KHR_LINE_RASTERIZATION_EXTENSION_NAME
+                           : VK_EXT_LINE_RASTERIZATION_EXTENSION_NAME;
+    }
+    if (c->bary) exts[nx++] = VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME;
     if (c->fbfetch) {
         exts[nx++] = VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME;
         if (e_pd) {
@@ -910,12 +942,13 @@ static int vk_init(PFN_vkGetInstanceProcAddr gipa_shared, VkInstance inst_shared
         .enabledExtensionCount = nx, .ppEnabledExtensionNames = exts };
     hle_log("hakuX-hle-back", "vk: device \"%s\" api %u.%u.%u driver 0x%x floor=ok "
             "plus: gpl=%d eds3=%d dbuf=%d m5=%d sscaled=%d local_read=%d fbfetch=%d "
-            "raster_order=%d cache_control=%d swapchain=%d",
+            "raster_order=%d cache_control=%d swapchain=%d fill_modes=%d smooth_lines=%d bary=%d",
             v->props.deviceName, VK_API_VERSION_MAJOR(v->props.apiVersion),
             VK_API_VERSION_MINOR(v->props.apiVersion),
             VK_API_VERSION_PATCH(v->props.apiVersion), v->props.driverVersion,
             c->gpl, c->eds3, c->descriptor_buffer, c->maint5, c->sscaled,
-            c->local_read, c->fbfetch, c->raster_order, c->cache_control, c->swapchain);
+            c->local_read, c->fbfetch, c->raster_order, c->cache_control, c->swapchain,
+            c->fill_modes, c->smooth_lines, c->bary);
     hle_log("hakuX-hle-back", "vk: bc=%d vids=%d push=%d push_desc=%d cbc=%d cbc_any=%d bcs=%d "
             "bcs_image=%d x4444=%d r16=%d r5551=%d r4444=%d d24s8=%d bda=%d ahb=%d vk13=%d "
             "dyn_render=%d sync2=%d eds1=%d eds2=%d bindless=%d depth_clamp=%d etc2=%d dxt_etc2=%d "

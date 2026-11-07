@@ -483,7 +483,8 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
     for (unsigned s = 0; s < 3; s++) {
         hilo1 |= ((k->dot_map >> (4 * s)) & 7) == 4;
     }
-    put(&b, "#version 450\n#extension GL_EXT_nonuniform_qualifier : require\n%s",
+    put(&b, "#version 450\n#extension GL_EXT_nonuniform_qualifier : require\n%s%s",
+        k->poly_smooth ? "#extension GL_EXT_fragment_shader_barycentric : require\n" : "",
         hle_push_glsl());
     put(&b, "layout(set = 0, binding = 0) uniform texture2D uTex2D[];\n"
             "layout(set = 0, binding = 1) uniform sampler uSmp[];\n"
@@ -815,6 +816,22 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
     }
     final_combiner(&b, k);
     put(&b, "  outc = clamp(outc, 0.0, 1.0);\n");
+    if (k->poly_smooth) {
+        /* Polygon smoothing (SET_POLY_SMOOTH_ENABLE, multisampling off): alpha
+         * times the pixel's coverage, as GL's POLYGON_SMOOTH, before the alpha
+         * test (the Xbox's reference images show its seams where a mesh's
+         * triangles meet). Each edge's distance from the pixel centre in
+         * guest pixels (the resolution scale divided out) is its barycentric
+         * coordinate over that coordinate's gradient; the coverage is the
+         * product of the three half-planes', each clamped to a pixel. Pixels
+         * whose centre lies outside get no fragment (no conservative
+         * rasterization), so an edge is softened on its inner side only. */
+        put(&b, "  { vec3 bc = gl_BaryCoordNoPerspEXT, gx = dFdx(bc), gy = dFdy(bc);\n"
+                "    vec3 d = bc * inversesqrt(max(gx * gx + gy * gy, vec3(1e-20))) /\n"
+                "             float(max((pc.flags >> 16) & 255u, 1u));\n"
+                "    vec3 cv = clamp(d + 0.5, 0.0, 1.0);\n"
+                "    outc.a *= cv.x * cv.y * cv.z; }\n");
+    }
     if (k->alpha_test && k->alpha_func < 8) {
         put(&b, "  { float a = outc.a, r = pc.alpha_ref; if (!(%s)) discard; }\n",
             k_cmp[k->alpha_func]);
