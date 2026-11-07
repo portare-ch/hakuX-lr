@@ -122,9 +122,11 @@ core's mixers: HRTF decoding, routing and timing; DLS2, ParaEQ and I3DL2;
 the attenuation curve, gain ramps, envelopes and LFOs; the 8-point
 Lagrange resampler, now the default; multipass headroom and 24-bit
 rounding; output SGEs kept off the voice table; a serial fallback for
-multipass layouts DirectSound doesn't use. Tests: `test_apu_hrtf`,
-`test_apu_simd`, `test_apu_resample`, `test_apu_stereo`, `apu-stereo-smoke`
-and `libretro-smoke` to the measured behaviour.
+multipass layouts DirectSound doesn't use. Each voice's LFOs, ramps and
+filter state are saved with a state (`vp.filters`; an older state's voices
+resume as at their `VOICE_ON`). Tests: `test_apu_hrtf`, `test_apu_simd`,
+`test_apu_resample`, `test_apu_stereo`, `apu-stereo-smoke`,
+`apu-resample-smoke` and `libretro-smoke` to the measured behaviour.
 
 ## Measurements
 

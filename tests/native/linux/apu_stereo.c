@@ -41,6 +41,34 @@ static bool channels_equal(void)
 
 #define HALF 16384              /* 0.5 */
 
+/* Drop the named final APU field to simulate an older state. Return the
+ * new length, or zero if that field cannot be removed. */
+static size_t cut_last_field(NcBuf *b, size_t len, const char *name)
+{
+    const size_t nl = strlen(name);
+    size_t count = 0, field = 0;
+    for (size_t at = 0; at + 11 <= len; at++) {
+        if (b->p[at + 4] == 6 && !memcmp(b->p + at + 5, "gp.dsp", 6)) {
+            count = at;
+            break;
+        }
+    }
+    for (size_t at = len - nl - 1; at > count; at--) {
+        if (b->p[at] == nl && !memcmp(b->p + at + 1, name, nl)) {
+            field = at;
+            break;
+        }
+    }
+    uint32_t n;
+    memcpy(&n, b->p + count, 4);
+    if (!field || n < 2) {
+        return 0;
+    }
+    n--;
+    memcpy(b->p + count, &n, 4);
+    return field;
+}
+
 static void test_2d_mono_panned(void)
 {
     apu_up(false, true, 1);
@@ -248,27 +276,49 @@ static void test_2d_route_saved(void)
     check(!b.fail && before && loaded && kept && all(0, 0, 0) && all(1, 0, 0),
           "2D voice's route across a savestate: faded to mute beside a reverb send, silent before and after");
 
-    /* the state without vp.route, its last field: the field count one less
-     * (the "mcpx-apu" table's, before its first field, gp.dsp) and the
-     * field's bytes (name, kind, size, count, 256 routes) cut off */
-    const size_t field = 1 + strlen("vp.route") + 1 + 4 + 4 + sizeof(d->vp.route);
-    bool cut = false;
-    for (size_t at = 0; at + 11 <= b.len && !cut; at++) {
-        uint32_t n;
-        memcpy(&n, b.p + at, 4);
-        if (b.p[at + 4] == 6 && !memcmp(b.p + at + 5, "gp.dsp", 6) && n > 1) {
-            n--;
-            memcpy(b.p + at, &n, 4);
-            cut = !memcmp(b.p + b.len - field + 1, "vp.route", 8);
-        }
-    }
-    NcRd old = {b.p, b.len - field, 0, false};
-    const bool old_loaded = cut && nc_apu_state_load(&old, NC_STATE_V_APU);
+    /* Simulate a state saved before vp.route and vp.filters. */
+    size_t len = cut_last_field(&b, b.len, "vp.filters");
+    len = len ? cut_last_field(&b, len, "vp.route") : 0;
+    NcRd old = {b.p, len, 0, false};
+    const bool old_loaded = len && nc_apu_state_load(&old, NC_STATE_V_APU);
     bool undecided = true;
     for (int k = 0; k < MCPX_HW_MAX_VOICES; k++) {
         undecided &= d->vp.route[k] == VP_ROUTE_UNDECIDED;
     }
     check(old_loaded && undecided, "a state without the routes (an older one): loads, every voice undecided");
+    nc_buf_free(&b);
+    apu_down();
+}
+
+/* Check sample-for-sample LFO restoration and VOICE_ON defaults for old states. */
+static void test_lfo_saved(void)
+{
+    apu_up(false, false, 1);
+    pcm_page(0, false, HALF, 0);
+    Voice v = voice(108, NV1BA0_PIO_SET_ANTECEDENT_VOICE_LIST_2D_TOP, false, 0);
+    v.vol[0] = 0;               /* front left, 0 dB */
+    start(&v);
+    pio(NV1BA0_PIO_SET_CURRENT_VOICE, v.handle);
+    pio(NV1BA0_PIO_SET_VOICE_LFO_ENV, 0x40u << 12);    /* LFO A: delta 40h */
+    pio(NV1BA0_PIO_SET_VOICE_LFO_MOD, 127);            /* amplitude +127 */
+    frames(5);
+    NcBuf b = {0};
+    nc_apu_state_save(&b);
+    static int16_t after_save[8 * NUM_SAMPLES_PER_FRAME][2], after_load[8 * NUM_SAMPLES_PER_FRAME][2];
+    frames_into(8, after_save);
+    NcRd r = {b.p, b.len, 0, false};
+    const bool loaded = nc_apu_state_load(&r, NC_STATE_V_APU);
+    frames_into(8, after_load);
+    const bool moving = after_save[0][0] != after_save[7 * NUM_SAMPLES_PER_FRAME][0];
+    check(!b.fail && loaded && moving && !memcmp(after_save, after_load, sizeof(after_save)),
+          "a voice's LFO across a savestate: the same frames after the load as after the save");
+
+    const size_t len = cut_last_field(&b, b.len, "vp.filters");
+    NcRd old = {b.p, len, 0, false};
+    const bool old_loaded = len && nc_apu_state_load(&old, NC_STATE_V_APU);
+    const MCPXAPUVoiceFilter *f = &d->vp.filters[v.handle];
+    check(old_loaded && !f->lfo_armed && !f->gains && !f->pitched,
+          "a state without the voices' state (an older one): loads, each voice as at its VOICE_ON");
     nc_buf_free(&b);
     apu_down();
 }
@@ -595,6 +645,7 @@ int main(int argc, char **argv)
     test_2d_downmix();
     test_2d_route_kept();
     test_2d_route_saved();
+    test_lfo_saved();
     test_3d();
     test_multipass();
     test_full_dsp();

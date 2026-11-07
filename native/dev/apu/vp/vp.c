@@ -147,18 +147,25 @@ static void set_notify_status(MCPXAPUState *d, uint32_t v, int notifier,
 
 static long voice_resample_callback(void *cb_data, float **data);
 
+/* Reset per-voice state to VOICE_ON defaults, including for old states
+ * without the optional vp.filters field. */
+static void voice_clear_state(MCPXAPUVoiceFilter *f)
+{
+    memset(f->svf, 0, sizeof(f->svf));
+    memset(f->peq, 0, sizeof(f->peq));
+    memset(f->i3dl2, 0, sizeof(f->i3dl2));
+    f->dls2_set = f->peq_set = false;
+    f->gains = false;
+    f->pitched = false;
+    memset(f->lfo_phase, 0, sizeof(f->lfo_phase));
+    memset(f->lfo_wait, 0, sizeof(f->lfo_wait));
+    f->lfo_armed = false;
+}
+
 static void voice_reset_filters(MCPXAPUState *d, uint16_t v)
 {
     assert(v < MCPX_HW_MAX_VOICES);
-    memset(&d->vp.filters[v].svf, 0, sizeof(d->vp.filters[v].svf));
-    memset(&d->vp.filters[v].peq, 0, sizeof(d->vp.filters[v].peq));
-    memset(&d->vp.filters[v].i3dl2, 0, sizeof(d->vp.filters[v].i3dl2));
-    d->vp.filters[v].dls2_set = false;
-    d->vp.filters[v].peq_set = false;
-    d->vp.filters[v].gains = false;
-    d->vp.filters[v].pitched = false;
-    memset(&d->vp.filters[v].lfo_phase, 0, sizeof(d->vp.filters[v].lfo_phase));
-    d->vp.filters[v].lfo_armed = false;
+    voice_clear_state(&d->vp.filters[v]);
     d->vp.filters[v].ending = false;
     d->vp.filters[v].silence_fed = 0;
     d->vp.route[v] = VP_ROUTE_UNDECIDED;
@@ -2916,6 +2923,7 @@ void mcpx_apu_vp_reset(MCPXAPUState *d)
     g_idle_last = 0xFFFF;
     for (int v = 0; v < ARRAY_SIZE(d->vp.filters); v++) {
         hrtf_filter_init(&d->vp.filters[v].hrtf);
+        voice_clear_state(&d->vp.filters[v]);
         d->vp.filters[v].ending = false;
         d->vp.filters[v].silence_fed = 0;
     }
