@@ -47,7 +47,9 @@ fi
     if [ "$dsp_jit" = on ]; then
         cat "$build/dsp-jit/licenses/BUILD-INFO"
     fi
-    echo "runtime libz, libstdc++, libm, libgcc_s, glibc 2.38 ($arch); libvulkan.so.1 loaded at run time"
+    # x86-64: linked against Ubuntu 20.04's runtimes (Dockerfile.linux, #107)
+    if [ "$arch" = x86_64 ]; then glibc=2.31; else glibc=2.38; fi
+    echo "runtime libz, libstdc++, libm, libgcc_s, glibc $glibc ($arch); libvulkan.so.1 loaded at run time"
     if [ "$arch" = x86_64 ]; then
         echo "CPU KVM; Linux 5.16+, /dev/kvm, TSC scaling and UMIP required"
     fi

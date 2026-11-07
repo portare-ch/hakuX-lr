@@ -1,10 +1,30 @@
 # Copyright (C) 2026-present PortareOS
 FROM rust:1.99.1-slim-trixie@sha256:9daf2b244ccc30523e55cafe32edf8465671ba567d0101620e5612ccb76ea1a7 AS rust
+# The x86-64 core links against Ubuntu 20.04's C and C++ runtimes (glibc
+# 2.31, GCC 10's libstdc++), so it loads on Ubuntu 20.04, Debian 11 and
+# later (#107): linux-ci-x86_64.sh builds with this as its sysroot. (Debian
+# 11's own security archive is gone; Ubuntu keeps 20.04's.)
+FROM ubuntu:20.04@sha256:8feb4d8ca5354def3d8fce243717141ce31e2c428701f6682bd2fafe15388214 AS sysroot
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    libc6-dev libstdc++-10-dev libgcc-10-dev zlib1g-dev linux-libc-dev \
+    && rm -rf /var/lib/apt/lists/*
 FROM debian:stable-slim@sha256:a717a33469731894e77e912ea7d714e27c2dc38ee6554fd1a3102e92999cfc66
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential clang-19 clang-tools-19 lld-19 llvm-19 cmake ninja-build git python3 \
     pkg-config ca-certificates zlib1g-dev libvulkan1 mesa-vulkan-drivers \
     && rm -rf /var/lib/apt/lists/*
+COPY --from=sysroot / /opt/sysroot-focal
+# its absolute symlinks (libpthread.so -> /lib/...) made relative, so they
+# stay inside it rather than reaching this image's own libraries
+RUN find /opt/sysroot-focal -type l -lname '/*' | while read -r l; do \
+        ln -sfn "$(realpath -m -s --relative-to="$(dirname "$l")" "/opt/sysroot-focal$(readlink "$l")")" "$l"; \
+    done
+# and this image's kernel UAPI headers (constants, not a run-time library):
+# the KVM backend uses Linux 5.16's TSC controls, 20.04's are 5.4's
+RUN ma=$(dpkg-architecture -qDEB_HOST_MULTIARCH) && \
+    for d in linux asm-generic "$ma/asm"; do \
+        rm -rf "/opt/sysroot-focal/usr/include/$d" && cp -RL "/usr/include/$d" "/opt/sysroot-focal/usr/include/$d"; \
+    done
 COPY --from=rust /usr/local/cargo /usr/local/cargo
 COPY --from=rust /usr/local/rustup /usr/local/rustup
 ENV CARGO_HOME=/usr/local/cargo RUSTUP_HOME=/usr/local/rustup

@@ -18,7 +18,19 @@ export HAKUX_VERSION="$version"
 jobs=${JOBS:-4}
 
 python3 tools/native/linux-deps.py --dest "$HAKUX_DEPS"
-sh tools/native/linux-build.sh
+# linked against the image's Ubuntu 20.04 runtimes (glibc 2.31, #107), so
+# the core loads on older distributions than the image's own
+sysroot=${HAKUX_SYSROOT-/opt/sysroot-focal}
+if [ -n "$sysroot" ]; then
+    if [ ! -d "$sysroot/usr/include" ]; then
+        echo "linux-ci-x86_64.sh: no sysroot at $sysroot (HAKUX_SYSROOT= builds without)" >&2
+        exit 1
+    fi
+    set -- "-DCMAKE_SYSROOT=$sysroot"
+else
+    set --
+fi
+sh tools/native/linux-build.sh "$@"
 if ! grep -q '^HAKUX_DSP_JIT:BOOL=ON$' "$HAKUX_BUILD/CMakeCache.txt"; then
     echo "linux-ci-x86_64.sh: the build has no DSP JIT" >&2
     exit 1
