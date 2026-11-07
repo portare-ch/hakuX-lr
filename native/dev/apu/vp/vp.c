@@ -151,6 +151,10 @@ static void voice_reset_filters(MCPXAPUState *d, uint16_t v)
 {
     assert(v < MCPX_HW_MAX_VOICES);
     memset(&d->vp.filters[v].svf, 0, sizeof(d->vp.filters[v].svf));
+    memset(&d->vp.filters[v].peq, 0, sizeof(d->vp.filters[v].peq));
+    memset(&d->vp.filters[v].i3dl2, 0, sizeof(d->vp.filters[v].i3dl2));
+    d->vp.filters[v].dls2_set = false;
+    d->vp.filters[v].peq_set = false;
     d->vp.filters[v].ending = false;
     d->vp.filters[v].silence_fed = 0;
     d->vp.route[v] = VP_ROUTE_UNDECIDED;
@@ -181,6 +185,16 @@ static float clampf(float v, float min, float max)
     } else {
         return v;
     }
+}
+
+/* Filter coefficients take 2^(x / 4096) to a 1024th of an octave, then to
+ * the nearest 1/65536, at most FFFFh (measured: D97Eh gave 3043h). */
+static float filter_coefficient(double x)
+{
+    int k = floor(x / 4.0);
+    int octave = floor(k / 1024.0);
+    double c = ldexp(exp2((k - octave * 1024) / 1024.0) * 65536.0, octave);
+    return fmin(round(c), 65535.0) / 65536.0;
 }
 
 /* attenuate()'s values for the 4096 volumes, computed once (the same
@@ -2003,34 +2017,91 @@ static void voice_process(MCPXAPUState *d, uint8_t *c,
     /* Without an HRTF entry, a 3D voice uses 2D filtering without I3DL2. */
     const bool spatial = three_d && hrtf_handle != HRTF_NULL_HANDLE;
     bool lpf = false;
+    bool peq = false;
     if (spatial) {
         /* 1:DLS2+I3DL2 2:ParaEQ+I3DL2 3:I3DL2 */
         lpf = (fmode == 1);
+        peq = (fmode == 2);
     } else {
         /* 0:Bypass 1:DLS2 2:ParaEQ 3(Mono):DLS2+ParaEQ 3(Stereo):Bypass */
         lpf = stereo ? (fmode == 1) : (fmode & 1);
+        peq = stereo ? (fmode == 2) : (fmode >= 2);
     }
+    /* The F envelope offsets both cutoffs by 256 units per FC step at full
+     * level. Ramp the resulting coefficients linearly in frequency. */
+    int8_t fc_scale = voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_CFG_ENV1,
+                                            NV_PAVS_VOICE_CFG_ENV1_EF_FCSCALE);
+    double fc_bend = fc_scale * 256.0 * ef_value;
+    MCPXAPUVoiceFilter *vfl = &d->vp.filters[v];
+
     if (lpf) {
         for (int ch = 0; ch < 2; ch++) {
-            // FIXME: Cutoff modulation via NV_PAVS_VOICE_CFG_ENV1_EF_FCSCALE
             int16_t fc = voice_get_mask_nolock(
                 d, c, v, NV_PAVS_VOICE_TAR_FCA + (ch % channels) * 4,
                 NV_PAVS_VOICE_TAR_FCA_FC0);
-            float fc_f = clampf(pow(2, fc / 4096.0), 0.003906f, 1.0f);
+            float fc_f = filter_coefficient(fc + fc_bend);
+            float f_from = vfl->dls2_set ? vfl->dls2_f[ch] : fc_f;
+            vfl->dls2_f[ch] = fc_f;
             uint16_t q = voice_get_mask_nolock(
                 d, c, v, NV_PAVS_VOICE_TAR_FCA + (ch % channels) * 4,
                 NV_PAVS_VOICE_TAR_FCA_FC1);
-            float q_f = clampf(q / (1.0 * 0x8000), 0.079407f, 1.0f);
-            sv_filter *filter = &d->vp.filters[v].svf[ch];
+            float q_f = q / (1.0 * 0x8000);
+            sv_filter *filter = &vfl->svf[ch];
             setup_svf(filter, fc_f, q_f, F_LP);
             for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
+                filter->f = f_from + (fc_f - f_from) * (i / 32.0f);
                 samples[i][ch] = run_svf(filter, samples[i][ch]);
-                samples[i][ch] = fminf(fmaxf(samples[i][ch], -1.0f), 1.0f);
             }
         }
     }
+    vfl->dls2_set = lpf;
 
-    // FIXME: ParaEQ
+    /* ParaEQ (measured on hardware): the DLS2 filter's SVF as a peaking EQ,
+     * y = x + G * q * band, with f = 2^(FC / 4096), G = gain / 8192 and
+     * q = 2^-Q. Its word is FCB on mono 2D voices, FCA on 3D voices and
+     * FCA/FCB per channel on stereo voices. */
+    if (peq) {
+        int q_field = voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_CFG_MISC,
+                                            NV_PAVS_VOICE_CFG_MISC_PARAEQ_Q);
+        float q_f = ldexpf(1.0f, -q_field);
+        for (int ch = 0; ch < 2; ch++) {
+            uint32_t reg = spatial ? NV_PAVS_VOICE_TAR_FCA :
+                           stereo  ? NV_PAVS_VOICE_TAR_FCA + ch * 4 :
+                                     NV_PAVS_VOICE_TAR_FCB;
+            uint32_t cw = voice_get_mask_nolock(d, c, v, reg, 0xFFFFFFFF);
+            float fc_f = filter_coefficient((int16_t)(cw & 0xFFFF) + fc_bend);
+            float f_from = vfl->peq_set ? vfl->peq_f[ch] : fc_f;
+            vfl->peq_f[ch] = fc_f;
+            float g = (int16_t)(cw >> 16) / 8192.0f * q_f;
+            sv_filter *filter = &vfl->peq[ch];
+            setup_svf(filter, fc_f, q_f, F_BP);
+            for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
+                filter->f = f_from + (fc_f - f_from) * (i / 32.0f);
+                samples[i][ch] = svf_round(samples[i][ch] +
+                                           g * run_svf(filter, samples[i][ch]));
+            }
+        }
+    }
+    vfl->peq_set = peq;
+
+    /* I3DL2 (measured on hardware): one-pole low-passes y = (1 - a) x + a y'
+     * with a = FCB 15:0 / 65536 on routes 0-4 and 6, and FCB 31:16 / 65536
+     * on routes 5 and 7. */
+    float room[NUM_SAMPLES_PER_FRAME];
+    const bool i3dl2 = spatial && fmode != 0 && !stereo;
+    if (i3dl2) {
+        uint32_t fcb = voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_TAR_FCB, 0xFFFFFFFF);
+        float a_direct = (fcb & 0xFFFF) / 65536.0f;
+        float a_room = (fcb >> 16) / 65536.0f;
+        float *state = vfl->i3dl2;
+        for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
+            float x = samples[i][0];
+            state[0] = svf_round(x + (state[0] - x) * a_direct);
+            state[1] = svf_round(x + (state[1] - x) * a_room);
+            samples[i][0] = samples[i][1] = state[0];
+            room[i] = state[1];
+        }
+    }
 
     /* Refresh HRTF parameters each frame so writes to the entry take effect
      * on the next frame. Sends 0–3 stay silent without an entry. */
@@ -2046,10 +2117,7 @@ static void voice_process(MCPXAPUState *d, uint8_t *c,
         }
     }
 
-    /* Deinterleave the sources into contiguous buffers once (amortized
-     * across 8 subsequent mix_one_bin calls): the voice's channels, then a
-     * 3D voice's ears (vp_send_channel). mix_one_bin (NEON on aarch64,
-     * SSE2/AVX2 on x86-64) reads contiguous float[32]. */
+    /* Deinterleave the voice, ears and room path once for the SIMD mixers. */
     float channel_buf[VP_SOURCES][NUM_SAMPLES_PER_FRAME];
     for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
         channel_buf[0][i] = samples[i][0];
@@ -2064,6 +2132,9 @@ static void voice_process(MCPXAPUState *d, uint8_t *c,
             channel_buf[VP_SOURCE_EARS][i] = ears[i][0];
             channel_buf[VP_SOURCE_EARS + 1][i] = ears[i][1];
         }
+    }
+    if (i3dl2) {
+        memcpy(channel_buf[VP_SOURCE_ROOM], room, sizeof(room));
     }
 
     /* The VP's own mix (the default, no DSP): the frame's mixbins are
@@ -2080,7 +2151,7 @@ static void voice_process(MCPXAPUState *d, uint8_t *c,
         /* Hardware uses the destination bin's headroom for HRTF sends. */
         float hr = 1 << d->vp.submix_headroom[bin[b]];
         float g = ea_value * attenuate(vol[b]) / hr;
-        mix_one_bin(mixbins[bin[b]], channel_buf[vp_send_channel(b, three_d, channels)], g);
+        mix_one_bin(mixbins[bin[b]], channel_buf[vp_send_channel(b, three_d, i3dl2, channels)], g);
     }
 
     if (d->monitor.point == MCPX_APU_DEBUG_MON_VP) {
@@ -2103,9 +2174,9 @@ static void voice_process(MCPXAPUState *d, uint8_t *c,
             }
             if (d->vp.route[v] == VP_ROUTE_SPEAKERS) {
                 float g2[2][VP_SOURCES];
-                vp_stereo_gains(bin, att, shift, channels, three_d, ea_value, g2);
-                vp_stereo_mix(sample_buf, samples, three_d ? (const float (*)[2])ears : NULL, g2,
-                              channels);
+                vp_stereo_gains(bin, att, shift, channels, three_d, i3dl2, ea_value, g2);
+                vp_stereo_mix(sample_buf, samples, three_d ? (const float (*)[2])ears : NULL,
+                              i3dl2 ? room : NULL, g2, channels);
                 return;
             }
         }

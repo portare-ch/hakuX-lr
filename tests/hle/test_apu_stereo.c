@@ -62,7 +62,7 @@ static void gains(const Voice *v, float g[2][VP_SOURCES])
         att[b] = att_of(v->vol[b]);
         shift[b] = v->headroom[v->bin[b]];
     }
-    vp_stereo_gains(v->bin, att, shift, v->channels, v->three_d, v->ea, g);
+    vp_stereo_gains(v->bin, att, shift, v->channels, v->three_d, false, v->ea, g);
 }
 
 /* a frame of the voice's samples: channel 0 a ramp, channel 1 another (a
@@ -84,7 +84,7 @@ static void mix(const Voice *v, float out[N][2])
     source(in, v->channels);
     source(ears, 2);
     memset(out, 0, sizeof(float[N][2]));
-    vp_stereo_mix(out, in, v->three_d ? (const float (*)[2])ears : NULL, g, v->channels);
+    vp_stereo_mix(out, in, v->three_d ? (const float (*)[2])ears : NULL, NULL, g, v->channels);
 }
 
 static void test_mono_left_only(void)
@@ -235,10 +235,10 @@ static void test_two_voices_add(void)
         ia[i][0] = ia[i][1] = 0.9f;
         ib[i][0] = 0.8f;
     }
-    vp_stereo_mix(both, ia, NULL, ga, 1);
-    vp_stereo_mix(both, ib, NULL, gb, 2);
-    vp_stereo_mix(oa, ia, NULL, ga, 1);
-    vp_stereo_mix(ob, ib, NULL, gb, 2);
+    vp_stereo_mix(both, ia, NULL, NULL, ga, 1);
+    vp_stereo_mix(both, ib, NULL, NULL, gb, 2);
+    vp_stereo_mix(oa, ia, NULL, NULL, ga, 1);
+    vp_stereo_mix(ob, ib, NULL, NULL, gb, 2);
     for (int i = 0; i < N; i++) {
         HT_CHECK(both[i][0] == oa[i][0] + ob[i][0]);
         HT_CHECK(both[i][1] == oa[i][1] + ob[i][1]);
@@ -419,6 +419,12 @@ static void test_3d_bins(void)
     for (int i = 0; i < N; i++) {
         HT_CHECK(fabsf(out[i][0] - mono[i][0]) < 1e-6f && out[i][1] == 0.0f);
     }
+    /* with its I3DL2 filter, sends 5 and 7 carry the room path */
+    HT_EQ_INT(vp_send_channel(5, true, true, 1), VP_SOURCE_ROOM);
+    HT_EQ_INT(vp_send_channel(7, true, true, 1), VP_SOURCE_ROOM);
+    HT_EQ_INT(vp_send_channel(6, true, true, 1), 0);
+    HT_EQ_INT(vp_send_channel(5, true, false, 1), 0);
+    HT_EQ_INT(vp_send_channel(1, true, true, 1), VP_SOURCE_EARS);
 }
 
 /* only LFE or non-speaker sends audible: the monitor's mix */

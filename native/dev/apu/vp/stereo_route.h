@@ -69,16 +69,22 @@
 #define VP_SENDS            8
 #define VP_DOWNMIX_SIDE     0.70710678f     /* -3 dB */
 
-/* Sources: the voice's two channels, then a 3D voice's two ears */
-#define VP_SOURCES 4
+/* Sources: two voice channels, two HRTF ears and the I3DL2 room path. */
+#define VP_SOURCES 5
 #define VP_SOURCE_EARS 2
+#define VP_SOURCE_ROOM 4
 
-/* The source of a voice's send slot: a 3D voice's HRTF outputs (slots 0 to
- * 3) its left ear for the first two and its right ear for the last two; any
- * other send its own channel, the slot modulo channels */
-static inline unsigned vp_send_channel(int slot, bool three_d, unsigned channels)
+/* Route 3D sends 0–3 to the HRTF ears and I3DL2 sends 5 and 7 to the room.
+ * Other sends select a voice channel by slot modulo channel count. */
+static inline unsigned vp_send_channel(int slot, bool three_d, bool room, unsigned channels)
 {
-    return three_d && slot < 4 ? VP_SOURCE_EARS + ((unsigned)slot >> 1) : (unsigned)slot % channels;
+    if (three_d && slot < 4) {
+        return VP_SOURCE_EARS + ((unsigned)slot >> 1);
+    }
+    if (room && (slot == 5 || slot == 7)) {
+        return VP_SOURCE_ROOM;
+    }
+    return (unsigned)slot % channels;
 }
 
 /* A 2D voice's route in the VP's own mix, a sound's (vp.c) */
@@ -138,10 +144,10 @@ static inline int vp_stereo_classify(const int bin[VP_SENDS], const float att[VP
  * speaker send's ea * attenuation / 2^shift[send] (its headroom) added in by
  * its downmix weights; every gain 0 when its speaker sends are muted.
  * channels: the voice's; three_d: a 3D voice, its first four sends its
- * ears'. */
+ * ears'; room: its I3DL2 room path on sends 5 and 7. */
 static inline void vp_stereo_gains(const int bin[VP_SENDS], const float att[VP_SENDS],
                                    const uint8_t shift[VP_SENDS], unsigned channels, bool three_d,
-                                   float ea, float g[2][VP_SOURCES])
+                                   bool room, float ea, float g[2][VP_SOURCES])
 {
     float w[2];
     for (int s = 0; s < VP_SOURCES; s++) {
@@ -152,19 +158,19 @@ static inline void vp_stereo_gains(const int bin[VP_SENDS], const float att[VP_S
             continue;
         }
         const float a = ea * att[b] / (float)(1u << shift[b]);
-        const unsigned src = vp_send_channel(b, three_d, channels);
+        const unsigned src = vp_send_channel(b, three_d, room, channels);
         g[0][src] += a * w[0];
         g[1][src] += a * w[1];
     }
 }
 
 /* The voice's frame into the speakers by its gains (vp_stereo_gains), added
- * to out: a mono voice's one channel, a stereo voice's two, and a 3D
- * voice's ears (ears: NULL for a 2D voice). */
+ * to out: a mono voice's one channel, a stereo voice's two, a 3D voice's
+ * ears and room path (ears, room: NULL without). */
 static inline void vp_stereo_mix(float out[NUM_SAMPLES_PER_FRAME][2],
                                  const float in[NUM_SAMPLES_PER_FRAME][2],
-                                 const float (*ears)[2], const float g[2][VP_SOURCES],
-                                 unsigned channels)
+                                 const float (*ears)[2], const float *room,
+                                 const float g[2][VP_SOURCES], unsigned channels)
 {
     for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
         float l = g[0][0] * in[i][0], r = g[1][0] * in[i][0];
@@ -175,6 +181,10 @@ static inline void vp_stereo_mix(float out[NUM_SAMPLES_PER_FRAME][2],
         if (ears) {
             l += g[0][2] * ears[i][0] + g[0][3] * ears[i][1];
             r += g[1][2] * ears[i][0] + g[1][3] * ears[i][1];
+        }
+        if (room) {
+            l += g[0][VP_SOURCE_ROOM] * room[i];
+            r += g[1][VP_SOURCE_ROOM] * room[i];
         }
         out[i][0] += l;
         out[i][1] += r;

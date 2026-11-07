@@ -47,6 +47,10 @@ typedef struct MCPXAPUVoiceFilter {
     bool ending;
     uint32_t silence_fed;
     sv_filter svf[2];
+    sv_filter peq[2];           /* ParaEQ state */
+    float i3dl2[2];             /* I3DL2 direct and room filters */
+    float dls2_f[2], peq_f[2];  /* last frame's frequency coefficients */
+    bool dls2_set, peq_set;     /* filter ran last frame */
     HrtfFilter hrtf;
     /* The voice table for voice_resample_callback (the resampler's callback
      * signature cannot be extended). Set by voice_resample before
