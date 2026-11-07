@@ -208,10 +208,6 @@ static uint32_t attenuation_gain(int att)
     return (256 * n0 - 4 * (n0 - n1) * (att & 63)) >> 6;
 }
 
-/* attenuate()'s values for the 4096 volumes, computed once (a voice asks
- * for 16 a frame) */
-static float g_attenuation[0x1000];
-
 static void attenuation_init(void)
 {
     for (int k = 0; k <= 48; k++) {
@@ -220,14 +216,6 @@ static void attenuation_init(void)
     for (int k = 49; k < 64; k++) {
         attenuation_nodes[k] = attenuation_nodes[48] * (63 - k) / 15;
     }
-    for (int vol = 0; vol < 0x1000; vol++) {
-        g_attenuation[vol] = attenuation_gain(vol) / 16384.0f;
-    }
-}
-
-static float attenuate(uint16_t vol)
-{
-    return g_attenuation[vol & 0xFFF];
 }
 
 /* A table's pointer from the guest's base: NULL with no base yet or without
@@ -2280,15 +2268,17 @@ static void voice_process(MCPXAPUState *d, uint8_t *c,
             mp_bin = peek_ahead_multipass_bin(d, c, v, &mp_dst_voice);
         }
 
+        /* the routes' gains as the mix bins take them (the envelope's
+         * level included, a 3D voice's HRTF routes silent without an
+         * entry) */
         float g = 0.0f;
         for (int b = 0; b < 8; b++) {
             if (bin[b] == mp_bin) {
                 continue;
             }
             float hr = 1 << d->vp.submix_headroom[bin[b]];
-            g = fmax(g, attenuate(vol[b]) / hr);
+            g = fmax(g, route_to[b] / 16384.0f / hr);
         }
-        g *= ea_value;
         for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
             sample_buf[i][0] += g*samples[i][0];
             sample_buf[i][1] += g*samples[i][1];
