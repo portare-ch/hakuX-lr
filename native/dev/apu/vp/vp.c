@@ -155,6 +155,9 @@ static void voice_reset_filters(MCPXAPUState *d, uint16_t v)
     memset(&d->vp.filters[v].i3dl2, 0, sizeof(d->vp.filters[v].i3dl2));
     d->vp.filters[v].dls2_set = false;
     d->vp.filters[v].peq_set = false;
+    d->vp.filters[v].gains = false;
+    memset(&d->vp.filters[v].lfo_phase, 0, sizeof(d->vp.filters[v].lfo_phase));
+    d->vp.filters[v].lfo_armed = false;
     d->vp.filters[v].ending = false;
     d->vp.filters[v].silence_fed = 0;
     d->vp.route[v] = VP_ROUTE_UNDECIDED;
@@ -176,17 +179,6 @@ static void voice_reset_filters(MCPXAPUState *d, uint16_t v)
     hrtf_filter_clear_history(&d->vp.filters[v].hrtf);
 }
 
-static float clampf(float v, float min, float max)
-{
-    if (v < min) {
-        return min;
-    } else if (v > max) {
-        return max;
-    } else {
-        return v;
-    }
-}
-
 /* Filter coefficients take 2^(x / 4096) to a 1024th of an octave, then to
  * the nearest 1/65536, at most FFFFh (measured: D97Eh gave 3043h). */
 static float filter_coefficient(double x)
@@ -197,14 +189,38 @@ static float filter_coefficient(double x)
     return fmin(round(c), 65535.0) / 65536.0;
 }
 
-/* attenuate()'s values for the 4096 volumes, computed once (the same
- * expression: a voice asks for 16 a frame) */
+/* Route gains in 1/16384, attenuations in 1/64 dB (measured): straight lines
+ * between whole decibels through round(4095 * 10^(-k / 20)), rounded down;
+ * from 48 dB a straight line to nothing at 63 dB. Attenuation 0 is unity. */
+static uint32_t attenuation_nodes[64];
+
+static uint32_t attenuation_gain(int att)
+{
+    if (att <= 0) {
+        return 16384;
+    }
+    if (att >= 63 * 64) {
+        return 0;
+    }
+    uint32_t n0 = attenuation_nodes[att >> 6];
+    uint32_t n1 = attenuation_nodes[(att >> 6) + 1];
+    return (256 * n0 - 4 * (n0 - n1) * (att & 63)) >> 6;
+}
+
+/* attenuate()'s values for the 4096 volumes, computed once (a voice asks
+ * for 16 a frame) */
 static float g_attenuation[0x1000];
 
 static void attenuation_init(void)
 {
+    for (int k = 0; k <= 48; k++) {
+        attenuation_nodes[k] = floor(4095.0 * pow(10.0, -k / 20.0) + 0.5);
+    }
+    for (int k = 49; k < 64; k++) {
+        attenuation_nodes[k] = attenuation_nodes[48] * (63 - k) / 15;
+    }
     for (int vol = 0; vol < 0x1000; vol++) {
-        g_attenuation[vol] = (vol == 0xFFF) ? 0.0 : powf(10.0f, vol/(64.0 * -20.0f));
+        g_attenuation[vol] = attenuation_gain(vol) / 16384.0f;
     }
 }
 
@@ -646,7 +662,8 @@ static void fe_method(MCPXAPUState *d, uint32_t method, uint32_t argument)
                                NV_PAVS_VOICE_CFG_ENV0_EA_DELAYTIME);
             voice_set_mask(d, selected_handle, NV_PAVS_VOICE_CUR_ECNT,
                            NV_PAVS_VOICE_CUR_ECNT_EACOUNT, delay_time * 16);
-        } else if (ea_start == NV_PAVS_VOICE_PAR_STATE_EFCUR_ATTACK) {
+        } else if (ea_start == NV_PAVS_VOICE_PAR_STATE_EFCUR_ATTACK ||
+                   ea_start == NV_PAVS_VOICE_PAR_STATE_EFCUR_DECAY) {
             voice_set_mask(d, selected_handle, NV_PAVS_VOICE_CUR_ECNT,
                            NV_PAVS_VOICE_CUR_ECNT_EACOUNT, 0);
         } else if (ea_start == NV_PAVS_VOICE_PAR_STATE_EFCUR_HOLD) {
@@ -667,7 +684,8 @@ static void fe_method(MCPXAPUState *d, uint32_t method, uint32_t argument)
                                NV_PAVS_VOICE_CFG_ENV0_EA_DELAYTIME);
             voice_set_mask(d, selected_handle, NV_PAVS_VOICE_CUR_ECNT,
                            NV_PAVS_VOICE_CUR_ECNT_EFCOUNT, delay_time * 16);
-        } else if (ef_start == NV_PAVS_VOICE_PAR_STATE_EFCUR_ATTACK) {
+        } else if (ef_start == NV_PAVS_VOICE_PAR_STATE_EFCUR_ATTACK ||
+                   ef_start == NV_PAVS_VOICE_PAR_STATE_EFCUR_DECAY) {
             voice_set_mask(d, selected_handle, NV_PAVS_VOICE_CUR_ECNT,
                            NV_PAVS_VOICE_CUR_ECNT_EFCOUNT, 0);
         } else if (ef_start == NV_PAVS_VOICE_PAR_STATE_EFCUR_HOLD) {
@@ -776,8 +794,16 @@ static void fe_method(MCPXAPUState *d, uint32_t method, uint32_t argument)
         voice_set_mask(d, d->regs[NV_PAPU_FECV], NV_PAVS_VOICE_TAR_VOLC,
                        0xFFFFFFFF, argument);
         break;
+    case NV1BA0_PIO_SET_VOICE_LFO_DELAY:
+        voice_set_mask(d, d->regs[NV_PAPU_FECV], NV_PAVS_VOICE_PAR_LFO_DELAY,
+                       0xFFFFFFFF, argument);
+        break;
     case NV1BA0_PIO_SET_VOICE_LFO_ENV:
         voice_set_mask(d, d->regs[NV_PAPU_FECV], NV_PAVS_VOICE_TAR_LFO_ENV,
+                       0xFFFFFFFF, argument);
+        break;
+    case NV1BA0_PIO_SET_VOICE_LFO_MOD:
+        voice_set_mask(d, d->regs[NV_PAPU_FECV], NV_PAVS_VOICE_TAR_LFO_MOD,
                        0xFFFFFFFF, argument);
         break;
     case NV1BA0_PIO_SET_VOICE_TAR_FCA:
@@ -1045,7 +1071,9 @@ void mcpx_apu_vp_write(void *opaque, uint32_t addr, uint64_t val, unsigned int s
     case NV1BA0_PIO_SET_VOICE_TAR_VOLA:
     case NV1BA0_PIO_SET_VOICE_TAR_VOLB:
     case NV1BA0_PIO_SET_VOICE_TAR_VOLC:
+    case NV1BA0_PIO_SET_VOICE_LFO_DELAY:
     case NV1BA0_PIO_SET_VOICE_LFO_ENV:
+    case NV1BA0_PIO_SET_VOICE_LFO_MOD:
     case NV1BA0_PIO_SET_VOICE_TAR_FCA:
     case NV1BA0_PIO_SET_VOICE_TAR_FCB:
     case NV1BA0_PIO_SET_VOICE_TAR_PITCH:
@@ -1145,6 +1173,22 @@ static uint64_t get_data_ptr(MCPXAPUState *d, uint64_t sge_base,
     return prd_address + addr % APU_PAGE_SIZE;
 }
 
+static float envelope_level(MCPXAPUState *d, uint8_t *c, uint16_t v, uint32_t lvl_reg,
+                            uint32_t lvl_mask, double units)
+{
+    voice_set_mask_nolock(d, c, v, lvl_reg, lvl_mask, MIN(255, (int)units / 8));
+    return units / 2048.0;
+}
+
+/* Steps an envelope by one frame and returns its level (measured):
+ * - Each phase steps before its frame plays; delay and hold last 16T + 1
+ *   frames. Attack rises to 2048ths in R * 16 frames.
+ * - Decay falls by e^(-1/2R) a frame from full to the sustain level, s/255;
+ *   a decay rate of 0 holds one frame at full.
+ * - Release holds the level byte (as 256ths) for a frame, falls by
+ *   e^(-1/2R) a frame, and from 11R frames runs in a straight line to
+ *   nothing at 15R, when the envelope ends.
+ * - The F envelope reads 0 while off. */
 static float voice_step_envelope(MCPXAPUState *d, uint8_t *c, uint16_t v,
                            uint32_t reg_0,
                            uint32_t reg_a, uint32_t rr_reg, uint32_t rr_mask,
@@ -1152,148 +1196,89 @@ static float voice_step_envelope(MCPXAPUState *d, uint8_t *c, uint16_t v,
                            uint32_t count_mask, uint32_t cur_mask)
 {
     uint8_t cur = voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_PAR_STATE, cur_mask);
+    uint32_t count = voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_CUR_ECNT, count_mask);
+    uint32_t attack_rate =
+        voice_get_mask_nolock(d, c, v, reg_0, NV_PAVS_VOICE_CFG_ENV0_EA_ATTACKRATE);
+    uint32_t hold_time =
+        voice_get_mask_nolock(d, c, v, reg_a, NV_PAVS_VOICE_CFG_ENVA_EA_HOLDTIME);
+    uint32_t decay_rate =
+        voice_get_mask_nolock(d, c, v, reg_a, NV_PAVS_VOICE_CFG_ENVA_EA_DECAYRATE);
+    uint32_t sustain_level =
+        voice_get_mask_nolock(d, c, v, reg_a, NV_PAVS_VOICE_CFG_ENVA_EA_SUSTAINLEVEL);
+    uint32_t release_rate = voice_get_mask_nolock(d, c, v, rr_reg, rr_mask);
+    double sustain = floor(sustain_level * 2048.0 / 255.0);
+    bool amplitude = count_mask == NV_PAVS_VOICE_CUR_ECNT_EACOUNT;
+
     switch (cur) {
     case NV_PAVS_VOICE_PAR_STATE_EFCUR_OFF:
         voice_set_mask_nolock(d, c, v, NV_PAVS_VOICE_CUR_ECNT, count_mask, 0);
-        voice_set_mask_nolock(d, c, v, lvl_reg, lvl_mask, 0xFF);
-        return 1.0f;
-    case NV_PAVS_VOICE_PAR_STATE_EFCUR_DELAY: {
-        uint16_t count =
-            voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_CUR_ECNT, count_mask);
-        voice_set_mask_nolock(d, c, v, lvl_reg, lvl_mask, 0x00); // FIXME: Confirm this?
-
+        return envelope_level(d, c, v, lvl_reg, lvl_mask, amplitude ? 2048 : 0);
+    case NV_PAVS_VOICE_PAR_STATE_EFCUR_DELAY:
         if (count == 0) {
-            cur++;
-            voice_set_mask_nolock(d, c, v, NV_PAVS_VOICE_PAR_STATE, cur_mask, cur);
-            count = 0;
+            voice_set_mask_nolock(d, c, v, NV_PAVS_VOICE_PAR_STATE, cur_mask, cur + 1);
         } else {
             count--;
         }
         voice_set_mask_nolock(d, c, v, NV_PAVS_VOICE_CUR_ECNT, count_mask, count);
-        return 0.0f;
-    }
+        return envelope_level(d, c, v, lvl_reg, lvl_mask, 0);
     case NV_PAVS_VOICE_PAR_STATE_EFCUR_ATTACK: {
-        uint16_t count =
-            voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_CUR_ECNT, count_mask);
-        uint16_t attack_rate =
-            voice_get_mask_nolock(d, c, v, reg_0, NV_PAVS_VOICE_CFG_ENV0_EA_ATTACKRATE);
-
-        float value;
-        if (attack_rate == 0) {
-            // FIXME: [division by zero]
-            //       Got crackling sound in hardware for amplitude env.
-            value = 255.0f;
-        } else {
-            if (count <= (attack_rate * 16)) {
-                value = (count * 0xFF) / (attack_rate * 16);
-            } else {
-                // FIXME: Overflow in hardware
-                //       The actual value seems to overflow, but not sure how
-                value = 255.0f;
-            }
+        count = MIN(count + 1, 0xFFFF);
+        double units = 2048;
+        if (attack_rate != 0) {
+            units = MIN(2048, floor(2048.0 * count / (attack_rate * 16)));
         }
-        voice_set_mask_nolock(d, c, v, lvl_reg, lvl_mask, value);
-        // FIXME: Comparison could also be the other way around?! Test please.
-        if (count == (attack_rate * 16)) {
-            cur++;
-            voice_set_mask_nolock(d, c, v, NV_PAVS_VOICE_PAR_STATE, cur_mask, cur);
-            uint16_t hold_time =
-                voice_get_mask_nolock(d, c, v, reg_a, NV_PAVS_VOICE_CFG_ENVA_EA_HOLDTIME);
-            count = hold_time * 16; // FIXME: Skip next phase if count is 0?
-                                    // [other instances too]
-        } else {
-            count++;
+        if (attack_rate == 0 || count >= attack_rate * 16) {
+            voice_set_mask_nolock(d, c, v, NV_PAVS_VOICE_PAR_STATE, cur_mask, cur + 1);
+            count = hold_time * 16;
         }
         voice_set_mask_nolock(d, c, v, NV_PAVS_VOICE_CUR_ECNT, count_mask, count);
-        return value / 255.0f;
+        return envelope_level(d, c, v, lvl_reg, lvl_mask, units);
     }
-    case NV_PAVS_VOICE_PAR_STATE_EFCUR_HOLD: {
-        uint16_t count =
-            voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_CUR_ECNT, count_mask);
-        voice_set_mask_nolock(d, c, v, lvl_reg, lvl_mask, 0xFF);
-
+    case NV_PAVS_VOICE_PAR_STATE_EFCUR_HOLD:
         if (count == 0) {
-            cur++;
-            voice_set_mask_nolock(d, c, v, NV_PAVS_VOICE_PAR_STATE, cur_mask, cur);
-            uint16_t decay_rate = voice_get_mask_nolock(
-                d, c, v, reg_a, NV_PAVS_VOICE_CFG_ENVA_EA_DECAYRATE);
-            count = decay_rate * 16;
+            voice_set_mask_nolock(d, c, v, NV_PAVS_VOICE_PAR_STATE, cur_mask, cur + 1);
         } else {
             count--;
         }
         voice_set_mask_nolock(d, c, v, NV_PAVS_VOICE_CUR_ECNT, count_mask, count);
-        return 1.0f;
-    }
+        return envelope_level(d, c, v, lvl_reg, lvl_mask, 2048);
     case NV_PAVS_VOICE_PAR_STATE_EFCUR_DECAY: {
-        uint16_t count =
-            voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_CUR_ECNT, count_mask);
-        uint16_t decay_rate =
-            voice_get_mask_nolock(d, c, v, reg_a, NV_PAVS_VOICE_CFG_ENVA_EA_DECAYRATE);
-        uint8_t sustain_level =
-            voice_get_mask_nolock(d, c, v, reg_a, NV_PAVS_VOICE_CFG_ENVA_EA_SUSTAINLEVEL);
-
-        // FIXME: Decay should return a value no less than sustain
-        float value;
-        if (decay_rate == 0) {
-            value = 0.0f;
-        } else {
-            // FIXME: This formula and threshold is not accurate, but I can't
-            // get it any better for now
-            value = 255.0f * powf(0.99988799f, (decay_rate * 16 - count) *
-                                                   4096 / decay_rate);
+        double units = 2048;
+        if (decay_rate != 0) {
+            count = MIN(count + 1, 0xFFFF);
+            units = floor(2048.0 * exp(-(double)count / (2 * decay_rate)));
         }
-        if (value <= (sustain_level + 0.2f) || (value > 255.0f)) {
-            // FIXME: Should we still update lvl?
-            cur++;
-            voice_set_mask_nolock(d, c, v, NV_PAVS_VOICE_PAR_STATE, cur_mask, cur);
-        } else {
-            count--;
-            voice_set_mask_nolock(d, c, v, NV_PAVS_VOICE_CUR_ECNT, count_mask, count);
-            voice_set_mask_nolock(d, c, v, lvl_reg, lvl_mask, value);
-        }
-        return value / 255.0f;
-    }
-    case NV_PAVS_VOICE_PAR_STATE_EFCUR_SUSTAIN: {
-        uint8_t sustain_level =
-            voice_get_mask_nolock(d, c, v, reg_a, NV_PAVS_VOICE_CFG_ENVA_EA_SUSTAINLEVEL);
-        voice_set_mask_nolock(
-            d, c, v, NV_PAVS_VOICE_CUR_ECNT, count_mask,
-            0x00); // FIXME: is this only set to 0 once or forced to zero?
-        voice_set_mask_nolock(d, c, v, lvl_reg, lvl_mask, sustain_level);
-        return sustain_level / 255.0f;
-    }
-    case NV_PAVS_VOICE_PAR_STATE_EFCUR_RELEASE: {
-        uint16_t count =
-            voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_CUR_ECNT, count_mask);
-        uint16_t release_rate = voice_get_mask_nolock(d, c, v, rr_reg, rr_mask);
-
-        if (release_rate == 0) {
+        if (decay_rate == 0 || units <= sustain) {
+            units = decay_rate == 0 ? 2048 : sustain;
+            voice_set_mask_nolock(d, c, v, NV_PAVS_VOICE_PAR_STATE, cur_mask, cur + 1);
             count = 0;
         }
-
-        float value = 0;
-        if (count == 0) {
-            voice_set_mask_nolock(d, c, v, NV_PAVS_VOICE_PAR_STATE, cur_mask, ++cur);
-        } else {
-            // FIXME: Appears to be an exponential but unsure about actual
-            // curve; performing standard decay of current level to T60 over the
-            // release interval which seems about right.
-            // FIXME: Based on sustain level or just decay of current level?
-            // FIXME: Update level? A very similar, alternative decay function
-            // (probably what the hw actually does): y(t)=2^(-10t), which would
-            // permit simpler attenuation more efficiently and update level on
-            // each round.
-            float pos = clampf(1 - count / (release_rate * 16.0), 0, 1);
-            uint8_t lvl = voice_get_mask_nolock(d, c, v, lvl_reg, lvl_mask);
-            value = powf(M_E, -6.91*pos)*lvl;
-            count--; // FIXME: Should release count ascend or descend?
-            voice_set_mask_nolock(d, c, v, NV_PAVS_VOICE_CUR_ECNT, count_mask, count);
+        voice_set_mask_nolock(d, c, v, NV_PAVS_VOICE_CUR_ECNT, count_mask, count);
+        return envelope_level(d, c, v, lvl_reg, lvl_mask, units);
+    }
+    case NV_PAVS_VOICE_PAR_STATE_EFCUR_SUSTAIN:
+        voice_set_mask_nolock(d, c, v, NV_PAVS_VOICE_CUR_ECNT, count_mask, 0);
+        voice_set_mask_nolock(d, c, v, lvl_reg, lvl_mask, sustain_level);
+        return sustain / 2048.0;
+    case NV_PAVS_VOICE_PAR_STATE_EFCUR_RELEASE: {
+        /* The count runs down from R * 16 */
+        uint32_t t = release_rate * 16 > count ? release_rate * 16 - count : 0;
+        if (release_rate == 0 || t >= release_rate * 15) {
+            voice_set_mask_nolock(d, c, v, NV_PAVS_VOICE_PAR_STATE, cur_mask, cur + 1);
+            voice_set_mask_nolock(d, c, v, NV_PAVS_VOICE_CUR_ECNT, count_mask, 0);
+            return 0.0f;
         }
-
-        return value / 255.0f;
+        voice_set_mask_nolock(d, c, v, NV_PAVS_VOICE_CUR_ECNT, count_mask,
+                              count ? count - 1 : 0);
+        double start = voice_get_mask_nolock(d, c, v, lvl_reg, lvl_mask) * 8.0;
+        double fall = floor(start * exp(-(double)t / (2 * release_rate)));
+        double tail = floor(start * 2.0 * (release_rate * 15 - t) /
+                                (2048.0 * release_rate) +
+                            0.5);
+        return (t < release_rate * 11 ? MAX(fall, tail) : tail) / 2048.0;
     }
     case NV_PAVS_VOICE_PAR_STATE_EFCUR_FORCE_RELEASE:
-        if (count_mask == NV_PAVS_VOICE_CUR_ECNT_EACOUNT) {
+        if (amplitude) {
             voice_off_nolock(d, c, v);
         }
         return 0.0f;
@@ -1302,6 +1287,58 @@ static float voice_step_envelope(MCPXAPUState *d, uint8_t *c, uint16_t v,
         assert(false);
         return 0.0f;
     }
+}
+
+/* Advance each 16-bit phase once per frame after its delay. The bipolar
+ * triangle rises first. One depth unit scales to 8 attenuation units,
+ * 32 pitch units or 256 cutoff units. */
+static void voice_step_lfos(MCPXAPUState *d, uint8_t *c, uint16_t v, float *attenuation,
+                            float *pitch, float *cutoff)
+{
+    MCPXAPUVoiceFilter *filter = &d->vp.filters[v];
+    if (!filter->lfo_armed) {
+        uint32_t misc = voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_CFG_MISC, 0xFFFFFFFF);
+        filter->lfo_wait[0] =
+            (misc & NV_PAVS_VOICE_CFG_MISC_LFOA_DELAY_ENABLE) ?
+                voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_PAR_LFO_DELAY,
+                                      NV_PAVS_VOICE_PAR_LFO_DELAY_LFOA) :
+                0;
+        filter->lfo_wait[1] =
+            (misc & NV_PAVS_VOICE_CFG_MISC_LFOF_DELAY_ENABLE) ?
+                voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_PAR_LFO_DELAY,
+                                      NV_PAVS_VOICE_PAR_LFO_DELAY_LFOF) :
+                0;
+        filter->lfo_armed = true;
+    }
+
+    const uint32_t delta_mask[2] = { NV_PAVS_VOICE_TAR_LFO_ENV_LFOA_DELTA,
+                                     NV_PAVS_VOICE_TAR_LFO_ENV_LFOF_DELTA };
+    float value[2] = { 0.0f, 0.0f };
+    for (int k = 0; k < 2; k++) {
+        if (filter->lfo_wait[k]) {
+            filter->lfo_wait[k]--;
+            continue;
+        }
+        filter->lfo_phase[k] +=
+            voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_TAR_LFO_ENV, delta_mask[k]);
+        int p = filter->lfo_phase[k];
+        value[k] = (p < 0x4000 ? p :
+                    p < 0xC000 ? 0x8000 - p :
+                                 p - 0x10000) /
+                   16384.0f;
+    }
+
+    int8_t a_amplitude = voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_TAR_LFO_MOD,
+                                               NV_PAVS_VOICE_TAR_LFO_MOD_LFOA_AMPLITUDE);
+    int8_t a_pitch = voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_TAR_LFO_MOD,
+                                           NV_PAVS_VOICE_TAR_LFO_MOD_LFOA_PITCH);
+    int8_t a_cutoff = voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_TAR_LFO_MOD,
+                                            NV_PAVS_VOICE_TAR_LFO_MOD_LFOA_CUTOFF);
+    int8_t f_pitch = voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_TAR_LFO_MOD,
+                                           NV_PAVS_VOICE_TAR_LFO_MOD_LFOF_PITCH);
+    *attenuation = a_amplitude * 8.0f * value[0];
+    *pitch = (a_pitch * value[0] + f_pitch * value[1]) * 32.0f;
+    *cutoff = a_cutoff * 256.0f * value[0];
 }
 
 static int voice_get_samples(MCPXAPUState *d, uint8_t *c, uint32_t v,
@@ -1791,7 +1828,10 @@ static void voice_process(MCPXAPUState *d, uint8_t *c,
                                NV_PAVS_VOICE_TAR_PITCH_LINK_PITCH);
     int8_t ps = voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_CFG_ENV0,
                                NV_PAVS_VOICE_CFG_ENV0_EF_PITCHSCALE);
-    float rate = 1.0 / powf(2.0f, (p + ps * 32 * ef_value) / 4096.0f);
+    float lfo_attenuation, lfo_pitch, lfo_cutoff;
+    voice_step_lfos(d, c, v, &lfo_attenuation, &lfo_pitch, &lfo_cutoff);
+    double pitch = p + ps * 32.0 * ef_value + lfo_pitch;
+    float rate = 1.0 / powf(2.0f, pitch / 4096.0f);
 
     float ea_value = voice_step_envelope(
         d, c, v, NV_PAVS_VOICE_CFG_ENV0, NV_PAVS_VOICE_CFG_ENVA,
@@ -2031,7 +2071,7 @@ static void voice_process(MCPXAPUState *d, uint8_t *c,
      * level. Ramp the resulting coefficients linearly in frequency. */
     int8_t fc_scale = voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_CFG_ENV1,
                                             NV_PAVS_VOICE_CFG_ENV1_EF_FCSCALE);
-    double fc_bend = fc_scale * 256.0 * ef_value;
+    double fc_bend = fc_scale * 256.0 * ef_value + lfo_cutoff;
     MCPXAPUVoiceFilter *vfl = &d->vp.filters[v];
 
     if (lpf) {
@@ -2140,18 +2180,43 @@ static void voice_process(MCPXAPUState *d, uint8_t *c,
     /* The VP's own mix (the default, no DSP): the frame's mixbins are
      * cleared unread at its end, but for the multipass bin the next voices
      * of a group read (scheduled together, voice_work_schedule) */
+    /* Multiply attenuation by envelope level and round down to 1/16384.
+     * Ramp from the previous gain, starting at zero for a new voice. */
+    const uint32_t level = lrint(ea_value * 2048.0f);
+    float route_from[8], route_to[8];
+    for (int b = 0; b < 8; b++) {
+        float to = 0.0f;
+        if (!(three_d && b < 4 && hrtf_handle == HRTF_NULL_HANDLE) && vol[b] != 0xFFF) {
+            int att = vol[b] + (int)floorf(lfo_attenuation);
+            to = (float)((attenuation_gain(att) * level) >> 11);
+        }
+        route_from[b] = vfl->gains ? vfl->route_gain[b] : 0.0f;
+        route_to[b] = to;
+        vfl->route_gain[b] = to;
+    }
+    vfl->gains = true;
+
     const bool mon_vp = d->monitor.point == MCPX_APU_DEBUG_MON_VP;
     for (int b = 0; b < 8; b++) {
         if (mon_vp && bin[b] != MULTIPASS_BIN) {
             continue;
         }
-        if (three_d && b < 4 && hrtf_handle == HRTF_NULL_HANDLE) {
+        const float from = route_from[b], to = route_to[b];
+        if (from == 0.0f && to == 0.0f) {
             continue;
         }
         /* Hardware uses the destination bin's headroom for HRTF sends. */
-        float hr = 1 << d->vp.submix_headroom[bin[b]];
-        float g = ea_value * attenuate(vol[b]) / hr;
-        mix_one_bin(mixbins[bin[b]], channel_buf[vp_send_channel(b, three_d, i3dl2, channels)], g);
+        const float scale = 1.0f / (16384 << d->vp.submix_headroom[bin[b]]);
+        const float *src = channel_buf[vp_send_channel(b, three_d, i3dl2, channels)];
+        if (from == to) {
+            mix_one_bin(mixbins[bin[b]], src, floorf(to) * scale);
+        } else {
+            float g[NUM_SAMPLES_PER_FRAME];
+            for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
+                g[i] = floorf(from + (to - from) * (i / 32.0f)) * scale;
+            }
+            mix_one_bin_ramp(mixbins[bin[b]], src, g);
+        }
     }
 
     if (d->monitor.point == MCPX_APU_DEBUG_MON_VP) {
@@ -2166,7 +2231,7 @@ static void voice_process(MCPXAPUState *d, uint8_t *c,
             float att[VP_SENDS];
             uint8_t shift[VP_SENDS];
             for (int b = 0; b < VP_SENDS; b++) {
-                att[b] = three_d && b < 4 && hrtf_handle == HRTF_NULL_HANDLE ? 0.0f : attenuate(vol[b]);
+                att[b] = route_to[b] / 16384.0f;    /* the envelope's level included */
                 shift[b] = d->vp.submix_headroom[bin[b]];
             }
             if (d->vp.route[v] == VP_ROUTE_UNDECIDED) {
@@ -2174,7 +2239,7 @@ static void voice_process(MCPXAPUState *d, uint8_t *c,
             }
             if (d->vp.route[v] == VP_ROUTE_SPEAKERS) {
                 float g2[2][VP_SOURCES];
-                vp_stereo_gains(bin, att, shift, channels, three_d, i3dl2, ea_value, g2);
+                vp_stereo_gains(bin, att, shift, channels, three_d, i3dl2, 1.0f, g2);
                 vp_stereo_mix(sample_buf, samples, three_d ? (const float (*)[2])ears : NULL,
                               i3dl2 ? room : NULL, g2, channels);
                 return;

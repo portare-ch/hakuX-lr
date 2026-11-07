@@ -128,6 +128,39 @@ static void test_mix(void)
     reset_level();
 }
 
+/* Check that ramped gains round like constant gains on each SIMD path. */
+static void test_mix_ramp(void)
+{
+    int ls[3];
+    const int nl = levels(ls);
+    for (int li = 0; li < nl; li++) {
+        set_level(ls[li]);
+        unsigned off = 0;
+        for (int trial = 0; trial < 2000; trial++) {
+            float src[NUM_SAMPLES_PER_FRAME], dst[NUM_SAMPLES_PER_FRAME], want[NUM_SAMPLES_PER_FRAME];
+            float g[NUM_SAMPLES_PER_FRAME];
+            const float from = rnd() * 2.0f, to = rnd() * 2.0f;
+            for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
+                g[i] = from + (to - from) * (i / 32.0f);
+                src[i] = rnd() * (i & 1 ? 1.0f : 1e-3f);
+                dst[i] = rnd() * 4.0f;
+                if (fused(ls[li])) {
+                    want[i] = fmaf(g[i], src[i], dst[i]);
+                } else {
+                    const float p = g[i] * src[i];
+                    want[i] = dst[i] + p;
+                }
+            }
+            mix_one_bin_ramp(dst, src, g);
+            off += memcmp(dst, want, sizeof(dst)) != 0;
+        }
+        fprintf(stderr, "  ramp %-8s %s: %u of 2000 frames off\n", level_name(ls[li]),
+                fused(ls[li]) ? "fused" : "multiply, add", off);
+        HT_EQ_INT(off, 0);
+    }
+    reset_level();
+}
+
 /* ---- the HRTF filter's dot product */
 
 /* NEON's hrtf_dot in scalar code: two 4-lane accumulators, each fused
@@ -392,6 +425,7 @@ int main(int argc, char **argv)
         return 0;
     }
     HT_RUN(test_mix);
+    HT_RUN(test_mix_ramp);
     HT_RUN(test_hrtf_neon_sums);
     HT_RUN(test_float_to_short);
     HT_RUN(test_linear_stereo);

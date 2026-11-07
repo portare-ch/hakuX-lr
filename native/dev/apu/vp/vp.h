@@ -51,6 +51,10 @@ typedef struct MCPXAPUVoiceFilter {
     float i3dl2[2];             /* I3DL2 direct and room filters */
     float dls2_f[2], peq_f[2];  /* last frame's frequency coefficients */
     bool dls2_set, peq_set;     /* filter ran last frame */
+    float route_gain[8];        /* each route's gain at the last frame's end, 1/16384 */
+    bool gains;                 /* previous gains valid */
+    uint16_t lfo_phase[2], lfo_wait[2];     /* LFO phases and remaining delays */
+    bool lfo_armed;             /* LFO delays initialized */
     HrtfFilter hrtf;
     /* The voice table for voice_resample_callback (the resampler's callback
      * signature cannot be extended). Set by voice_resample before
