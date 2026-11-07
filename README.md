@@ -304,5 +304,9 @@ game, as a new session may overwrite them:
 The emulator core and Android app are the work of the upstream hakuX
 contributors. This fork maintains the Linux and RetroArch integration.
 
-GNU GPL v3 or later ([COPYING](COPYING)). Third-party licenses are listed
-in [LICENSE](LICENSE) and [licenses/](licenses/).
+Upstream hakuX code is licensed under [GPL-3.0-or-later](COPYING).
+Original code from this fork marked `SPDX-License-Identifier: GPL-2.0-or-later`
+is also available under [GPL-2.0-or-later](licenses/GPL-2.0.txt).
+The combined hakuX-lr core is distributed under GPL-3.0-or-later.
+Third-party code keeps its own licenses, listed in [LICENSE](LICENSE)
+and [licenses/](licenses/).

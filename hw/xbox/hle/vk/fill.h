@@ -1,4 +1,5 @@
 /* Copyright (C) 2026-present PortareOS */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* Fill and smoothing state from the Xbox render registers.
  * No Vulkan dependency; see tests/hle/test_fill.c. */
 #ifndef HW_XBOX_HLE_VK_FILL_H

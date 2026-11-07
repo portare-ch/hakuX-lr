@@ -1,5 +1,6 @@
 #!/bin/sh
 # Copyright (C) 2026-present PortareOS
+# SPDX-License-Identifier: GPL-2.0-or-later
 # The libretro core for RetroArch on Android (arm64-v8a): built with the NDK
 # and packaged with its core info, stripped, with the licences and the
 # revisions it was built from, as

@@ -1,4 +1,5 @@
 /* Copyright (C) 2026-present PortareOS */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * hakuX native core — the VP's own stereo mix (MON_VP, the default without
  * the DSP) for 2D and 3D voices: a voice routed to the speakers is mixed

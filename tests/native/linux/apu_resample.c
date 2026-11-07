@@ -1,4 +1,5 @@
 /* Copyright (C) 2026-present PortareOS */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* The voices' resamplers (vp/resample.h) through the real voice processing,
  * linear and sinc (the hakux_audio_resampler option, NC_APU_RESAMPLER):
  * a looping 22.05 kHz voice's levels and its seamless loop, the pitch

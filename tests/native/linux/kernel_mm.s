@@ -1,4 +1,5 @@
 /* Copyright (C) 2026-present PortareOS */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* Failed-commit regression test, run by kernel_mm.py.
  * Repeat ten times: reject 256 MiB, then commit, write, and release 16 MiB.
  * Leaked pages block the smaller commit; leaked reservations exhaust VA space.

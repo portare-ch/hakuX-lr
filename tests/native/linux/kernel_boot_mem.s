@@ -1,4 +1,5 @@
 /* Copyright (C) 2026-present PortareOS */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* Boot memory regression test (kernel_boot_mem.py, 64 MiB RAM).
  * Check the boot reservation, copied window PDEs without a flush,
  * alias removal after a flush, and zero padding above the stack.

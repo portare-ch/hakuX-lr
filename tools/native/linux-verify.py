@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (C) 2026-present PortareOS
+# SPDX-License-Identifier: GPL-2.0-or-later
 """Verify the release archive and write its SHA-256 checksum.
 
 Check libretro exports, dependencies, DSP JIT, and ABI requirements:

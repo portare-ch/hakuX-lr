@@ -1,5 +1,6 @@
 #!/bin/sh
 # Copyright (C) 2026-present PortareOS
+# SPDX-License-Identifier: GPL-2.0-or-later
 # Package a committed libretro build with its metadata and licences.
 # Run after linux-build.sh in the same image from a clean checkout.
 set -eu

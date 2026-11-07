@@ -1,4 +1,5 @@
 /* Copyright (C) 2026-present PortareOS */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* Xbox fill and smoothing rules, based on nxdk_pgraph_tests captures. */
 #include "hw/xbox/hle/vk/fill.h"
 #include "hle_test.h"

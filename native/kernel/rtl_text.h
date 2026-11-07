@@ -1,4 +1,5 @@
 /* Copyright (C) 2026-present PortareOS */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * hakuX native core — the runtime library's pure string, number and
  * formatting routines, on host buffers (tests/native/rtl tests them).

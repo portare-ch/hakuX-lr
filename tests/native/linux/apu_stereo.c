@@ -1,4 +1,5 @@
 /* Copyright (C) 2026-present PortareOS */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* The VP's own mix (MON_VP, the default without the DSP) through the real
  * voice processing: voices set up and started by the PIO methods
  * DirectSound sends (mcpx_apu_vp_write), their PCM read from guest RAM

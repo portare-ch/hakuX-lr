@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-or-later
 """Convert an Xbox ISO to an optimized XISO-based DVD CHD.
 
 Requires the xdvdfs and chdman commands on PATH. The source is never modified.

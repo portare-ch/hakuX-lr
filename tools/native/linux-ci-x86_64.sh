@@ -1,5 +1,6 @@
 #!/bin/sh
 # Copyright (C) 2026-present PortareOS
+# SPDX-License-Identifier: GPL-2.0-or-later
 # Build, test and package the AMD64 KVM core with the DSP JIT.
 # Release builds use the Ubuntu 22.04 sysroot in the build image.
 # Set HAKUX_SYSROOT= to test with host libraries in separate directories,
