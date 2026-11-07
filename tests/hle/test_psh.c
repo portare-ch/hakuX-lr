@@ -747,6 +747,33 @@ static void test_dither(void)
     HT_CHECK(strstr(buf, "oColor = clamp(d * df - s * sf, 0.0, 1.0);") != NULL);
 }
 
+/* polygon smoothing: alpha times the pixel's coverage of the triangle,
+ * from the barycentric coordinates, by guest pixel, before the alpha test */
+static void test_poly_smooth(void)
+{
+    uint32_t rs[HLE_PS_REGS] = { 0 };
+    rs[HLE_PS_RGB_IN] = IN4(R_V0, R_ZERO | INVERT, R_ZERO, R_ZERO);
+    rs[HLE_PS_RGB_OUT] = R_R0 << 4;
+    rs[HLE_PS_COUNT] = 1;
+    HlePshKey k;
+    hle_psh_key(rs, &k);
+    HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), NULL) > 0);
+    HT_CHECK(strstr(buf, "gl_BaryCoordNoPerspEXT") == NULL);
+    HT_CHECK(strstr(buf, "GL_EXT_fragment_shader_barycentric") == NULL);
+    k.poly_smooth = 1;
+    k.alpha_test = 1;
+    k.alpha_func = 4;                                   /* GREATER */
+    size_t n = hle_psh_glsl(&k, buf, sizeof(buf), NULL);
+    HT_CHECK(n > 0 && n == strlen(buf));
+    dump("psh_poly_smooth");
+    HT_CHECK(strstr(buf, "#extension GL_EXT_fragment_shader_barycentric : require\n") != NULL);
+    HT_CHECK(strstr(buf, "vec3 bc = gl_BaryCoordNoPerspEXT, gx = dFdx(bc), gy = dFdy(bc);") != NULL);
+    HT_CHECK(strstr(buf, "float(max((pc.flags >> 16) & 255u, 1u));") != NULL);
+    const char *cv = strstr(buf, "outc.a *= cv.x * cv.y * cv.z;");
+    const char *at = strstr(buf, "if (!(a > r)) discard;");
+    HT_CHECK(cv != NULL && at != NULL && cv < at);
+}
+
 static void test_overflow(void)
 {
     uint32_t rs[HLE_PS_REGS] = { 0 };
@@ -776,6 +803,7 @@ int main(void)
     HT_RUN(test_sign_color_key);
     HT_RUN(test_dither);
     HT_RUN(test_aa_control);
+    HT_RUN(test_poly_smooth);
     HT_RUN(test_overflow);
     HT_DONE();
 }

@@ -33,9 +33,10 @@ enum {
     RS_WIREFRAMEOFFSETENABLE = 80, RS_SOLIDOFFSETENABLE = 81,
     RS_FOGENABLE = 92, RS_FOGTABLEMODE = 93, RS_FOGSTART = 94, RS_FOGEND = 95,
     RS_FOGDENSITY = 96, RS_SPECULARENABLE = 103, RS_POINTSPRITEENABLE = 118,
-    RS_FOGCOLOR = 138, RS_TWOSIDEDLIGHTING = 141, RS_ZENABLE = 143, RS_STENCILENABLE = 144,
-    RS_STENCILFAIL = 145,
-    RS_FRONTFACE = 146, RS_CULLMODE = 147, RS_SHADOWFUNC = 156, RS_LINEWIDTH = 157,
+    RS_FOGCOLOR = 138, RS_FILLMODE = 139, RS_BACKFILLMODE = 140, RS_TWOSIDEDLIGHTING = 141,
+    RS_ZENABLE = 143, RS_STENCILENABLE = 144, RS_STENCILFAIL = 145,
+    RS_FRONTFACE = 146, RS_CULLMODE = 147, RS_EDGEANTIALIAS = 151, RS_SHADOWFUNC = 156,
+    RS_LINEWIDTH = 157,
 };
 enum {
     TSS_ADDRESSU = 0, TSS_ADDRESSV, TSS_ADDRESSW, TSS_MAGFILTER, TSS_MINFILTER,
@@ -221,6 +222,9 @@ static const struct { uint16_t m, rs; } k_rs_map[] = {
     { 0x0310, RS_DITHERENABLE },        /* SET_DITHER_ENABLE */
     { 0x0380, RS_LINEWIDTH },           /* SET_LINE_WIDTH: 6.3 fixed point (< 0x200:
                                            hle_kelvin_method refuses the rest) */
+    /* SET_FRONT_POLYGON_MODE, SET_BACK_POLYGON_MODE: 0x1B00 points, 0x1B01
+     * lines, 0x1B02 fill (D3DFILLMODE's values; vk/draw.c) */
+    { 0x038C, RS_FILLMODE }, { 0x0390, RS_BACKFILLMODE },
 };
 
 void hle_kelvin_state(HleCmdState *st)
@@ -239,6 +243,11 @@ void hle_kelvin_state(HleCmdState *st)
         } else {
             st->eye[i] = k_eye[i];
         }
+    }
+    if (W(0x0320) || W(0x0324)) {
+        /* SET_LINE_SMOOTH_ENABLE (bit 0), SET_POLY_SMOOTH_ENABLE (bit 1), HLE's
+         * own encoding of the two (D3D's EDGEANTIALIAS sets both) */
+        rs[RS_EDGEANTIALIAS] = (R(0x0320) != 0) | (R(0x0324) != 0) << 1;
     }
     if (!W(0x0380)) {                   /* SET_LINE_WIDTH never written: 1.0 (an */
         rs[RS_LINEWIDTH] = 8;           /* explicit 0 draws no line, vk/draw.c) */
