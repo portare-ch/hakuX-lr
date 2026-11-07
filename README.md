@@ -77,11 +77,6 @@ Download the archive that matches your CPU:
 Save states, rewind and run-ahead are not supported. Leave them off in
 RetroArch.
 
-**Combiner Precision** in RetroArch's Core Options controls Xbox pixel-shader
-rounding. Accurate is the default on AMD64 Linux; Fast is the default on
-ARM64 Linux and Android. Fast avoids the extra GPU work from 9-bit rounding.
-Restart the game after changing this option.
-
 <details>
 <summary>Set up a test machine with one script</summary>
 
@@ -175,16 +170,28 @@ problem.
 
 ## Game formats
 
-Supported formats are Xbox XISO images, full disc dumps (Redump) with the
-`.iso` extension, and DVD CHD images. To compress an ISO into a CHD:
+Supported formats are Xbox XISO images (`.iso`), full disc dumps (Redump
+ISO), and DVD CHDs (`.chd`). **Convert full Redump ISOs to XISO before
+creating a CHD.** Redump images include non-game partitions and padding;
+compressing them directly can produce a CHD larger than a bare XISO.
+
+The converter removes that overhead before CHD compression:
 
 ```sh
-chdman createdvd -i "Game.iso" -o "Game.chd"
+python3 tools/iso_to_chd.py "Game.iso"
+# Optional: also keep Game.xiso.iso
+python3 tools/iso_to_chd.py "Game.iso" --keep-xiso
 ```
 
-hakuX can read the resulting CHD directly. Use `createdvd` when converting:
-CD CHDs made with `createcd` and CHDs that depend on a parent image are not
-supported.
+Install [xdvdfs-cli](https://github.com/antangelo/xdvdfs) (the `xdvdfs`
+command) and [chdman](https://docs.mamedev.org/tools/chdman.html) first.
+The script runs `xdvdfs pack` followed by `chdman createdvd`; it keeps
+the input ISO and removes the intermediate XISO unless `--keep-xiso` is
+given. It refuses to overwrite existing files.
+
+An XISO is not a bit-for-bit Redump archive; preserve your original dump
+if you need one. hakuX reads the resulting CHD directly. CD CHDs made
+with `createcd` and CHDs that depend on a parent image are not supported.
 
 <a id="how-hakux-compares-with-xemu"></a>
 <a id="how-this-differs-from-upstream-hakux-and-xemu"></a>
@@ -234,6 +241,7 @@ take effect immediately.
 | Render Scale | The default is **2x**. Try **1x** if a game runs slowly. Higher values sharpen the picture but need more GPU power. |
 | Screen Format | Choose **Widescreen** for games that support it. Set RetroArch's aspect ratio to **Core provided**. |
 | Crop Overscan | On by default to hide borders around the picture. Turn it off to show the full frame. |
+| Combiner Precision | **Accurate** is the default on AMD64 Linux; **Fast** on ARM64 Linux and Android. Fast omits 9-bit combiner rounding to reduce GPU work. Restart the game after changing it. |
 | Audio Processing | Defaults to **Full DSP (experimental)**, which runs Xbox audio effects. Try **Fast** if audio crackles or a game runs slowly. |
 | Audio Resampler | Defaults to **Sinc**. Try **Linear** to reduce CPU use at the cost of some audio quality. |
 | Frame Pacing | Off by default (experimental). If a game runs slowly and the controls feel delayed, **On** holds the game to the pace the GPU draws at, so it can't run ahead of the picture. **Lowest Latency** waits one frame less but may lower the frame rate. |
