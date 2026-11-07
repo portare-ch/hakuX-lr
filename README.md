@@ -77,6 +77,11 @@ Download the archive that matches your CPU:
 Save states, rewind and run-ahead are not supported. Leave them off in
 RetroArch.
 
+**Combiner Precision** in RetroArch's Core Options controls Xbox pixel-shader
+rounding. Accurate is the default on AMD64 Linux; Fast is the default on
+ARM64 Linux and Android. Fast avoids the extra GPU work from 9-bit rounding.
+Restart the game after changing this option.
+
 <details>
 <summary>Set up a test machine with one script</summary>
 

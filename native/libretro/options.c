@@ -11,6 +11,7 @@
 #include "native/kernel/kernel.h"
 #include "native/dev/dev.h"
 #include "native/dev/usb.h"
+#include "hw/xbox/hle/shader/psh.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,8 +25,14 @@
 #define AUDIO_PROCESSING_DEFAULT "fast"
 #endif
 
+#if defined(__x86_64__) && !defined(__ANDROID__)
+#define COMBINER_PRECISION_DEFAULT "enabled"
+#else
+#define COMBINER_PRECISION_DEFAULT "disabled"
+#endif
+
 enum { OPT_SCALE, OPT_CROP, OPT_FORMAT, OPT_LANGUAGE, OPT_REGION, OPT_RUMBLE, OPT_NETWORK, OPT_COMMUNICATOR,
-       OPT_MIC_GATE, OPT_RESAMPLER, OPT_PROCESSING, OPT_PACE, OPT_COUNT };
+       OPT_MIC_GATE, OPT_RESAMPLER, OPT_PROCESSING, OPT_PRECISION, OPT_PACE, OPT_COUNT };
 
 /* The language values follow XC_LANGUAGE after auto: english is 1. */
 static struct retro_core_option_v2_definition g_defs[OPT_COUNT + 1] = {
@@ -117,6 +124,13 @@ static struct retro_core_option_v2_definition g_defs[OPT_COUNT + 1] = {
         NULL, NULL,
         {{"fast", "Fast (dry mix)"}, {"dsp", "Full DSP (experimental)"}, {NULL, NULL}},
         AUDIO_PROCESSING_DEFAULT},
+    [OPT_PRECISION] = {
+        "hakux_combiner_precision", "Combiner Precision", NULL,
+        "Accurate rounds pixel-shader combiner outputs like the Xbox. Fast uses "
+        "floating-point outputs and may improve GPU performance." NEXT,
+        NULL, NULL,
+        {{"disabled", "Fast"}, {"enabled", "Accurate"}, {NULL, NULL}},
+        COMBINER_PRECISION_DEFAULT},
     /* The value is the decoder's depth: the swaps back it waits for the GPU
      * to finish (pb/pbdraw.c g_pace). */
     [OPT_PACE] = {
@@ -276,13 +290,15 @@ void nc_lr_options_apply(void)
     const bool dsp = !strcmp(g_defs[OPT_PROCESSING].values[g_applied[OPT_PROCESSING]].value, "dsp");
     nc_dev_apu_set_dsp(dsp);
     nc_hle_set_frame_pace(pace_depth(g_applied[OPT_PACE]));
+    const bool precise = !strcmp(g_defs[OPT_PRECISION].values[g_applied[OPT_PRECISION]].value, "enabled");
+    hle_psh_set_precision(precise);
     nc_log("hakuX-libretro", "options: render scale %dx, overscan %s, screen %s, language %d (%s), video region %s, "
-           "rumble %s, network %s, resampler %s, audio processing %s, frame pacing %s, communicator %s%s%s",
+           "rumble %s, network %s, resampler %s, audio processing %s, frame pacing %s, communicator %s%s%s, combiner %s",
            scale, crop ? "cropped" : "shown", format, language,
            g_defs[OPT_LANGUAGE].values[g_applied[OPT_LANGUAGE]].value, region, rumble ? "on" : "off",
            strcmp(network, "disabled") ? network : "off", sinc ? "sinc" : "linear", dsp ? "dsp" : "fast",
            pace_text(g_applied[OPT_PACE]), communicator ? "on (noise gate " : "off", communicator ? gate : "",
-           communicator ? ")" : "");
+           communicator ? ")" : "", precise ? "accurate" : "fast");
 }
 
 void nc_lr_options_run(void)
