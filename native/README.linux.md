@@ -264,6 +264,13 @@ HAKUX_VERSION=0.17.0 CC=clang-19 CXX=clang++-19 sh tools/native/linux-build.sh
 CC=clang-19 sh tools/native/linux-package.sh 0.17.0
 ```
 
+On x86-64, link against the image's Ubuntu 22.04 runtimes so the core loads
+on Ubuntu 22.04, Debian 12 and later (#107): add
+`-DCMAKE_SYSROOT=/opt/sysroot-jammy` to the `linux-build.sh` command, or run
+`tools/native/linux-ci-x86_64.sh 0.17.0`, which does. Without it the core
+needs the image's glibc. `BUILD-INFO` records the glibc version the core
+needs, read from its symbol versions.
+
 This writes `build/package/hakux-0.17.0-aarch64.tar.gz` on ARM64 or
 `build/package/hakux-0.17.0-x86_64.tar.gz` on x86-64, and prints its
 SHA-256. The archive contains the stripped core and info file in

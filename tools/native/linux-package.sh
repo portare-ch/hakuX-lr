@@ -33,6 +33,16 @@ mkdir -p "$out/$name/lib/libretro" "$out/$name/share/licenses/hakux"
 sed "s/^display_version = .*/display_version = \"$version\"/" native/libretro/hakux_libretro.info \
     > "$out/$name/lib/libretro/hakux_libretro.info"
 cp LICENSE COPYING licenses/* "$out/$name/share/licenses/hakux/"
+# the newest glibc symbol version the core needs, read from its ELF: the
+# x86-64 CI build links against Ubuntu 22.04's (linux-ci-x86_64.sh, #107),
+# a build without that sysroot against the build host's
+glibc=$("${READELF:-readelf}" --version-info "$out/$name/lib/libretro/hakux_libretro.so" |
+    grep -o 'GLIBC_2\.[0-9.]*' | sort -u -t. -k2,2n -k3,3n | tail -n1)
+glibc=${glibc#GLIBC_}
+if [ -z "$glibc" ]; then
+    echo "linux-package.sh: no glibc version in the core's symbol versions" >&2
+    exit 1
+fi
 dsp_jit=off
 if grep -q '^HAKUX_DSP_JIT:BOOL=ON$' "$build/CMakeCache.txt"; then
     dsp_jit=on
@@ -47,7 +57,7 @@ fi
     if [ "$dsp_jit" = on ]; then
         cat "$build/dsp-jit/licenses/BUILD-INFO"
     fi
-    echo "runtime libz, libstdc++, libm, libgcc_s, glibc 2.38 ($arch); libvulkan.so.1 loaded at run time"
+    echo "runtime libz, libstdc++, libm, libgcc_s, glibc $glibc+ ($arch); libvulkan.so.1 loaded at run time"
     if [ "$arch" = x86_64 ]; then
         echo "CPU KVM; Linux 5.16+, /dev/kvm, TSC scaling and UMIP required"
     fi
