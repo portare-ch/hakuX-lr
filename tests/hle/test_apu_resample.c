@@ -533,6 +533,7 @@ static long hw_cb(void *cb_data, float **data)
     return 32;
 }
 
+/* Check the exact 16.16 cursor after n outputs. */
 static void hw_read(const uint32_t step, int n, float out[][2])
 {
     uint32_t steps[256];
@@ -543,7 +544,40 @@ static void hw_read(const uint32_t step, int n, float out[][2])
     VpResampler *r = vp_resample_new(hw_cb, VP_RESAMPLE_HARDWARE, 2, NULL);
     HT_CHECK(r && vp_resample_quality(r) == VP_RESAMPLE_HARDWARE);
     HT_EQ_INT(vp_resample_read_steps(r, steps, 1.0, n, &out[0][0]), n);
+    HT_CHECK(g_hw_pos - vp_resample_ahead(r) == (double)n * step / 65536.0);
     vp_resample_delete(r);
+}
+
+/* Verify that output stays silent once the cursor and filter window pass
+ * the last input sample, at whole and fractional steps. */
+static void test_hardware_end(void)
+{
+    static const uint32_t steps[] = {0x10000, 0x8000, 0x5555, 0x18000};
+    const int last = 40;                /* the sound's last frame: an impulse */
+    for (size_t k = 0; k < sizeof(steps) / sizeof(steps[0]); k++) {
+        memset(g_hw_in, 0, sizeof(g_hw_in));
+        g_hw_in[last][0] = 1.0f;
+        g_hw_pos = 0;
+        VpResampler *r = vp_resample_new(hw_cb, VP_RESAMPLE_HARDWARE, 2, NULL);
+        int n = 0;
+        float y[2];
+        for (; n < 200; n++) {
+            const double silence = g_hw_pos > last + 1 ? g_hw_pos - (last + 1) : 0;
+            if (vp_resample_ahead(r) - silence <= -vp_resample_reach(r)) {
+                break;
+            }
+            vp_resample_read_steps(r, &steps[k], 1.0, 1, y);
+        }
+        const double cursor = (double)n * steps[k] / 65536.0;
+        HT_CHECK(n < 200 && cursor <= last + 5 + steps[k] / 65536.0);
+        int heard = 0;
+        for (int i = 0; i < 16; i++) {
+            vp_resample_read_steps(r, &steps[k], 1.0, 1, y);
+            heard += y[0] != 0.0f;
+        }
+        HT_EQ_INT(heard, 0);
+        vp_resample_delete(r);
+    }
 }
 
 static void test_hardware(void)
@@ -601,6 +635,7 @@ static void run_suite(void)
     HT_RUN(test_rate);
     HT_RUN(test_reuse);
     HT_RUN(test_hardware);
+    HT_RUN(test_hardware_end);
 }
 
 int main(int argc, char **argv)

@@ -412,8 +412,9 @@ long vp_resample_read_steps(VpResampler *r, const uint32_t *steps, double ratio,
 double vp_resample_ahead(const VpResampler *r)
 {
     if (r->quality == VP_RESAMPLE_HARDWARE) {
-        /* interp[4..7] and the callback's frames not read yet */
-        return (r->hw_len - r->hw_pos) + 4.0 - r->interp_pos / 65536.0;
+        /* Count the current frame, four future frames and unread input,
+         * minus the cursor's offset from interp[3]. */
+        return (r->hw_len - r->hw_pos) + 5.0 - r->interp_pos / 65536.0;
     }
 #ifdef VP_HAVE_SINC
     if (r->sinc) {
