@@ -47,11 +47,13 @@ Back up your [saves](#saves) before changing versions.
 
 ### RetroArch on other Linux systems
 
-Install a 64-bit version of RetroArch with your distribution's package
-manager. You also need a GPU driver with Vulkan 1.3 (Vulkan 1.2 drivers use
-a compatibility path, which can be slower), the Vulkan loader
-(`libvulkan.so.1`) 1.3 or newer even with a 1.2 driver, glibc 2.38 or newer,
-libstdc++ from GCC 13 or newer, and zlib.
+Install 64-bit RetroArch and zlib. Vulkan 1.3 is recommended; Vulkan 1.2
+works through a compatibility path, which may be slower. The Vulkan loader
+(`libvulkan.so.1`) must be version 1.3 or newer.
+
+The ARM64 core requires glibc 2.38+ and GCC 13's libstdc++. The AMD64 core
+requires glibc 2.35+ and GCC 11's libstdc++ (Ubuntu 22.04, Debian 12 or
+newer), plus the kernel and KVM requirements below.
 
 Download the archive that matches your CPU:
 
@@ -106,9 +108,15 @@ or `--core` to install a specific release or local build; see
 
 #### AMD64: set up KVM first
 
-The AMD64 build uses Linux KVM to run Xbox code on your CPU and requires
-TSC scaling and UMIP support. AMD Zen 2 and newer CPUs meet these
-requirements; on Intel, KVM can provide UMIP itself.
+The AMD64 build uses Linux KVM and requires kernel 5.16+, TSC scaling,
+and UMIP. AMD Zen 2 and newer CPUs meet the CPU requirements; Intel KVM
+can provide UMIP in software.
+
+**Ubuntu 22.04:** Its glibc is compatible, but the original 5.15 kernel
+is too old. Check with `uname -r` and use kernel 5.16 or newer. Ubuntu's
+HWE kernel (6.8 on 22.04.5) is suitable. Install it with
+`sudo apt install --install-recommends linux-generic-hwe-22.04`, then
+reboot. Some Desktop installations already have HWE.
 
 1. Enable **Intel VT-x** or **AMD SVM / AMD-V** in BIOS/UEFI.
 2. Load the KVM driver: `sudo modprobe kvm_intel` for Intel, or
