@@ -51,7 +51,9 @@ static void ref_process(RefFilter *f, float in[HRTF_SAMPLES_PER_FRAME][2], float
             float *coeff_cur = f->ch[ch].hrir_coeff_cur;
             float *coeff_tar = f->ch[ch].hrir_coeff_tar;
             buf[f->buf_pos] = in[n][ch];
-            float itd = f->itd_cur + (f->itd_tar - f->itd_cur) * w;
+            /* Match the core's rounding by preventing FMA contraction. */
+            float move = (f->itd_tar - f->itd_cur) * w;
+            float itd = f->itd_cur + move;
             float d = itd * (ch == 0 ? +1.0f : -1.0f);
             if (d < 0.0f) {
                 d = 0.0f;
