@@ -7,6 +7,7 @@
  * call into guest code).
  */
 #include "native/kernel/kernel.h"
+#include "native/core/libc_compat.h"
 #include "native/core/xbe_load.h"
 #include "native/core/xdvdfs.h"
 #include "native/dev/dev.h"
