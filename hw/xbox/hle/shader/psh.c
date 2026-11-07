@@ -7,12 +7,15 @@
  * - output word: bits 0-3 CD, 4-7 AB, 8-11 SUM/MUX register, bit 12 CD dot,
  *   13 AB dot, 14 MUX, 15-17 output mapping, 18 CD blue-to-alpha, 19 AB;
  * - every input of a stage is read before any output is written; stage
- *   results are clamped to [-1, 1]; r0.a starts as t0.a;
+ *   results are clamped to [-1, 1] and kept in 9-bit signed fixed point,
+ *   1.0 = 0xFF (rounded half up: q9); the bias mappings' 0.5 is 0x80;
+ *   r0.a starts as t0.a;
  * - PSCombinerCount: bits 0-7 stages, bit 8 MUX on r0.a's MSB (else LSB),
  *   bit 12 a C0 per stage (else stage 0's), bit 16 the same for C1;
  * - final combiner: rgb = A*B + (1-A)*C + D, alpha = G, inputs clamped to
- *   [0, 1]; EF_PROD = E*F, V1R0_SUM = v1 + r0 (EFG flags: 0x80 clamp,
- *   0x40 complement v1, 0x20 complement r0). Without one, the output is r0.
+ *   [0, 1]; EF_PROD = E*F, V1R0_SUM = v1 + r0, each clamped to [0, 1]
+ *   first, the sum up to 2 unless clamped (EFG flags: 0x80 clamp, 0x40
+ *   complement v1, 0x20 complement r0). Without one, the output is r0.
  */
 #include <stdarg.h>
 #include <stdbool.h>
@@ -25,8 +28,10 @@ typedef struct Buf {
     char *p;
     size_t cap, len;
     bool overflow;
-    const char *half;                   /* the bias mappings' 0.5 (hle_psh_glsl) */
 } Buf;
+
+/* In combiner fixed point, the half-bias constant is 0x80/0xFF. */
+#define HALF "(128.0 / 255.0)"
 
 static void put(Buf *b, const char *fmt, ...)
 {
@@ -91,20 +96,20 @@ static void in_expr(Buf *b, uint8_t in, bool alpha, bool final)
     case 1: put(b, "(1.0 - clamp(%s, 0.0, 1.0))", x); break;     /* UNSIGNED_INVERT */
     case 2: put(b, "(2.0 * max(%s, 0.0) - 1.0)", x); break;      /* EXPAND_NORMAL */
     case 3: put(b, "(-2.0 * max(%s, 0.0) + 1.0)", x); break;     /* EXPAND_NEGATE */
-    case 4: put(b, "(max(%s, 0.0) - %s)", x, b->half); break;    /* HALFBIAS_NORMAL */
-    case 5: put(b, "(-max(%s, 0.0) + %s)", x, b->half); break;   /* HALFBIAS_NEGATE */
+    case 4: put(b, "(max(%s, 0.0) - " HALF ")", x); break;       /* HALFBIAS_NORMAL */
+    case 5: put(b, "(-max(%s, 0.0) + " HALF ")", x); break;      /* HALFBIAS_NEGATE */
     case 6: put(b, "(%s)", x); break;                            /* SIGNED_IDENTITY */
     default: put(b, "(-(%s))", x); break;                        /* SIGNED_NEGATE */
     }
 }
 
-/* A stage's result v through its output mapping (half: the bias's 0.5). */
-static void out_expr(char *e, size_t n, uint32_t out, const char *v, const char *half)
+/* A stage's result v through its output mapping. */
+static void out_expr(char *e, size_t n, uint32_t out, const char *v)
 {
     switch ((out >> 15) & 7) {
-    case 1: snprintf(e, n, "(%s - %s)", v, half); break;            /* BIAS */
+    case 1: snprintf(e, n, "(%s - " HALF ")", v); break;            /* BIAS */
     case 2: snprintf(e, n, "(%s * 2.0)", v); break;                 /* SHIFTLEFT_1 */
-    case 3: snprintf(e, n, "((%s - %s) * 2.0)", v, half); break;    /* SHIFTLEFT_1_BIAS */
+    case 3: snprintf(e, n, "((%s - " HALF ") * 2.0)", v); break;    /* SHIFTLEFT_1_BIAS */
     case 4: snprintf(e, n, "(%s * 4.0)", v); break;                 /* SHIFTLEFT_2 */
     case 6: snprintf(e, n, "(%s * 0.5)", v); break;                 /* SHIFTRIGHT_1 */
     default: snprintf(e, n, "(%s)", v); break;
@@ -141,10 +146,10 @@ static void stage(Buf *b, const HlePshKey *k, unsigned s)
         in_expr(b, (ai >> (24 - 8 * i)) & 0xFF, true, false);
         put(b, ";\n");
     }
-    /* MSB: bit 7 of the 8-bit value (D3D cnd: r0.a > 0.5); 1.0 * 0.5 is
-     * 0xFF >> 1 = 0x7F, clear, and a bias's 0.5 is 0x80, set (b->half) */
+    /* MSB: bit 7 of the 8-bit value (D3D cnd: r0.a > 0.5, 0x80 and up);
+     * LSB: bit 0, of a two's complement value where r0.a is negative */
     put(b, "    bool mx = %s;\n", (k->count & 0x100) ? "r0.a > 0.5"
-                                                   : "(uint(r0.a * 255.0) & 1u) == 1u");
+                                                   : "(int(floor(r0.a * 255.0 + 0.5)) & 1) == 1");
     put(b, "    vec3 ab = %s, cd = %s;\n", (ro & 0x2000) ? "vec3(dot(A, B))" : "A * B",
         (ro & 0x1000) ? "vec3(dot(C, D))" : "C * D");
     put(b, "    vec3 ms = %s;\n", (ro & 0x4000) ? "mx ? cd : ab" : "ab + cd");
@@ -154,10 +159,10 @@ static void stage(Buf *b, const HlePshKey *k, unsigned s)
     static const char *const k_rv[3] = { "ab", "cd", "ms" };
     static const char *const k_av[3] = { "aab", "acd", "ams" };
     for (unsigned i = 0; i < 3; i++) {
-        out_expr(e, sizeof(e), ro, k_rv[i], b->half);
-        put(b, "    %s = clamp(%s, -1.0, 1.0);\n", k_rv[i], e);
-        out_expr(e, sizeof(e), ao, k_av[i], b->half);
-        put(b, "    %s = clamp(%s, -1.0, 1.0);\n", k_av[i], e);
+        out_expr(e, sizeof(e), ro, k_rv[i]);
+        put(b, "    %s = q9(clamp(%s, -1.0, 1.0));\n", k_rv[i], e);
+        out_expr(e, sizeof(e), ao, k_av[i]);
+        put(b, "    %s = q9(clamp(%s, -1.0, 1.0));\n", k_av[i], e);
     }
     /* outputs: AB bits 4-7, CD bits 0-3, SUM bits 8-11 */
     static const unsigned k_shift[3] = { 4, 0, 8 };
@@ -198,7 +203,7 @@ static void final_combiner(Buf *b, const HlePshKey *k)
          * SPECULARENABLE, v1 + r0 (clamped), C = fog.rgb, G = r0.a; without
          * fog, D = B (fogf is 1 then) */
         put(b, "  outc = vec4(mix(fogr.rgb, clamp(%s, 0.0, 1.0), fogf), clamp(r0.a, 0.0, 1.0));\n",
-            k->specular ? "v1.rgb + r0.rgb" : "r0.rgb");
+            k->specular ? "clamp(v1.rgb, 0.0, 1.0) + clamp(r0.rgb, 0.0, 1.0)" : "r0.rgb");
         return;
     }
     put(b, "  {\n    vec4 C0 = col(pc.psc[16]), C1 = col(pc.psc[17]);\n");
@@ -207,16 +212,21 @@ static void final_combiner(Buf *b, const HlePshKey *k)
     put(b, ", 0.0, 1.0);\n    vec3 F = clamp(");
     in_expr(b, (efg >> 16) & 0xFF, false, false);
     put(b, ", 0.0, 1.0);\n    vec4 efp = vec4(E * F, 0.0);\n");
+    /* Clamp v1 and r0 separately before the optional complements. */
     put(b, "    vec4 v1r0 = vec4(%s + %s, 0.0);\n",
-        (efg & 0x40) ? "(1.0 - v1.rgb)" : "v1.rgb", (efg & 0x20) ? "(1.0 - r0.rgb)" : "r0.rgb");
+        (efg & 0x40) ? "(1.0 - clamp(v1.rgb, 0.0, 1.0))" : "clamp(v1.rgb, 0.0, 1.0)",
+        (efg & 0x20) ? "(1.0 - clamp(r0.rgb, 0.0, 1.0))" : "clamp(r0.rgb, 0.0, 1.0)");
     if (efg & 0x80) {
         put(b, "    v1r0 = clamp(v1r0, 0.0, 1.0);\n");
     }
     static const char k_v[4] = { 'A', 'B', 'C', 'D' };
     for (unsigned i = 0; i < 4; i++) {
-        put(b, "    vec3 %c = clamp(", k_v[i]);
-        in_expr(b, (abcd >> (24 - 8 * i)) & 0xFF, false, true);
-        put(b, ", 0.0, 1.0);\n");
+        /* The unclamped sum can reach 2.0. */
+        const uint8_t in = (abcd >> (24 - 8 * i)) & 0xFF;
+        const bool sum = (in & 0xEF) == 14;
+        put(b, "    vec3 %c = %s", k_v[i], sum ? "" : "clamp(");
+        in_expr(b, in, false, true);
+        put(b, "%s;\n", sum ? "" : ", 0.0, 1.0)");
     }
     put(b, "    float G = clamp(");
     in_expr(b, (efg >> 8) & 0xFF, true, true);
@@ -380,6 +390,21 @@ static void sign_decode(Buf *b, const HlePshKey *k, unsigned s, unsigned m)
     }
 }
 
+/* Texture-shader coordinates use signed bytes / 127; combiner inputs
+ * use / 127.5. Keep these conversions separate. */
+static const char *tex_read(char *e, size_t n, const HlePshKey *k, unsigned t)
+{
+    const unsigned m = (k->tex_modes >> (5 * t)) & 0x1F;
+    const unsigned sg = ((k->sgn_ob | k->sgn_raw) >> (4 * t)) & 15;
+    if (!sg || !fetches(m)) {
+        snprintf(e, n, "t%u", t);
+    } else {
+        snprintf(e, n, "tsh(t%u, bvec4(%s, %s, %s, %s))", t, sg & 1 ? "true" : "false",
+                 sg & 2 ? "true" : "false", sg & 4 ? "true" : "false", sg & 8 ? "true" : "false");
+    }
+    return e;
+}
+
 /* Colour key (HlePshKey ckey) and colour sign (sign_decode) on stage s's
  * fetched texel. A texel that matches the stage's key colour (its ARGB, or
  * RGB where the format's alpha isn't compared) has its alpha or ARGB
@@ -444,28 +469,11 @@ static void alpha_kill(Buf *b, const HlePshKey *k, unsigned s, unsigned m)
 
 size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsupported)
 {
-    Buf b = { buf, cap, 0, false, "0.5" };
+    Buf b = { buf, cap, 0, false };
     const char *interp = k->flat ? "flat " : "";
-    /* The combiners compute in signed fixed point, 1.0 = 0xFF: the bias
-     * mappings' 0.5 is 0x80, its MSB set, while a halving of 1.0 is 0x7F,
-     * clear; both are 0.5 in float. A MUX on r0.a's MSB tells them apart:
-     * Halo 2's scope mask sets r0.a = 0.5 - t0.b (HALFBIAS_NEGATE) to pick
-     * its black where t0.b is 0 (a dimmed view around the scope, black
-     * lines) and a light blue elsewhere, and read as 0.5 it painted the
-     * whole view light blue; PGR2's road halves t0.a (SHIFTRIGHT_1) and must
-     * not pick at 1.0. Shaders with such a MUX take 0x80 / 0xFF for the
-     * bias; the others keep 0.5 and their text (a colour moves by half an
-     * 8-bit step only). A MUX on the LSB keeps 0.5 too: its test truncates
-     * r0.a * 255, which lands a 0x80 bias's sums just under their integer
-     * (no title is known to depend on its parity at a bias). */
-    if (k->count & 0x100) {
-        for (unsigned s = 0; s < (k->count & 0xFF) && s < 8; s++) {
-            if ((k->rgb_out[s] | k->alpha_out[s]) & 0x4000) {
-                b.half = "(128.0 / 255.0)";
-                break;
-            }
-        }
-    }
+    /* Register-combiner outputs use signed 9-bit values (1.0 = 0xFF).
+     * Round each stage after mapping and clamping, as in Xbox combiner
+     * captures (116/116 matching pixels). Inputs remain interpolated. */
     unsigned unsup = 0;
     /* two-sided lighting: the back colours (vsh.h's outputs 7, 8) */
     char back[160] = "";
@@ -500,6 +508,10 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "%s%s%s%s"
             "layout(location = 0) out vec4 oColor;\n"
             "vec4 col(uint c) { return unpackUnorm4x8(c).zyxw; }\n"
+            /* Compensate for float32 error around half-step ties. This matches
+             * 8-bit inputs; finer texture inputs can round differently. */
+            "float q9(float x) { return floor(x * 255.0 + 0.500244140625) / 255.0; }\n"
+            "vec3 q9(vec3 x) { return floor(x * 255.0 + 0.500244140625) / 255.0; }\n"
             HLE_NVPROJ_GLSL
             "%s"
             /* Xbox linear (non-swizzled) textures use texel coordinates */
@@ -556,14 +568,14 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
         hilo1 ? "  if (m == 4u) { uvec4 i = uvec4(c * 255.0 + 0.5);\n"
                 "    return vec3(float(i.a << 8 | i.r), float(i.g << 8 | i.b), 65535.0) / 65535.0; }\n" : "",
         k->conv ? k_conv_glsl : "",
-        /* colour sign: a channel offset binary, or as stored, as two's
-         * complement over 127 */
+        /* Signed combiner texels use /127.5; texture-shader reads use /127. */
         k->sgn_ob | k->sgn_raw ?
-            "float sgnob(float c) { return max((c * 255.0 - 128.0) / 127.0, -1.0); }\n"
+            "float sgnob(float c) { return max((c * 255.0 - 128.0) / 127.5, -1.0); }\n"
             "float sgnraw(float c) {\n"
             "  float v = floor(c * 255.0 + 0.5);\n"
-            "  return max((v >= 128.0 ? v - 256.0 : v) / 127.0, -1.0);\n"
-            "}\n" : "",
+            "  return max((v >= 128.0 ? v - 256.0 : v) / 127.5, -1.0);\n"
+            "}\n"
+            "vec4 tsh(vec4 t, bvec4 m) { return mix(t, max(t * (255.0 / 254.0), -1.0), m); }\n" : "",
         /* colour key: the texel and the key the same at n levels a channel */
         k->ckey ? "bool ckeq(vec4 t, vec4 c, vec4 n) {\n"
                   "  return all(equal(floor(t * n + 0.5), floor(c * n + 0.5)));\n"
@@ -615,13 +627,16 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
         bool dotmode = s && (m == HLE_PST_DOTPRODUCT || (m >= HLE_PST_DOT_ST &&
                                                          m <= HLE_PST_DOT_STR_CUBE) ||
                              m == HLE_PST_DOT_RFLCT_SPEC_CONST);
+        char ts[64], ts2[64];
         if (dotmode) {
-            put(&b, "  dot%u = dot(vTex%u.xyz, dmap(%uu, t%u));\n", s, s, dm, in);
+            put(&b, "  dot%u = dot(vTex%u.xyz, dmap(%uu, %s));\n", s, s, dm,
+                tex_read(ts, sizeof(ts), k, in));
         }
         if (s == 2 && m == HLE_PST_DOT_RFLCT_DIFF) {
             /* the diffuse lookup needs stage 3's dot, computed here first */
             unsigned in3 = (k->input_tex >> 20) & 3, dm3 = (k->dot_map >> 8) & 7;
-            put(&b, "  dot3 = dot(vTex3.xyz, dmap(%uu, t%u));\n", dm3, in3);
+            put(&b, "  dot3 = dot(vTex3.xyz, dmap(%uu, %s));\n", dm3,
+                tex_read(ts, sizeof(ts), k, in3));
         }
         if ((k->fbfetch >> s) & 1) {
             /* the target drawn into: this pixel as the earlier draws left it
@@ -685,13 +700,22 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
                 { "", "" }, { "pc.bump.x", "pc.bump.y" }, { "pc.bump.z", "pc.bump.w" },
                 { "pc.bump3.x", "pc.bump3.y" } };
             /* (du, dv) the input's signed bytes; a channel colour sign already
-             * made signed (sign_decode) as it is */
+             * made signed (sign_decode) as it is, over 127 (tex_read) */
             const unsigned sd = ((k->sgn_ob | k->sgn_raw) >> (4 * in)) & 6;
-            char duv[64], du[24], dv[24];
-            snprintf(du, sizeof(du), sd & 4 ? "t%u.b" : "sgn8(t%u.bg).x", in);
-            snprintf(dv, sizeof(dv), sd & 2 ? "t%u.g" : "sgn8(t%u.bg).y", in);
+            char duv[176], du[80], dv[80];
+            tex_read(ts, sizeof(ts), k, in);
+            if (sd & 4) {
+                snprintf(du, sizeof(du), "%s.b", ts);
+            } else {
+                snprintf(du, sizeof(du), "sgn8(t%u.bg).x", in);
+            }
+            if (sd & 2) {
+                snprintf(dv, sizeof(dv), "%s.g", ts);
+            } else {
+                snprintf(dv, sizeof(dv), "sgn8(t%u.bg).y", in);
+            }
             if (sd == 6) {
-                snprintf(duv, sizeof(duv), "t%u.bg", in);
+                snprintf(duv, sizeof(duv), "%s.bg", ts);
             } else if (!sd) {
                 snprintf(duv, sizeof(duv), "sgn8(t%u.bg)", in);
             } else {
@@ -709,7 +733,7 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             }
             if (m == HLE_PST_BUMPENVMAP_LUM) {
                 put(&b, "    vec2 l = unpackHalf2x16(pc.bumpl[%u]);\n"
-                        "    t%u.rgb *= clamp(l.x * t%u.r + l.y, 0.0, 1.0);\n", s - 1, s, in);
+                        "    t%u.rgb *= clamp(l.x * %s.r + l.y, 0.0, 1.0);\n", s - 1, s, ts);
             }
             put(&b, "  }\n");
             break;
@@ -731,8 +755,8 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             put(&b, "  vec4 t%u;\n"
                     "  { uint ti = pc.tex[%u] & 0xFFFFu, si = (pc.tex[%u] >> 16) & 0xFFu;\n"
                     "    t%u = texture(sampler2D(uTex2D[nonuniformEXT(ti)], "
-                    "uSmp[nonuniformEXT(si)]), t%u.%s); }\n",
-                s, s, s, s, in, m == HLE_PST_DPNDNT_AR ? "ar" : "gb");
+                    "uSmp[nonuniformEXT(si)]), %s.%s); }\n",
+                s, s, s, s, tex_read(ts, sizeof(ts), k, in), m == HLE_PST_DPNDNT_AR ? "ar" : "gb");
             break;
         }
         case HLE_PST_DOT_STR_3D:                    /* stage 3: (dot1, dot2, dot3) */
@@ -791,15 +815,17 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
                 put(&b, "  vec4 t%u = samp(%uu, nvproj(vTex%u).xy);\n", s, s, s);
                 break;
             }
+            tex_read(ts, sizeof(ts), k, s - 2);
+            tex_read(ts2, sizeof(ts2), k, s - 1);
             if ((k->vol >> s) & 1) {
-                put(&b, "  vec4 t%u = samp3(%uu, vec3(t%u.g, t%u.g, t%u.r - t%u.r));\n",
-                    s, s, s - 2, s - 1, s - 1, s - 2);
+                put(&b, "  vec4 t%u = samp3(%uu, vec3(%s.g, %s.g, %s.r - %s.r));\n",
+                    s, s, ts, ts2, ts2, ts);
             } else {
                 put(&b, "  vec4 t%u;\n"
                         "  { uint ti = pc.tex[%u] & 0xFFFFu, si = (pc.tex[%u] >> 16) & 0xFFu;\n"
                         "    t%u = texture(sampler2D(uTex2D[nonuniformEXT(ti)], "
-                        "uSmp[nonuniformEXT(si)]), vec2(t%u.g, t%u.g)); }\n",
-                    s, s, s, s, s - 2, s - 1);
+                        "uSmp[nonuniformEXT(si)]), vec2(%s.g, %s.g)); }\n",
+                    s, s, s, s, ts, ts2);
             }
             break;
         default:                        /* unknown modes */
