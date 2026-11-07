@@ -28,19 +28,8 @@ typedef struct {
 static void ref_set_target_params(RefFilter *f, float hrir_coeff[2][HRTF_NUM_TAPS], float itd)
 {
     f->itd_tar = fmaxf(-HRTF_MAX_DELAY_SAMPLES, fminf(itd, HRTF_MAX_DELAY_SAMPLES));
-    for (int ch = 0; ch < 2; ch++) {
-        float *coeff = f->ch[ch].hrir_coeff_tar;
-        memcpy(coeff, hrir_coeff[ch], sizeof(f->ch[ch].hrir_coeff_tar));
-        float s = 0.0f;
-        for (int k = 0; k < HRTF_NUM_TAPS; k++) {
-            s += fabsf(coeff[k]);
-        }
-        if (s == 0.0f || s == 1.0f) {
-            break;
-        }
-        for (int k = 0; k < HRTF_NUM_TAPS; k++) {
-            coeff[k] /= s;
-        }
+    for (int ch = 0; ch < 2; ch++) {    /* taps as written (xemu #3105) */
+        memcpy(f->ch[ch].hrir_coeff_tar, hrir_coeff[ch], sizeof(f->ch[ch].hrir_coeff_tar));
     }
 }
 
@@ -307,11 +296,7 @@ static void test_retarget_keeps_history(void)
     HT_CHECK(nonzero > 0);
 }
 
-/* Each ear's own coefficients, normalized by their own absolute sum (left
- * as they are when it is 0 or 1), and its own delay: an impulse through a
- * settled filter against values worked out by hand, not against the
- * reference above (whose normalization stops at the first ear with a sum of
- * 0 or 1 and leaves the other ear's coefficients unset). */
+/* Check each ear's unnormalized taps and delay against an impulse response. */
 static void impulse_response(const float h[2][HRTF_NUM_TAPS], float itd, float y[2][HRTF_SAMPLES_PER_FRAME])
 {
     static HrtfFilter f;
@@ -339,28 +324,27 @@ static void expect(const float y[HRTF_SAMPLES_PER_FRAME], const float want[HRTF_
 static void test_coefficients_by_ear(void)
 {
     float h[2][HRTF_NUM_TAPS], y[2][HRTF_SAMPLES_PER_FRAME], w0[HRTF_SAMPLES_PER_FRAME], w1[HRTF_SAMPLES_PER_FRAME];
-    /* asymmetric: 2 at tap 0 (sum 2: 1), 0.25 at taps 1 and 2 (sum 0.5: 0.5 each) */
+    /* asymmetric: 2 at tap 0, 0.25 at taps 1 and 2 */
     memset(h, 0, sizeof(h));
     h[0][0] = 2.0f;
     h[1][1] = h[1][2] = 0.25f;
     impulse_response(h, 0.0f, y);
     memset(w0, 0, sizeof(w0));
     memset(w1, 0, sizeof(w1));
-    w0[0] = 1.0f;
-    w1[1] = w1[2] = 0.5f;
+    w0[0] = 2.0f;
+    w1[1] = w1[2] = 0.25f;
     expect(y[0], w0);
     expect(y[1], w1);
-    /* the first ear's sum 0: silent; the second still normalized (3 at tap 3: 1) */
+    /* the first ear silent; the second 3 at tap 3 */
     memset(h, 0, sizeof(h));
     h[1][3] = 3.0f;
     impulse_response(h, 0.0f, y);
     memset(w0, 0, sizeof(w0));
     memset(w1, 0, sizeof(w1));
-    w1[3] = 1.0f;
+    w1[3] = 3.0f;
     expect(y[0], w0);
     expect(y[1], w1);
-    /* the first ear's sum 1: as it is (0.5 at tap 0, -0.5 at tap 4); the
-     * second normalized (4 at tap 2: 1) */
+    /* 0.5 at tap 0 and -0.5 at tap 4; 4 at tap 2 */
     memset(h, 0, sizeof(h));
     h[0][0] = 0.5f;
     h[0][4] = -0.5f;
@@ -370,7 +354,7 @@ static void test_coefficients_by_ear(void)
     memset(w1, 0, sizeof(w1));
     w0[0] = 0.5f;
     w0[4] = -0.5f;
-    w1[2] = 1.0f;
+    w1[2] = 4.0f;
     expect(y[0], w0);
     expect(y[1], w1);
     /* a delay of +3 holds the first ear back 3 samples, not the second */

@@ -85,18 +85,12 @@ hrtf_filter_set_target_params(HrtfFilter *f, float hrir_coeff[2][HRTF_NUM_TAPS],
     f->itd_tar =
         fmaxf(-HRTF_MAX_DELAY_SAMPLES, fminf(itd, HRTF_MAX_DELAY_SAMPLES));
 
+    /* Taps apply as written: hardware does not normalize them. */
     for (int ch = 0; ch < 2; ch++) {
         const float *coeff = hrir_coeff[ch];
-
-        // Normalize coefficients for unity filter gain (each channel's own)
-        float s = 0.0f;
-        for (int k = 0; k < HRTF_NUM_TAPS; k++) {
-            s += fabsf(coeff[k]);
-        }
-        const bool norm = !(s == 0.0f || s == 1.0f);
         float *tar = f->ch[ch].hrir_coeff_tar;
         for (int k = 0; k < HRTF_NUM_TAPS; k++) {
-            tar[HRTF_NUM_TAPS - 1 - k] = norm ? coeff[k] / s : coeff[k];
+            tar[HRTF_NUM_TAPS - 1 - k] = coeff[k];
         }
         tar[HRTF_NUM_TAPS] = 0.0f;
     }
