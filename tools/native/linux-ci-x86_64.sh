@@ -18,9 +18,9 @@ export HAKUX_VERSION="$version"
 jobs=${JOBS:-4}
 
 python3 tools/native/linux-deps.py --dest "$HAKUX_DEPS"
-# linked against the image's Ubuntu 20.04 runtimes (glibc 2.31, #107), so
+# linked against the image's Ubuntu 22.04 runtimes (glibc 2.35, #107), so
 # the core loads on older distributions than the image's own
-sysroot=${HAKUX_SYSROOT-/opt/sysroot-focal}
+sysroot=${HAKUX_SYSROOT-/opt/sysroot-jammy}
 if [ -n "$sysroot" ]; then
     if [ ! -d "$sysroot/usr/include" ]; then
         echo "linux-ci-x86_64.sh: no sysroot at $sysroot (HAKUX_SYSROOT= builds without)" >&2

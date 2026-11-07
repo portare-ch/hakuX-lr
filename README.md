@@ -52,7 +52,7 @@ manager. You also need a GPU driver with Vulkan 1.3 (Vulkan 1.2 drivers use
 a compatibility path, which can be slower), the Vulkan loader
 (`libvulkan.so.1`) 1.3 or newer even with a 1.2 driver, and zlib. The ARM64
 core needs glibc 2.38 and libstdc++ from GCC 13 or newer; the AMD64 core
-needs glibc 2.31 and libstdc++ from GCC 10 or newer (Ubuntu 20.04, Debian 11
+needs glibc 2.35 and libstdc++ from GCC 11 or newer (Ubuntu 22.04, Debian 12
 and later).
 
 Download the archive that matches your CPU:

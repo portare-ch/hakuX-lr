@@ -1,11 +1,10 @@
 /* Copyright (C) 2026-present PortareOS */
 /*
  * hakuX native core — what an older C library lacks. The x86-64 Linux core
- * is linked against glibc 2.31 (Ubuntu 20.04's, tools/native/Dockerfile.linux)
- * so that it loads on the distributions of the last years, Ubuntu 22.04's
- * glibc 2.35 among them (issue #107): arc4random came with glibc 2.36 and
- * strlcpy with 2.38. Against those headers or newer, and Android's bionic,
- * this is empty.
+ * is linked against glibc 2.35 (Ubuntu 22.04's, tools/native/Dockerfile.linux)
+ * so that it loads there and later (issue #107): arc4random came with glibc
+ * 2.36 and strlcpy with 2.38. Against those headers or newer, and Android's
+ * bionic, this is empty.
  */
 #ifndef NATIVE_CORE_LIBC_COMPAT_H
 #define NATIVE_CORE_LIBC_COMPAT_H

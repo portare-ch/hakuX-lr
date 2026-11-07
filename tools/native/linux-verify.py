@@ -4,7 +4,7 @@
 in the image that built it, and write its .sha256: the commit's archive, an
 native core with the DSP JIT that reports the version and loads (retro_*
 exports only, no RUNPATH, no SDL), within PortareOS's glibc 2.38 and
-GLIBCXX 3.4.31 (aarch64), or Ubuntu 20.04's glibc 2.31 and GLIBCXX 3.4.28
+GLIBCXX 3.4.31 (aarch64), or Ubuntu 22.04's glibc 2.35 and GLIBCXX 3.4.30
 (x86_64, linked against them: Dockerfile.linux, #107).
     python3 tools/native/linux-verify.py <version>
 """
@@ -69,7 +69,7 @@ assert 'libSDL3' not in dynamic and 'libaaudio' not in dynamic
 versions = subprocess.check_output(['readelf', '--version-info', str(core)], text=True)
 glibc = sorted({tuple(map(int, x.split('.'))) for x in re.findall(r'GLIBC_([0-9.]+)', versions)})
 glibcxx = sorted({tuple(map(int, x.split('.'))) for x in re.findall(r'GLIBCXX_([0-9.]+)', versions)})
-glibc_max, glibcxx_max = {'aarch64': ((2, 38), (3, 4, 31)), 'x86_64': ((2, 31), (3, 4, 28))}[arch]
+glibc_max, glibcxx_max = {'aarch64': ((2, 38), (3, 4, 31)), 'x86_64': ((2, 35), (3, 4, 30))}[arch]
 assert glibc[-1] <= glibc_max, glibc[-1]
 assert glibcxx[-1] <= glibcxx_max, glibcxx[-1]
 digest = hashlib.sha256(archive.read_bytes()).hexdigest()
