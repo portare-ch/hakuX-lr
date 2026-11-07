@@ -12,6 +12,7 @@
 #include "hw/xbox/hle/pb/pbmode.h"
 #include "hw/xbox/hle/pb/pace.h"
 #include "hw/xbox/hle/pb/pbstate.h"
+#include "hw/xbox/hle/pb/pvideo.h"
 #include "hw/xbox/hle/pb/wclip.h"
 #include "hw/xbox/hle/vk/back.h"
 #include "hw/xbox/hle/vk/display.h"
@@ -1911,28 +1912,25 @@ void hle_pbd_overlay(bool show)
     const uint32_t size_in = hle_host_gpu_reg(0x008928);
     const bool on = show && size_in != 0xFFFFFFFFu;
     uint32_t w = 0, h = 0, off = HLE_ARENA_FULL;
-    int32_t src[4], dst[4];
+    HlePvideo pv = { 0 };
     if (on) {
         const uint32_t base = hle_host_gpu_reg(0x008900), offset = hle_host_gpu_reg(0x008920);
-        const uint32_t fmt = hle_host_gpu_reg(0x008958), pitch = fmt & 0x1FFF;
-        const uint32_t pout = hle_host_gpu_reg(0x008948), sout = hle_host_gpu_reg(0x008950);
-        const uint32_t ow = sout & 0xFFF, oh = (sout >> 16) & 0xFFF;
-        uint32_t iw = size_in & 0x7FF, ih = (size_in >> 16) & 0x7FF;
-        iw = MIN(iw, ow ? ow : iw);         /* larger than the output: capped, not scaled */
-        ih = MIN(ih, oh ? oh : ih);
+        const HlePvideoRegs r = {
+            .size_in = size_in, .point_in = hle_host_gpu_reg(0x008930),
+            .ds_dx = hle_host_gpu_reg(0x008938), .dt_dy = hle_host_gpu_reg(0x008940),
+            .point_out = hle_host_gpu_reg(0x008948), .size_out = hle_host_gpu_reg(0x008950),
+            .format = hle_host_gpu_reg(0x008958), .color_key = hle_host_gpu_reg(0x008B00),
+            .luminance = hle_host_gpu_reg(0x008910), .chrominance = hle_host_gpu_reg(0x008918) };
+        pv = hle_pvideo_decode(&r);
+        const uint32_t pitch = r.format & 0x1FFF;
         /* a linear YUY2 (CR8YB8CB8YA8) or UYVY surface's header words */
-        const uint32_t code = ((fmt >> 16) & 3) == 1 ? HLE_XFMT_YUY2 : HLE_XFMT_UYVY;
+        const uint32_t code = ((r.format >> 16) & 3) == 1 ? HLE_XFMT_YUY2 : HLE_XFMT_UYVY;
         const uint32_t h5[5] = { HLE_COMMON_TYPE_SURFACE | 1, (base + offset) & 0x0FFFFFFFu, 0,
                                  0x00010029u | code << 8,
-                                 (MAX(iw, 1u) - 1) | (MAX(ih, 1u) - 1) << HLE_SIZE_HEIGHT_SHIFT |
+                                 (MAX(pv.in_w, 1u) - 1) | (MAX(pv.in_h, 1u) - 1) << HLE_SIZE_HEIGHT_SHIFT |
                                      (MAX(pitch, 64u) / 64 - 1) << HLE_SIZE_PITCH_SHIFT };
-        coh_pend_wait((base + offset) & 0x0FFFFFFFu, MAX(pitch, 64u) * ih);   /* a copy queued into it lands first */
-        off = iw && ih ? hle_draw_overlay_upload(h5, &w, &h) : HLE_ARENA_FULL;
-        src[0] = 0; src[1] = 0; src[2] = (int32_t)w; src[3] = (int32_t)h;
-        dst[0] = (int32_t)(pout & 0xFFF);
-        dst[1] = (int32_t)((pout >> 16) & 0xFFF);
-        dst[2] = dst[0] + (int32_t)ow;
-        dst[3] = dst[1] + (int32_t)oh;
+        coh_pend_wait((base + offset) & 0x0FFFFFFFu, MAX(pitch, 64u) * pv.in_h);   /* a copy queued into it lands first */
+        off = pv.in_w && pv.in_h ? hle_draw_overlay_upload(h5, &pv.color, &w, &h) : HLE_ARENA_FULL;
     }
     if (!on && !g_pd.overlay_on) {
         return;
@@ -1947,8 +1945,16 @@ void hle_pbd_overlay(bool show)
         c->arena_off = off;
         c->w = w;
         c->h = h;
-        memcpy(c->src, src, sizeof(src));
-        memcpy(c->dst, dst, sizeof(dst));
+        c->dst[0] = (int32_t)pv.out_x;
+        c->dst[1] = (int32_t)pv.out_y;
+        c->dst[2] = (int32_t)(pv.out_x + pv.out_w);
+        c->dst[3] = (int32_t)(pv.out_y + pv.out_h);
+        c->in_x = pv.in_x;
+        c->in_y = pv.in_y;
+        c->scale_x = pv.scale_x;
+        c->scale_y = pv.scale_y;
+        c->color_key_on = pv.color_key_on;
+        c->color_key = pv.color_key;
     }
     const HleSurfDesc *sd = g_pd.shown_id ? object_desc(g_pd.shown_id) : NULL;
     c->fb_w = sd ? sd->w : 640;
@@ -1974,8 +1980,12 @@ void hle_pbd_overlay(bool show)
         g_pd.epoch++;
     }
     if (g_lg.overlay++ < 4 || g_dlog_left > 0) {
-        hle_log("hakuX-hle-pb", "overlay %s: %ux%u -> %d,%d-%d,%d", on ? "on" : "off", w, h,
-                on ? dst[0] : 0, on ? dst[1] : 0, on ? dst[2] : 0, on ? dst[3] : 0);
+        hle_log("hakuX-hle-pb", "overlay %s: %ux%u from %.1f,%.1f scale %.3fx%.3f -> %d,%d-%d,%d, "
+                "colour key %s %06x, contrast %x brightness %d saturation %d,%d %s",
+                on ? "on" : "off", w, h, c->in_x, c->in_y, c->scale_x, c->scale_y, c->dst[0],
+                c->dst[1], c->dst[2], c->dst[3], c->color_key_on ? "on" : "off", c->color_key,
+                (unsigned)pv.color.contrast, pv.color.brightness, pv.color.sat_cos,
+                pv.color.sat_sin, pv.color.bt709 ? "BT.709" : "BT.601");
     }
 }
 

@@ -9,6 +9,7 @@
 #include "hw/xbox/hle/mem/barrier.h"
 #include "hw/xbox/hle/mem/guestmem.h"
 #include "hw/xbox/hle/pb/pbres.h"
+#include "hw/xbox/hle/pb/pvideo.h"
 #include "hw/xbox/hle/tex/etc2_enc.h"
 #include "hw/xbox/hle/tex/xdk_res.h"
 #include "hw/xbox/hle/tex/xg_swizzle.h"
@@ -244,34 +245,6 @@ static bool tex_native(uint32_t fmt)
     }
 }
 
-static uint8_t clip8(int v)
-{
-    return v < 0 ? 0 : v > 255 ? 255 : (uint8_t)v;
-}
-
-/* YUY2 / UYVY (BT.601 video range) -> B8G8R8A8, w x h texels: integer form
- * as xemu's convert_yuy2_to_rgb. */
-static void yuv_convert(const uint8_t *src, uint32_t pitch, uint32_t w, uint32_t h, bool uyvy,
-                        uint8_t *dst)
-{
-    for (uint32_t y = 0; y < h; y++) {
-        const uint8_t *l = src + y * pitch;
-        uint8_t *q = dst + y * w * 4;
-        for (uint32_t x = 0; x + 1 < w; x += 2, l += 4, q += 8) {
-            int y0 = (uyvy ? l[1] : l[0]) - 16, y1 = (uyvy ? l[3] : l[2]) - 16;
-            int u = (uyvy ? l[0] : l[1]) - 128, v = (uyvy ? l[2] : l[3]) - 128;
-            int yy[2] = { y0, y1 };
-            for (unsigned k = 0; k < 2; k++) {
-                int c = 298 * yy[k];
-                q[4 * k + 0] = clip8((c + 516 * u + 128) >> 8);
-                q[4 * k + 1] = clip8((c - 100 * u - 208 * v + 128) >> 8);
-                q[4 * k + 2] = clip8((c + 409 * v + 128) >> 8);
-                q[4 * k + 3] = 255;
-            }
-        }
-    }
-}
-
 /* A YUY2 / UYVY texture's texels converted to A8R8G8B8 into the arena as
  * object id's image (HLE_OP_TEX), sent as a linear A8R8G8B8 texture (texel
  * coordinates like the source); false if they can't be. */
@@ -289,7 +262,7 @@ static bool yuv_define(uint32_t id, const uint32_t h5[5], const HleResDesc *d)
     if (off == HLE_ARENA_FULL) {
         return false;
     }
-    yuv_convert(src, pitch, d->w, d->h, d->fmt == HLE_XFMT_UYVY, dst);
+    hle_pvideo_convert(src, pitch, d->w, d->h, d->fmt == HLE_XFMT_UYVY, NULL, dst);
     if (g_lg.yuv++ < 4) {               /* movies: when their frames start converting */
         hle_log("hakuX-hle-front", "YUV texture %u: %ux%u %s converted (#%u of 4 logged)", id,
                 d->w, d->h, d->fmt == HLE_XFMT_UYVY ? "UYVY" : "YUY2", g_lg.yuv);
@@ -547,7 +520,8 @@ uint32_t hle_draw_tex_define(uint32_t id, const uint32_t h5[5], const uint32_t *
 
 /* The overlay is not a texture object: the video decoder rewrites it every
  * frame and the back end keeps its own image (HleCmdOverlay). */
-uint32_t hle_draw_overlay_upload(const uint32_t h5[5], uint32_t *w, uint32_t *h)
+uint32_t hle_draw_overlay_upload(const uint32_t h5[5], const HlePvideoColor *color, uint32_t *w,
+                                 uint32_t *h)
 {
     HleResDesc d;
     HleResInfo ri;
@@ -561,7 +535,8 @@ uint32_t hle_draw_overlay_upload(const uint32_t h5[5], uint32_t *w, uint32_t *h)
     uint8_t *dst;
     uint32_t off = src ? arena_alloc(d.w * d.h * 4, 16, &dst) : HLE_ARENA_FULL;
     if (off != HLE_ARENA_FULL) {
-        yuv_convert(src, pitch, d.w, d.h, d.fmt == HLE_XFMT_UYVY, dst);
+        hle_pvideo_convert(src, pitch, d.w, d.h, d.fmt == HLE_XFMT_UYVY,
+                           hle_pvideo_color_default(color) ? NULL : color, dst);
         *w = d.w;
         *h = d.h;
     }

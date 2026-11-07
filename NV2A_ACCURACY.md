@@ -42,8 +42,8 @@ Register combiners, including the final combiner; most texture modes; shadow
 maps with filtered edges; W-buffering; depth clamp; float depth; fog modes;
 fixed-function transform and lighting with skinning and texture-coordinate
 generation; point sprites; occlusion queries; signed blending; framebuffer
-reads; the video overlay; palettes; texture borders; and 2x / 2x2
-antialiased surfaces.
+reads; the video overlay, with its colour key and scaler; palettes; texture
+borders; and 2x / 2x2 antialiased surfaces.
 
 ## Suggested order
 
