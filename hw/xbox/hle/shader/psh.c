@@ -7,12 +7,15 @@
  * - output word: bits 0-3 CD, 4-7 AB, 8-11 SUM/MUX register, bit 12 CD dot,
  *   13 AB dot, 14 MUX, 15-17 output mapping, 18 CD blue-to-alpha, 19 AB;
  * - every input of a stage is read before any output is written; stage
- *   results are clamped to [-1, 1]; r0.a starts as t0.a;
+ *   results are clamped to [-1, 1] and kept in 9-bit signed fixed point,
+ *   1.0 = 0xFF (rounded half up: q9); the bias mappings' 0.5 is 0x80;
+ *   r0.a starts as t0.a;
  * - PSCombinerCount: bits 0-7 stages, bit 8 MUX on r0.a's MSB (else LSB),
  *   bit 12 a C0 per stage (else stage 0's), bit 16 the same for C1;
  * - final combiner: rgb = A*B + (1-A)*C + D, alpha = G, inputs clamped to
- *   [0, 1]; EF_PROD = E*F, V1R0_SUM = v1 + r0 (EFG flags: 0x80 clamp,
- *   0x40 complement v1, 0x20 complement r0). Without one, the output is r0.
+ *   [0, 1]; EF_PROD = E*F, V1R0_SUM = v1 + r0, each clamped to [0, 1]
+ *   first, the sum up to 2 unless clamped (EFG flags: 0x80 clamp, 0x40
+ *   complement v1, 0x20 complement r0). Without one, the output is r0.
  */
 #include <stdarg.h>
 #include <stdbool.h>
@@ -25,8 +28,12 @@ typedef struct Buf {
     char *p;
     size_t cap, len;
     bool overflow;
-    const char *half;                   /* the bias mappings' 0.5 (hle_psh_glsl) */
 } Buf;
+
+/* The bias mappings' 0.5: 0x80 in the combiners' fixed point, 1.0 = 0xFF
+ * (nxdk_pgraph_tests' Combiner suite on an Xbox: 0xBF - 0.5 reads 63, and
+ * 0xFF - 0.5 127) */
+#define HALF "(128.0 / 255.0)"
 
 static void put(Buf *b, const char *fmt, ...)
 {
@@ -91,20 +98,20 @@ static void in_expr(Buf *b, uint8_t in, bool alpha, bool final)
     case 1: put(b, "(1.0 - clamp(%s, 0.0, 1.0))", x); break;     /* UNSIGNED_INVERT */
     case 2: put(b, "(2.0 * max(%s, 0.0) - 1.0)", x); break;      /* EXPAND_NORMAL */
     case 3: put(b, "(-2.0 * max(%s, 0.0) + 1.0)", x); break;     /* EXPAND_NEGATE */
-    case 4: put(b, "(max(%s, 0.0) - %s)", x, b->half); break;    /* HALFBIAS_NORMAL */
-    case 5: put(b, "(-max(%s, 0.0) + %s)", x, b->half); break;   /* HALFBIAS_NEGATE */
+    case 4: put(b, "(max(%s, 0.0) - " HALF ")", x); break;       /* HALFBIAS_NORMAL */
+    case 5: put(b, "(-max(%s, 0.0) + " HALF ")", x); break;      /* HALFBIAS_NEGATE */
     case 6: put(b, "(%s)", x); break;                            /* SIGNED_IDENTITY */
     default: put(b, "(-(%s))", x); break;                        /* SIGNED_NEGATE */
     }
 }
 
-/* A stage's result v through its output mapping (half: the bias's 0.5). */
-static void out_expr(char *e, size_t n, uint32_t out, const char *v, const char *half)
+/* A stage's result v through its output mapping. */
+static void out_expr(char *e, size_t n, uint32_t out, const char *v)
 {
     switch ((out >> 15) & 7) {
-    case 1: snprintf(e, n, "(%s - %s)", v, half); break;            /* BIAS */
+    case 1: snprintf(e, n, "(%s - " HALF ")", v); break;            /* BIAS */
     case 2: snprintf(e, n, "(%s * 2.0)", v); break;                 /* SHIFTLEFT_1 */
-    case 3: snprintf(e, n, "((%s - %s) * 2.0)", v, half); break;    /* SHIFTLEFT_1_BIAS */
+    case 3: snprintf(e, n, "((%s - " HALF ") * 2.0)", v); break;    /* SHIFTLEFT_1_BIAS */
     case 4: snprintf(e, n, "(%s * 4.0)", v); break;                 /* SHIFTLEFT_2 */
     case 6: snprintf(e, n, "(%s * 0.5)", v); break;                 /* SHIFTRIGHT_1 */
     default: snprintf(e, n, "(%s)", v); break;
@@ -141,10 +148,10 @@ static void stage(Buf *b, const HlePshKey *k, unsigned s)
         in_expr(b, (ai >> (24 - 8 * i)) & 0xFF, true, false);
         put(b, ";\n");
     }
-    /* MSB: bit 7 of the 8-bit value (D3D cnd: r0.a > 0.5); 1.0 * 0.5 is
-     * 0xFF >> 1 = 0x7F, clear, and a bias's 0.5 is 0x80, set (b->half) */
+    /* MSB: bit 7 of the 8-bit value (D3D cnd: r0.a > 0.5, 0x80 and up);
+     * LSB: bit 0, of a two's complement value where r0.a is negative */
     put(b, "    bool mx = %s;\n", (k->count & 0x100) ? "r0.a > 0.5"
-                                                   : "(uint(r0.a * 255.0) & 1u) == 1u");
+                                                   : "(int(floor(r0.a * 255.0 + 0.5)) & 1) == 1");
     put(b, "    vec3 ab = %s, cd = %s;\n", (ro & 0x2000) ? "vec3(dot(A, B))" : "A * B",
         (ro & 0x1000) ? "vec3(dot(C, D))" : "C * D");
     put(b, "    vec3 ms = %s;\n", (ro & 0x4000) ? "mx ? cd : ab" : "ab + cd");
@@ -154,10 +161,10 @@ static void stage(Buf *b, const HlePshKey *k, unsigned s)
     static const char *const k_rv[3] = { "ab", "cd", "ms" };
     static const char *const k_av[3] = { "aab", "acd", "ams" };
     for (unsigned i = 0; i < 3; i++) {
-        out_expr(e, sizeof(e), ro, k_rv[i], b->half);
-        put(b, "    %s = clamp(%s, -1.0, 1.0);\n", k_rv[i], e);
-        out_expr(e, sizeof(e), ao, k_av[i], b->half);
-        put(b, "    %s = clamp(%s, -1.0, 1.0);\n", k_av[i], e);
+        out_expr(e, sizeof(e), ro, k_rv[i]);
+        put(b, "    %s = q9(clamp(%s, -1.0, 1.0));\n", k_rv[i], e);
+        out_expr(e, sizeof(e), ao, k_av[i]);
+        put(b, "    %s = q9(clamp(%s, -1.0, 1.0));\n", k_av[i], e);
     }
     /* outputs: AB bits 4-7, CD bits 0-3, SUM bits 8-11 */
     static const unsigned k_shift[3] = { 4, 0, 8 };
@@ -198,7 +205,7 @@ static void final_combiner(Buf *b, const HlePshKey *k)
          * SPECULARENABLE, v1 + r0 (clamped), C = fog.rgb, G = r0.a; without
          * fog, D = B (fogf is 1 then) */
         put(b, "  outc = vec4(mix(fogr.rgb, clamp(%s, 0.0, 1.0), fogf), clamp(r0.a, 0.0, 1.0));\n",
-            k->specular ? "v1.rgb + r0.rgb" : "r0.rgb");
+            k->specular ? "clamp(v1.rgb, 0.0, 1.0) + clamp(r0.rgb, 0.0, 1.0)" : "r0.rgb");
         return;
     }
     put(b, "  {\n    vec4 C0 = col(pc.psc[16]), C1 = col(pc.psc[17]);\n");
@@ -207,16 +214,23 @@ static void final_combiner(Buf *b, const HlePshKey *k)
     put(b, ", 0.0, 1.0);\n    vec3 F = clamp(");
     in_expr(b, (efg >> 16) & 0xFF, false, false);
     put(b, ", 0.0, 1.0);\n    vec4 efp = vec4(E * F, 0.0);\n");
+    /* v1 and r0 each clamped to [0, 1], then complemented: the sum of a
+     * negative r0 is v1's (SpecularR0SumFlags), and up to 2 unclamped */
     put(b, "    vec4 v1r0 = vec4(%s + %s, 0.0);\n",
-        (efg & 0x40) ? "(1.0 - v1.rgb)" : "v1.rgb", (efg & 0x20) ? "(1.0 - r0.rgb)" : "r0.rgb");
+        (efg & 0x40) ? "(1.0 - clamp(v1.rgb, 0.0, 1.0))" : "clamp(v1.rgb, 0.0, 1.0)",
+        (efg & 0x20) ? "(1.0 - clamp(r0.rgb, 0.0, 1.0))" : "clamp(r0.rgb, 0.0, 1.0)");
     if (efg & 0x80) {
         put(b, "    v1r0 = clamp(v1r0, 0.0, 1.0);\n");
     }
     static const char k_v[4] = { 'A', 'B', 'C', 'D' };
     for (unsigned i = 0; i < 4; i++) {
-        put(b, "    vec3 %c = clamp(", k_v[i]);
-        in_expr(b, (abcd >> (24 - 8 * i)) & 0xFF, false, true);
-        put(b, ", 0.0, 1.0);\n");
+        /* V1R0_SUM unclamped as it is, up to 2: twice 0xFF times 0x7F reads
+         * 254 (SpecularR0SumFlags) */
+        const uint8_t in = (abcd >> (24 - 8 * i)) & 0xFF;
+        const bool sum = (in & 0xEF) == 14;
+        put(b, "    vec3 %c = %s", k_v[i], sum ? "" : "clamp(");
+        in_expr(b, in, false, true);
+        put(b, "%s;\n", sum ? "" : ", 0.0, 1.0)");
     }
     put(b, "    float G = clamp(");
     in_expr(b, (efg >> 8) & 0xFF, true, true);
@@ -444,28 +458,23 @@ static void alpha_kill(Buf *b, const HlePshKey *k, unsigned s, unsigned m)
 
 size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsupported)
 {
-    Buf b = { buf, cap, 0, false, "0.5" };
+    Buf b = { buf, cap, 0, false };
     const char *interp = k->flat ? "flat " : "";
-    /* The combiners compute in signed fixed point, 1.0 = 0xFF: the bias
-     * mappings' 0.5 is 0x80, its MSB set, while a halving of 1.0 is 0x7F,
-     * clear; both are 0.5 in float. A MUX on r0.a's MSB tells them apart:
-     * Halo 2's scope mask sets r0.a = 0.5 - t0.b (HALFBIAS_NEGATE) to pick
-     * its black where t0.b is 0 (a dimmed view around the scope, black
-     * lines) and a light blue elsewhere, and read as 0.5 it painted the
-     * whole view light blue; PGR2's road halves t0.a (SHIFTRIGHT_1) and must
-     * not pick at 1.0. Shaders with such a MUX take 0x80 / 0xFF for the
-     * bias; the others keep 0.5 and their text (a colour moves by half an
-     * 8-bit step only). A MUX on the LSB keeps 0.5 too: its test truncates
-     * r0.a * 255, which lands a 0x80 bias's sums just under their integer
-     * (no title is known to depend on its parity at a bias). */
-    if (k->count & 0x100) {
-        for (unsigned s = 0; s < (k->count & 0xFF) && s < 8; s++) {
-            if ((k->rgb_out[s] | k->alpha_out[s]) & 0x4000) {
-                b.half = "(128.0 / 255.0)";
-                break;
-            }
-        }
-    }
+    /* The combiners compute in 9-bit signed fixed point, 1.0 = 0xFF, as
+     * nxdk_pgraph_tests' Combiner suite reads on an Xbox (116 pixels:
+     * InputMappings, ShiftClamping, CombinerOps, SignedCombinerOps,
+     * SignedToUnsignedMapping, SpecularR0Sum and its flags):
+     * - a stage's products and sums are exact; its output mapping, the
+     *   clamp to [-1, 1] and a rounding half up (q9) give the register's
+     *   value: 0x19 halved is 0x0D, -0x1F halved -0x0F, 0xFF halved 0x80
+     *   (its MSB set), and two halved values summed in the final combiner
+     *   (63.5 + 12.5) read 77;
+     * - the bias mappings' 0.5 is 0x80: 0xBF + 0xBF - 0.5 reads 254, and
+     *   (0x5F + 0x5F - 0.5) * 2 reads 124 (HALF). Halo 2's scope mask MUXes
+     *   on the MSB of r0.a = 0.5 - t0.b, which is set at t0.b = 0.
+     * Only the stages' outputs are rounded: the textures, the vertex colours
+     * and fog reach them as filtered and interpolated (not compared with an
+     * Xbox), the constants are 8-bit already. */
     unsigned unsup = 0;
     /* two-sided lighting: the back colours (vsh.h's outputs 7, 8) */
     char back[160] = "";
@@ -499,6 +508,11 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "%s%s%s%s"
             "layout(location = 0) out vec4 oColor;\n"
             "vec4 col(uint c) { return unpackUnorm4x8(c).zyxw; }\n"
+            /* a register's 9-bit value, rounded half up: a tie (a halving)
+             * lands a hair under k + 0.5 in float; the combiners' other
+             * values from 8-bit inputs are 1/510 of a step or more away */
+            "float q9(float x) { return floor(x * 255.0 + 0.5009765625) / 255.0; }\n"
+            "vec3 q9(vec3 x) { return floor(x * 255.0 + 0.5009765625) / 255.0; }\n"
             HLE_NVPROJ_GLSL
             "%s"
             /* Xbox linear (non-swizzled) textures use texel coordinates */
@@ -556,12 +570,13 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
                 "    return vec3(float(i.a << 8 | i.r), float(i.g << 8 | i.b), 65535.0) / 65535.0; }\n" : "",
         k->conv ? k_conv_glsl : "",
         /* colour sign: a channel offset binary, or as stored, as two's
-         * complement over 127 */
+         * complement, doubled into the combiners' fixed point (0x66 reads
+         * 0xCC, nxdk_pgraph_tests' SignedToUnsignedMapping on an Xbox) */
         k->sgn_ob | k->sgn_raw ?
-            "float sgnob(float c) { return max((c * 255.0 - 128.0) / 127.0, -1.0); }\n"
+            "float sgnob(float c) { return max((c * 255.0 - 128.0) / 127.5, -1.0); }\n"
             "float sgnraw(float c) {\n"
             "  float v = floor(c * 255.0 + 0.5);\n"
-            "  return max((v >= 128.0 ? v - 256.0 : v) / 127.0, -1.0);\n"
+            "  return max((v >= 128.0 ? v - 256.0 : v) / 127.5, -1.0);\n"
             "}\n" : "",
         /* colour key: the texel and the key the same at n levels a channel */
         k->ckey ? "bool ckeq(vec4 t, vec4 c, vec4 n) {\n"
