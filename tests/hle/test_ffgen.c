@@ -316,6 +316,29 @@ static void test_overflow(void)
     HT_CHECK(hle_ff_vs_glsl(&vk, small, sizeof(small)) == 0);
 }
 
+/* Check coverage is computed before discards and applied before alpha testing. */
+static void test_poly_smooth(void)
+{
+    HleFfPsKey pk = { .nstages = 1, .alpha_test = 1, .alpha_func = 4 };     /* GREATER */
+    pk.st[0] = (HleFfStage){ .colorop = 4, .colorarg1 = 2, .colorarg2 = 0, .alphaop = 4,
+                             .alphaarg1 = 2, .alphaarg2 = 0, .resultarg = 1, .texture = 1,
+                             .tex_dim = 2, .alpha_kill = 1 };
+    HT_CHECK(hle_ff_ps_glsl(&pk, buf, sizeof(buf)) > 0);
+    HT_CHECK(strstr(buf, "gl_BaryCoordNoPerspEXT") == NULL);
+    HT_CHECK(strstr(buf, "GL_EXT_fragment_shader_barycentric") == NULL);
+    pk.poly_smooth = 1;
+    size_t n = hle_ff_ps_glsl(&pk, buf, sizeof(buf));
+    HT_CHECK(n > 0 && n == strlen(buf));
+    dump("poly_smooth", "frag");
+    HT_CHECK(strstr(buf, "#extension GL_EXT_fragment_shader_barycentric : require\n") != NULL);
+    const char *bc = strstr(buf, "vec3 bc = gl_BaryCoordNoPerspEXT, gx = dFdx(bc), gy = dFdy(bc);");
+    const char *kill = strstr(buf, "if (t0.a == 0.0) discard;");
+    const char *cv = strstr(buf, "cur.a *= pcov;");
+    const char *at = strstr(buf, "if (!(a > r)) discard;");
+    HT_CHECK(bc != NULL && kill != NULL && bc < kill);
+    HT_CHECK(cv != NULL && at != NULL && cv < at);
+}
+
 int main(void)
 {
     HT_RUN(test_ui_quad);
@@ -328,6 +351,7 @@ int main(void)
     HT_RUN(test_texgen);
     HT_RUN(test_fog);
     HT_RUN(test_points);
+    HT_RUN(test_poly_smooth);
     HT_RUN(test_unset_texture);
     HT_RUN(test_all_ops);
     HT_RUN(test_overflow);

@@ -747,6 +747,37 @@ static void test_dither(void)
     HT_CHECK(strstr(buf, "oColor = clamp(d * df - s * sf, 0.0, 1.0);") != NULL);
 }
 
+/* Polygon coverage adjusts alpha before the alpha test. */
+static void test_poly_smooth(void)
+{
+    uint32_t rs[HLE_PS_REGS] = { 0 };
+    rs[HLE_PS_RGB_IN] = IN4(R_V0, R_ZERO | INVERT, R_ZERO, R_ZERO);
+    rs[HLE_PS_RGB_OUT] = R_R0 << 4;
+    rs[HLE_PS_COUNT] = 1;
+    HlePshKey k;
+    hle_psh_key(rs, &k);
+    HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), NULL) > 0);
+    HT_CHECK(strstr(buf, "gl_BaryCoordNoPerspEXT") == NULL);
+    HT_CHECK(strstr(buf, "GL_EXT_fragment_shader_barycentric") == NULL);
+    k.poly_smooth = 1;
+    k.alpha_test = 1;
+    k.alpha_func = 4;                                   /* GREATER */
+    k.tex_modes = HLE_PST_PROJECT2D;
+    k.alpha_kill = 1;                                   /* a discard before the coverage's use */
+    size_t n = hle_psh_glsl(&k, buf, sizeof(buf), NULL);
+    HT_CHECK(n > 0 && n == strlen(buf));
+    dump("psh_poly_smooth");
+    HT_CHECK(strstr(buf, "#extension GL_EXT_fragment_shader_barycentric : require\n") != NULL);
+    HT_CHECK(strstr(buf, "float(max((pc.flags >> 16) & 255u, 1u));") != NULL);
+    /* Compute derivatives before discards; apply coverage before alpha testing. */
+    const char *bc = strstr(buf, "vec3 bc = gl_BaryCoordNoPerspEXT, gx = dFdx(bc), gy = dFdy(bc);");
+    const char *kill = strstr(buf, "if (t0.a == 0.0) discard;");
+    const char *cv = strstr(buf, "outc.a *= pcov;");
+    const char *at = strstr(buf, "if (!(a > r)) discard;");
+    HT_CHECK(bc != NULL && kill != NULL && bc < kill);
+    HT_CHECK(cv != NULL && at != NULL && cv < at);
+}
+
 static void test_overflow(void)
 {
     uint32_t rs[HLE_PS_REGS] = { 0 };
@@ -776,6 +807,7 @@ int main(void)
     HT_RUN(test_sign_color_key);
     HT_RUN(test_dither);
     HT_RUN(test_aa_control);
+    HT_RUN(test_poly_smooth);
     HT_RUN(test_overflow);
     HT_DONE();
 }

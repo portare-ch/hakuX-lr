@@ -483,7 +483,8 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
     for (unsigned s = 0; s < 3; s++) {
         hilo1 |= ((k->dot_map >> (4 * s)) & 7) == 4;
     }
-    put(&b, "#version 450\n#extension GL_EXT_nonuniform_qualifier : require\n%s",
+    put(&b, "#version 450\n#extension GL_EXT_nonuniform_qualifier : require\n%s%s",
+        k->poly_smooth ? HLE_BARY_EXT_GLSL : "",
         hle_push_glsl());
     put(&b, "layout(set = 0, binding = 0) uniform texture2D uTex2D[];\n"
             "layout(set = 0, binding = 1) uniform sampler uSmp[];\n"
@@ -571,6 +572,9 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
                       "  vec4 v1 = gl_FrontFacing ? vSpecular : vBack1;\n"
                     : "  vec4 v0 = vDiffuse, v1 = vSpecular;\n",
         k->point_sprite ? "vec4(gl_PointCoord, 1.0, 1.0)" : "vTex3i");
+    if (k->poly_smooth) {
+        put(&b, HLE_POLY_COVER_GLSL);
+    }
     /* DOT_ZW's stage: its z and w (zrz, zrw) make the fragment's depth,
      * which replaces W-buffering's */
     const unsigned zr = hle_psh_zrep(k->tex_modes);
@@ -815,6 +819,11 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
     }
     final_combiner(&b, k);
     put(&b, "  outc = clamp(outc, 0.0, 1.0);\n");
+    if (k->poly_smooth) {
+        /* Apply polygon coverage before alpha testing. Only interior pixels
+         * are shaded. */
+        put(&b, "  outc.a *= pcov;\n");
+    }
     if (k->alpha_test && k->alpha_func < 8) {
         put(&b, "  { float a = outc.a, r = pc.alpha_ref; if (!(%s)) discard; }\n",
             k_cmp[k->alpha_func]);

@@ -108,6 +108,9 @@ typedef struct HleCaps {
     bool wide_lines;            /* enabled when present: lines as wide as SET_LINE_WIDTH
                                    times the resolution scale (vk/draw.c), else 1.0
                                    (Turnip on the Adreno 650 has none) */
+    bool fill_modes;            /* Non-solid polygon modes. */
+    bool smooth_lines;          /* Vulkan smooth-line rasterization. */
+    bool bary;                  /* Barycentric coordinates for polygon smoothing. */
     bool cache_control;         /* pipelineCreationCacheControl: a pipeline asked of the
                                    cache only (vk/draw.c, asynchronous builds) */
     bool swapchain;             /* the Android surface and VK_KHR_swapchain: the window's
@@ -140,6 +143,8 @@ extern HleVk g_hvk;
  * Vulkan 1.1 is the floor's version: 1.2's and 1.3's parts come from their
  * extensions (timeline semaphores required) or vk/compat.c. */
 int hle_vk_init(void);
+/* Request Vulkan 1.4 if available, otherwise 1.3. */
+uint32_t hle_vk_instance_version(void);
 /* hle_vk_init on a frontend's instance (the libretro core): gpu, or the first
  * one when VK_NULL_HANDLE; a queue that can present to surface if it isn't
  * VK_NULL_HANDLE; the device made by make, as vkCreateDevice would (the
