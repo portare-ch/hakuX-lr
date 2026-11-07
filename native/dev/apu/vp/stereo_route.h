@@ -37,10 +37,8 @@
  * the other side at -24.4 dB (at 1 kHz) that this mix leaves out. What the
  * hardware's analog stage and level do isn't measured.
  *
- * A send's source channel (vp_send_channel): a 2D voice's own channel, its
- * slot modulo the source's channels (vp.c mix_one_bin); a 3D voice's first
- * four slots, the VP's HRTF outputs, its HRTF filter's ears, the left ear
- * the first two and the right ear the last two. Those four go to the bins
+ * A 3D voice sends its left ear through slots 0–1 and its right ear through
+ * slots 2–3 (xemu #3105). Those four go to the bins
  * the guest names with SET_HRTF_SUBMIXES, and DirectSound names them in the
  * order 6, 8, 7, 9: 3D front left, back left, front right, back right
  * (0x09070806 in both Dead or Alive 3 and The Thing), so each ear reaches
@@ -71,12 +69,16 @@
 #define VP_SENDS            8
 #define VP_DOWNMIX_SIDE     0.70710678f     /* -3 dB */
 
-/* The source channel of a voice's send slot: a 3D voice's HRTF outputs
- * (slots 0 to 3) its left ear for the first two and its right ear for the
- * last two; any other send its own channel, the slot modulo channels */
+/* Sources: the voice's two channels, then a 3D voice's two ears */
+#define VP_SOURCES 4
+#define VP_SOURCE_EARS 2
+
+/* The source of a voice's send slot: a 3D voice's HRTF outputs (slots 0 to
+ * 3) its left ear for the first two and its right ear for the last two; any
+ * other send its own channel, the slot modulo channels */
 static inline unsigned vp_send_channel(int slot, bool three_d, unsigned channels)
 {
-    return three_d && slot < 4 ? (unsigned)slot >> 1 : (unsigned)slot % channels;
+    return three_d && slot < 4 ? VP_SOURCE_EARS + ((unsigned)slot >> 1) : (unsigned)slot % channels;
 }
 
 /* A 2D voice's route in the VP's own mix, a sound's (vp.c) */
@@ -132,17 +134,19 @@ static inline int vp_stereo_classify(const int bin[VP_SENDS], const float att[VP
 }
 
 /* The gains of a speaker-routed voice's sends to the two speakers: g[o][s]
- * from source channel s to output o (0 left, 1 right), each speaker send's
- * ea * attenuation / 2^shift[send] (its headroom) added in by its downmix
- * weights; every gain 0 when its speaker sends are muted. channels: the
- * source's (a 3D voice's two ears); three_d: a 3D voice, its first four
- * sends its ears' (vp_send_channel). */
+ * from source s (vp_send_channel) to output o (0 left, 1 right), each
+ * speaker send's ea * attenuation / 2^shift[send] (its headroom) added in by
+ * its downmix weights; every gain 0 when its speaker sends are muted.
+ * channels: the voice's; three_d: a 3D voice, its first four sends its
+ * ears'. */
 static inline void vp_stereo_gains(const int bin[VP_SENDS], const float att[VP_SENDS],
                                    const uint8_t shift[VP_SENDS], unsigned channels, bool three_d,
-                                   float ea, float g[2][2])
+                                   float ea, float g[2][VP_SOURCES])
 {
     float w[2];
-    g[0][0] = g[0][1] = g[1][0] = g[1][1] = 0.0f;
+    for (int s = 0; s < VP_SOURCES; s++) {
+        g[0][s] = g[1][s] = 0.0f;
+    }
     for (int b = 0; b < VP_SENDS; b++) {
         if (att[b] == 0.0f || !vp_downmix_weights(bin[b], w)) {
             continue;
@@ -155,21 +159,25 @@ static inline void vp_stereo_gains(const int bin[VP_SENDS], const float att[VP_S
 }
 
 /* The voice's frame into the speakers by its gains (vp_stereo_gains), added
- * to out: a mono voice's one channel, a stereo voice's two. */
+ * to out: a mono voice's one channel, a stereo voice's two, and a 3D
+ * voice's ears (ears: NULL for a 2D voice). */
 static inline void vp_stereo_mix(float out[NUM_SAMPLES_PER_FRAME][2],
-                                 const float in[NUM_SAMPLES_PER_FRAME][2], const float g[2][2],
+                                 const float in[NUM_SAMPLES_PER_FRAME][2],
+                                 const float (*ears)[2], const float g[2][VP_SOURCES],
                                  unsigned channels)
 {
-    if (channels == 1) {
-        for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
-            out[i][0] += g[0][0] * in[i][0];
-            out[i][1] += g[1][0] * in[i][0];
-        }
-        return;
-    }
     for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
-        out[i][0] += g[0][0] * in[i][0] + g[0][1] * in[i][1];
-        out[i][1] += g[1][0] * in[i][0] + g[1][1] * in[i][1];
+        float l = g[0][0] * in[i][0], r = g[1][0] * in[i][0];
+        if (channels == 2) {
+            l += g[0][1] * in[i][1];
+            r += g[1][1] * in[i][1];
+        }
+        if (ears) {
+            l += g[0][2] * ears[i][0] + g[0][3] * ears[i][1];
+            r += g[1][2] * ears[i][0] + g[1][3] * ears[i][1];
+        }
+        out[i][0] += l;
+        out[i][1] += r;
     }
 }
 

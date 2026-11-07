@@ -166,7 +166,9 @@ static void voice_reset_filters(MCPXAPUState *d, uint16_t v)
             vp_resample_new(&voice_resample_callback, d->vp.resample_quality, 2, &d->vp.filters[v]);
     }
     /* the voice slot's previous sound out of the HRTF filter too (its
-     * coefficients and delays, the voice's HRTF entry, stay) */
+     * coefficients and delays, the voice's HRTF entry, stay); its first
+     * frame starts at the entry's parameters */
+    d->vp.filters[v].hrtf.params_set = false;
     hrtf_filter_clear_history(&d->vp.filters[v].hrtf);
 }
 
@@ -746,16 +748,6 @@ static void fe_method(MCPXAPUState *d, uint32_t method, uint32_t argument)
         uint32_t current_voice = d->regs[NV_PAPU_FECV];
         voice_set_mask(d, current_voice, NV_PAVS_VOICE_CFG_HRTF_TARGET,
                        NV_PAVS_VOICE_CFG_HRTF_TARGET_HANDLE, handle);
-        if (current_voice < MCPX_HW_MAX_3D_VOICES &&
-            handle != HRTF_NULL_HANDLE &&
-            APU_CHECK(handle < HRTF_ENTRY_COUNT)) {
-            // FIXME: Xbox software seems to reliably set voice HRTF handles
-            // after updating filter parameters, however it may be possible to
-            // update parameter targets for an active voice.
-            hrtf_filter_set_target_params(&d->vp.filters[current_voice].hrtf,
-                                          d->vp.hrtf.entries[handle].hrir,
-                                          d->vp.hrtf.entries[handle].itd);
-        }
         break;
     }
     case NV1BA0_PIO_SET_VOICE_TAR_VOLA:
@@ -1873,6 +1865,15 @@ static void voice_process(MCPXAPUState *d, uint8_t *c,
     return;
 #endif
 
+    /* A 3D voice plays channel 0 as mono (xemu #3105). */
+    if (v < MCPX_HW_MAX_3D_VOICES && stereo) {
+        for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
+            samples[i][1] = samples[i][0];
+        }
+        stereo = false;
+        channels = 1;
+    }
+
     int bin[8];
     bin[0] = voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_CFG_VBIN,
                             NV_PAVS_VOICE_CFG_VBIN_V0BIN);
@@ -1993,8 +1994,16 @@ static void voice_process(MCPXAPUState *d, uint8_t *c,
                                NV_PAVS_VOICE_CFG_MISC_FMODE);
 
     // FIXME: Move to function
+    const bool three_d = v < MCPX_HW_MAX_3D_VOICES;
+    uint16_t hrtf_handle = HRTF_NULL_HANDLE;
+    if (three_d) {
+        hrtf_handle = voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_CFG_HRTF_TARGET,
+                                            NV_PAVS_VOICE_CFG_HRTF_TARGET_HANDLE);
+    }
+    /* Without an HRTF entry, a 3D voice uses 2D filtering without I3DL2. */
+    const bool spatial = three_d && hrtf_handle != HRTF_NULL_HANDLE;
     bool lpf = false;
-    if (v < MCPX_HW_MAX_3D_VOICES) {
+    if (spatial) {
         /* 1:DLS2+I3DL2 2:ParaEQ+I3DL2 3:I3DL2 */
         lpf = (fmode == 1);
     } else {
@@ -2021,32 +2030,39 @@ static void voice_process(MCPXAPUState *d, uint8_t *c,
         }
     }
 
-    if (v < MCPX_HW_MAX_3D_VOICES && g_apu_config.hrtf) {
-        uint16_t hrtf_handle =
-            voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_CFG_HRTF_TARGET,
-                           NV_PAVS_VOICE_CFG_HRTF_TARGET_HANDLE);
-        if (hrtf_handle != HRTF_NULL_HANDLE) {
-            hrtf_filter_process(&d->vp.filters[v].hrtf, samples, samples);
+    // FIXME: ParaEQ
+
+    /* Refresh HRTF parameters each frame so writes to the entry take effect
+     * on the next frame. Sends 0–3 stay silent without an entry. */
+    float ears[NUM_SAMPLES_PER_FRAME][2];
+    if (three_d) {
+        if (spatial && g_apu_config.hrtf && APU_CHECK(hrtf_handle < HRTF_ENTRY_COUNT)) {
+            hrtf_filter_set_target_params(&d->vp.filters[v].hrtf,
+                                          d->vp.hrtf.entries[hrtf_handle].hrir,
+                                          d->vp.hrtf.entries[hrtf_handle].itd);
+            hrtf_filter_process(&d->vp.filters[v].hrtf, samples, ears);
+        } else {
+            memcpy(ears, samples, sizeof(ears));
         }
     }
 
-    // FIXME: ParaEQ
-
-    /* Deinterleave samples[32][2] into per-channel contiguous buffers once
-     * (amortized across 8 subsequent mix_one_bin calls). mix_one_bin
-     * (NEON on aarch64, SSE2/AVX2 on x86-64) reads contiguous float[32].
-     * A 3D voice's second is its right ear, a mono one's too (its HRTF
-     * filter's, or the copy of its channel without it): its HRTF sends take
-     * an ear each (vp_send_channel), where a mono voice's right ear was
-     * lost (slot % 1). */
-    const bool three_d = v < MCPX_HW_MAX_3D_VOICES;
-    float channel_buf[2][NUM_SAMPLES_PER_FRAME];
+    /* Deinterleave the sources into contiguous buffers once (amortized
+     * across 8 subsequent mix_one_bin calls): the voice's channels, then a
+     * 3D voice's ears (vp_send_channel). mix_one_bin (NEON on aarch64,
+     * SSE2/AVX2 on x86-64) reads contiguous float[32]. */
+    float channel_buf[VP_SOURCES][NUM_SAMPLES_PER_FRAME];
     for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
         channel_buf[0][i] = samples[i][0];
     }
-    if (channels == 2 || three_d) {
+    if (channels == 2) {
         for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
             channel_buf[1][i] = samples[i][1];
+        }
+    }
+    if (three_d) {
+        for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
+            channel_buf[VP_SOURCE_EARS][i] = ears[i][0];
+            channel_buf[VP_SOURCE_EARS + 1][i] = ears[i][1];
         }
     }
 
@@ -2058,15 +2074,12 @@ static void voice_process(MCPXAPUState *d, uint8_t *c,
         if (mon_vp && bin[b] != MULTIPASS_BIN) {
             continue;
         }
-        float g = ea_value;
-        float hr;
-        if (three_d && (b < 4)) {
-            // FIXME: Not sure if submix/voice headroom factor in for HRTF
-            hr = 1 << d->vp.hrtf_headroom;
-        } else {
-            hr = 1 << d->vp.submix_headroom[bin[b]];
+        if (three_d && b < 4 && hrtf_handle == HRTF_NULL_HANDLE) {
+            continue;
         }
-        g *= attenuate(vol[b]) / hr;
+        /* Hardware uses the destination bin's headroom for HRTF sends. */
+        float hr = 1 << d->vp.submix_headroom[bin[b]];
+        float g = ea_value * attenuate(vol[b]) / hr;
         mix_one_bin(mixbins[bin[b]], channel_buf[vp_send_channel(b, three_d, channels)], g);
     }
 
@@ -2074,24 +2087,25 @@ static void voice_process(MCPXAPUState *d, uint8_t *c,
         /* 2D and 3D voices (vp/stereo_route.h): one outside the multipass
          * groups routed to the speakers is mixed into them by the stereo
          * downmix of its sends to the speaker and 3D bins, its LFE and
-         * effect sends left out; a 3D voice's sources are its HRTF filter's
-         * two ears, its first four sends' headroom the HRTF one, as the
-         * mix-bin path above. The route is its sound's, chosen at the first
-         * frame with an audible send. */
+         * effect sends left out; a 3D voice's first four sends take its
+         * HRTF filter's ears and its others the voice itself, every send
+         * with its bin's headroom, as the mix-bin path above. The route is
+         * its sound's, chosen at the first frame with an audible send. */
         if (!multipass && voice_list != NV1BA0_PIO_SET_ANTECEDENT_VOICE_LIST_MP_TOP - 1) {
             float att[VP_SENDS];
             uint8_t shift[VP_SENDS];
             for (int b = 0; b < VP_SENDS; b++) {
-                att[b] = attenuate(vol[b]);
-                shift[b] = three_d && b < 4 ? d->vp.hrtf_headroom : d->vp.submix_headroom[bin[b]];
+                att[b] = three_d && b < 4 && hrtf_handle == HRTF_NULL_HANDLE ? 0.0f : attenuate(vol[b]);
+                shift[b] = d->vp.submix_headroom[bin[b]];
             }
             if (d->vp.route[v] == VP_ROUTE_UNDECIDED) {
                 d->vp.route[v] = (uint8_t)vp_stereo_classify(bin, att);
             }
             if (d->vp.route[v] == VP_ROUTE_SPEAKERS) {
-                float g2[2][2];
-                vp_stereo_gains(bin, att, shift, three_d ? 2 : channels, three_d, ea_value, g2);
-                vp_stereo_mix(sample_buf, samples, g2, three_d ? 2 : channels);
+                float g2[2][VP_SOURCES];
+                vp_stereo_gains(bin, att, shift, channels, three_d, ea_value, g2);
+                vp_stereo_mix(sample_buf, samples, three_d ? (const float (*)[2])ears : NULL, g2,
+                              channels);
                 return;
             }
         }

@@ -132,7 +132,7 @@ static void test_mix(void)
 
 /* NEON's hrtf_dot in scalar code: two 4-lane accumulators, each fused
  * multiply-add one rounding, summed (a0 + a1), then (0 + 1) + (2 + 3) */
-static float neon_dot(float *c, const float *tar, const float *w, float dfrac)
+static float neon_dot(const float *c, const float *tar, float wgt, const float *w, float dfrac)
 {
     const bool interp = dfrac > 0.0f;
     const float w0 = 1 - dfrac;
@@ -141,8 +141,7 @@ static float neon_dot(float *c, const float *tar, const float *w, float dfrac)
         for (int j = 0; j < 8; j++) {
             float cj = c[m + j];
             if (tar) {
-                cj = fmaf(tar[m + j] - cj, HRTF_PARAM_SMOOTH_ALPHA, cj);
-                c[m + j] = cj;
+                cj = fmaf(tar[m + j] - cj, wgt, cj);
             }
             float s = w[m + j];
             if (interp) {
@@ -161,21 +160,21 @@ static float neon_dot(float *c, const float *tar, const float *w, float dfrac)
 }
 
 #if defined(__x86_64__)
-static VP_AVX2 float dot_avx2(float *c, const float *tar, const float *w, float dfrac)
+static VP_AVX2 float dot_avx2(const float *c, const float *tar, float wgt, const float *w, float dfrac)
 {
-    return hrtf_dot_avx2(c, tar, w, dfrac);
+    return hrtf_dot_avx2(c, tar, wgt, w, dfrac);
 }
 #endif
 
 /* the build's NEON path or x86-64's AVX2 one against the model: the same
- * sums, the same coefficients stepped; SSE2's within rounding */
+ * sums, the coefficients moved alike; SSE2's within rounding */
 static void test_hrtf_neon_sums(void)
 {
     int ls[3];
     const int nl = levels(ls);
     for (int li = 0; li < nl; li++) {
         const int level = ls[li];
-        unsigned off = 0, steps_off = 0;
+        unsigned off = 0;
         double max_err = 0;
         for (int trial = 0; trial < 4000; trial++) {
             float c[HRTF_TAPS_PADDED], c2[HRTF_TAPS_PADDED], tar[HRTF_TAPS_PADDED], w[HRTF_TAPS_PADDED + 1];
@@ -190,28 +189,28 @@ static void test_hrtf_neon_sums(void)
             memcpy(c2, c, sizeof(c));
             const bool moving = trial & 1;
             const float dfrac = trial & 2 ? 0.0f : (trial % 97) / 97.0f;
-            const float want = neon_dot(c, moving ? tar : NULL, w + 1, dfrac);
+            const float wgt = (trial % 32) / 32.0f;
+            const float want = neon_dot(c, moving ? tar : NULL, wgt, w + 1, dfrac);
             float got;
 #if defined(__x86_64__)
             if (level == VP_SIMD_AVX2) {
-                got = dot_avx2(c2, moving ? tar : NULL, w + 1, dfrac);
+                got = dot_avx2(c2, moving ? tar : NULL, wgt, w + 1, dfrac);
             } else if (level == VP_SIMD_SSE2) {
-                got = hrtf_dot_sse2(c2, moving ? tar : NULL, w + 1, dfrac);
+                got = hrtf_dot_sse2(c2, moving ? tar : NULL, wgt, w + 1, dfrac);
             } else {
-                got = hrtf_dot(c2, moving ? tar : NULL, w + 1, dfrac);
+                got = hrtf_dot(c2, moving ? tar : NULL, wgt, w + 1, dfrac);
             }
 #else
-            got = hrtf_dot(c2, moving ? tar : NULL, w + 1, dfrac);
+            got = hrtf_dot(c2, moving ? tar : NULL, wgt, w + 1, dfrac);
 #endif
             off += memcmp(&got, &want, sizeof(got)) != 0;
-            steps_off += memcmp(c, c2, sizeof(c)) != 0;
+            HT_CHECK(memcmp(c, c2, sizeof(c)) == 0);    /* the coefficients aren't written */
             max_err = fmax(max_err, fabs((double)got - want));
         }
-        fprintf(stderr, "  hrtf %-8s %u of 4000 sums, %u coefficient steps off NEON's, max |difference| %.3g\n",
-                level_name(level), off, steps_off, max_err);
+        fprintf(stderr, "  hrtf %-8s %u of 4000 sums off NEON's, max |difference| %.3g\n",
+                level_name(level), off, max_err);
         if (neon_sums(level)) {
             HT_EQ_INT(off, 0);
-            HT_EQ_INT(steps_off, 0);
         }
         HT_CHECK(max_err < 2e-6);
     }
