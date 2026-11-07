@@ -102,6 +102,7 @@ typedef struct HlePshKey {
      * 3 4444), alpha included where the format has one (ckey_alpha, a bit a
      * stage; an X format's is not compared). */
     uint8_t ckey, ckey_bits, ckey_alpha;
+    uint8_t precise;                    /* Round combiner stages to 9-bit registers. */
     uint32_t ckey_col[4];               /* SET_COLOR_KEY_COLOR per stage (D3DCOLOR) */
     /* The NV2A's convolution filters (CONVOLUTION_2D_LOD0), 2 bits a stage:
      * conv the kernel (1 quincunx, 2 gaussian 3 x 3), conv_mm where it
@@ -155,6 +156,9 @@ static inline unsigned hle_psh_zrep(uint32_t tex_modes)
  * with every sample in the mask and neither alpha-to-coverage nor
  * alpha-to-one. */
 void hle_psh_aa_key(HlePshKey *k, uint32_t aactl, uint32_t xs, uint32_t ys, bool colour, bool depth);
+
+/* Configure precision before starting a game. Shader keys record the mode. */
+void hle_psh_set_precision(bool enabled);
 
 /* Key from the render-state array (rs[0..56] = the pixel-shader block). */
 void hle_psh_key(const uint32_t *rs, HlePshKey *k);

@@ -135,6 +135,7 @@ static void test_dot_mux(void)
     rs[HLE_PS_COUNT] = 2 | 0x100 | 0x1000;
     HlePshKey k;
     hle_psh_key(rs, &k);
+    k.precise = 1;
     unsigned un = 0;
     HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), &un) > 0);
     dump("psh_dot");
@@ -165,6 +166,7 @@ static void test_mux_bias(void)
     rs[HLE_PS_COUNT] = 3 | 0x100;
     HlePshKey k;
     hle_psh_key(rs, &k);
+    k.precise = 1;
     HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), NULL) > 0);
     dump("psh_mux_bias");
     HT_CHECK(strstr(buf, "float Ca = (-max(t0.b, 0.0) + (128.0 / 255.0));") != NULL);
@@ -177,6 +179,7 @@ static void test_mux_bias(void)
     rs[HLE_PS_RGB_IN + 1] = IN4(R_T0 | 0x80, R_ZERO | INVERT, R_ZERO, R_ZERO);  /* HALFBIAS_NORMAL */
     rs[HLE_PS_RGB_OUT + 1] = (R_R1 << 4) | (3u << 15);  /* SHIFTLEFT_1_BIAS */
     hle_psh_key(rs, &k);
+    k.precise = 1;
     HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), NULL) > 0);
     HT_CHECK(strstr(buf, "ams = mx ? acd : aab;") != NULL);
     HT_CHECK(strstr(buf, "vec3 A = (max(t0.rgb, 0.0) - (128.0 / 255.0));") != NULL);
@@ -188,6 +191,7 @@ static void test_mux_bias(void)
     rs[HLE_PS_RGB_OUT + 2] = (R_T1 << 8) | 0x4000;
     rs[HLE_PS_COUNT] = 3;                               /* MUX on the LSB */
     hle_psh_key(rs, &k);
+    k.precise = 1;
     HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), NULL) > 0);
     HT_CHECK(strstr(buf, "float Ca = (-max(t0.b, 0.0) + (128.0 / 255.0));") != NULL);
     HT_CHECK(strstr(buf, "bool mx = (int(floor(r0.a * 255.0 + 0.5)) & 1) == 1;") != NULL);
@@ -195,6 +199,7 @@ static void test_mux_bias(void)
     rs[HLE_PS_RGB_OUT + 2] = R_T1 << 8;                 /* no MUX: sum */
     rs[HLE_PS_ALPHA_OUT + 1] = (R_R0 << 8) | (1u << 15);   /* BIAS */
     hle_psh_key(rs, &k);
+    k.precise = 1;
     HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), NULL) > 0);
     HT_CHECK(strstr(buf, "float Ca = (-max(t0.b, 0.0) + (128.0 / 255.0));") != NULL);
     HT_CHECK(strstr(buf, "ams = q9(clamp((ams - (128.0 / 255.0)), -1.0, 1.0));") != NULL);
@@ -855,6 +860,11 @@ static void test_precision(void)
     rs[HLE_PS_COUNT] = 1;
     HlePshKey k;
     hle_psh_key(rs, &k);
+    k.precise = 0;
+    HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), NULL) > 0);
+    HT_CHECK(strstr(buf, "float q9(float x)") == NULL);
+    HT_CHECK(strstr(buf, "ab = clamp((ab * 0.5), -1.0, 1.0);") != NULL);
+    k.precise = 1;
     HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), NULL) > 0);
     dump("psh_precision");
     HT_CHECK(strstr(buf, "float q9(float x) { return floor(x * 255.0 + 0.500244140625) / 255.0; }")
@@ -865,6 +875,7 @@ static void test_precision(void)
     HT_CHECK(strstr(buf, "vec3 D = max(v1r0.rgb, 0.0);") != NULL);      /* up to 2 */
     rs[HLE_PS_FINAL_EFG] = IN4(R_ZERO, R_ZERO, R_R0 | CH_A, 0xE0);
     hle_psh_key(rs, &k);
+    k.precise = 1;
     HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), NULL) > 0);
     HT_CHECK(strstr(buf, "vec4 v1r0 = vec4((1.0 - clamp(v1.rgb, 0.0, 1.0)) + "
                          "(1.0 - clamp(r0.rgb, 0.0, 1.0)), 0.0);") != NULL);
@@ -940,6 +951,24 @@ static void test_precision(void)
     }
 }
 
+static void test_precision_mode(void)
+{
+    uint32_t rs[HLE_PS_REGS] = { 0 };
+    HlePshKey k;
+    HT_EQ_U32(offsetof(HlePshKey, precise) + 1, offsetof(HlePshKey, ckey_col));
+    hle_psh_set_precision(false);
+    hle_psh_key(rs, &k);
+    HT_EQ_U32(k.precise, 0);
+    hle_psh_set_precision(true);
+    hle_psh_key(rs, &k);
+    HT_EQ_U32(k.precise, 1);
+#if defined(__x86_64__) && !defined(__ANDROID__)
+    hle_psh_set_precision(true);
+#else
+    hle_psh_set_precision(false);
+#endif
+}
+
 int main(void)
 {
     HT_RUN(test_modulate);
@@ -962,6 +991,7 @@ int main(void)
     HT_RUN(test_aa_control);
     HT_RUN(test_poly_smooth);
     HT_RUN(test_overflow);
+    HT_RUN(test_precision_mode);
     HT_RUN(test_precision);
     HT_DONE();
 }

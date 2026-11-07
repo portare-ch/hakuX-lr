@@ -33,6 +33,17 @@ typedef struct Buf {
 /* In combiner fixed point, the half-bias constant is 0x80/0xFF. */
 #define HALF "(128.0 / 255.0)"
 
+#if defined(__x86_64__) && !defined(__ANDROID__)
+static bool g_precise_combiners = true;
+#else
+static bool g_precise_combiners;
+#endif
+
+void hle_psh_set_precision(bool enabled)
+{
+    g_precise_combiners = enabled;
+}
+
 static void put(Buf *b, const char *fmt, ...)
 {
     va_list ap;
@@ -50,6 +61,7 @@ static void put(Buf *b, const char *fmt, ...)
 void hle_psh_key(const uint32_t *rs, HlePshKey *k)
 {
     memset(k, 0, sizeof(*k));
+    k->precise = g_precise_combiners;
     unsigned n = rs[HLE_PS_COUNT] & 0xFF;
     n = n > 8 ? 8 : n;
     for (unsigned s = 0; s < n; s++) {      /* stages past the count do not split keys */
@@ -160,9 +172,11 @@ static void stage(Buf *b, const HlePshKey *k, unsigned s)
     static const char *const k_av[3] = { "aab", "acd", "ams" };
     for (unsigned i = 0; i < 3; i++) {
         out_expr(e, sizeof(e), ro, k_rv[i]);
-        put(b, "    %s = q9(clamp(%s, -1.0, 1.0));\n", k_rv[i], e);
+        put(b, k->precise ? "    %s = q9(clamp(%s, -1.0, 1.0));\n"
+                          : "    %s = clamp(%s, -1.0, 1.0);\n", k_rv[i], e);
         out_expr(e, sizeof(e), ao, k_av[i]);
-        put(b, "    %s = q9(clamp(%s, -1.0, 1.0));\n", k_av[i], e);
+        put(b, k->precise ? "    %s = q9(clamp(%s, -1.0, 1.0));\n"
+                          : "    %s = clamp(%s, -1.0, 1.0);\n", k_av[i], e);
     }
     /* outputs: AB bits 4-7, CD bits 0-3, SUM bits 8-11 */
     static const unsigned k_shift[3] = { 4, 0, 8 };
@@ -494,6 +508,10 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
     put(&b, "#version 450\n#extension GL_EXT_nonuniform_qualifier : require\n%s%s",
         k->poly_smooth ? HLE_BARY_EXT_GLSL : "",
         hle_push_glsl());
+    if (k->precise) {
+        put(&b, "float q9(float x) { return floor(x * 255.0 + 0.500244140625) / 255.0; }\n"
+                "vec3 q9(vec3 x) { return floor(x * 255.0 + 0.500244140625) / 255.0; }\n");
+    }
     put(&b, "layout(set = 0, binding = 0) uniform texture2D uTex2D[];\n"
             "layout(set = 0, binding = 1) uniform sampler uSmp[];\n"
             "layout(set = 0, binding = 2) uniform textureCube uTexCube[];\n"
@@ -508,10 +526,6 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "%s%s%s%s"
             "layout(location = 0) out vec4 oColor;\n"
             "vec4 col(uint c) { return unpackUnorm4x8(c).zyxw; }\n"
-            /* Compensate for float32 error around half-step ties. This matches
-             * 8-bit inputs; finer texture inputs can round differently. */
-            "float q9(float x) { return floor(x * 255.0 + 0.500244140625) / 255.0; }\n"
-            "vec3 q9(vec3 x) { return floor(x * 255.0 + 0.500244140625) / 255.0; }\n"
             HLE_NVPROJ_GLSL
             "%s"
             /* Xbox linear (non-swizzled) textures use texel coordinates */
