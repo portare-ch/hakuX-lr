@@ -902,17 +902,10 @@ static void fe_method(MCPXAPUState *d, uint32_t method, uint32_t argument)
             argument & NV1BA0_PIO_SET_CURRENT_OUTBUF_SGE_HANDLE;
         break;
     case NV1BA0_PIO_SET_CURRENT_OUTBUF_SGE_OFFSET: {
-        // FIXME: Is there an upper limit for the SGE table size?
-        // FIXME: NV_PAPU_VPSGEADDR is probably bad, as inbuf SGE use the same
-        // handle range (or that is also wrong)
+        // TODO: Identify the output SGE table. Hardware leaves voice SGEs intact.
         // NV_PAPU_EPFADDR   EP outbufs
         // NV_PAPU_GPFADDR   GP outbufs
         // But how does it know which outbuf is being written?!
-        uint64_t sge_address =
-            d->regs[NV_PAPU_VPSGEADDR] + d->vp.outbuf_sge_handle * 8;
-        apu_ram_st32(sge_address,
-                    argument &
-                        NV1BA0_PIO_SET_CURRENT_OUTBUF_SGE_OFFSET_PARAMETER);
         DPRINTF("Wrote outbuf SGE[0x%X] = 0x%08X\n", d->vp.outbuf_sge_handle,
                 argument & NV1BA0_PIO_SET_CURRENT_OUTBUF_SGE_OFFSET_PARAMETER);
         break;
@@ -2563,28 +2556,27 @@ static void voice_work_schedule(MCPXAPUState *d, uint8_t *c)
     bool group = false;
     uint32_t dirty = 0;
 
+    // Parallel scheduling assumes one cleared DirectSound multipass bin and
+    // consecutive sources. Other layouts run in list order on one worker.
+    bool serial = false;
+    for (int i = 0; i < vwd->queue_len; i++) {
+        uint32_t src, dst, clr;
+        get_voice_bin_src_dst(d, c, vwd->queue[i].voice, &src, &dst, &clr);
+        if ((src && (src != MULTIPASS_BIN_MASK || clr != MULTIPASS_BIN_MASK)) ||
+            (!src && !(dst & MULTIPASS_BIN_MASK) && (dirty & MULTIPASS_BIN_MASK))) {
+            serial = true;
+        }
+        dirty = (dirty & ~clr) | dst;
+    }
+    dirty = 0;
+
     for (int i = 0; i < vwd->queue_len; i++) {
         uint32_t src, dst, clr;
         get_voice_bin_src_dst(d, c, vwd->queue[i].voice, &src, &dst, &clr);
 
-        // TODO: To simplify submix scheduling, we make a few assumptions based
-        // on Xbox software observations. However, the configurability of
-        // multipass sources suggests the hardware may not be so strict. We'll
-        // defer making this more robust for now.
-        //
-        // We currently assume that:
-        //
-        // - MP bin is constant
-        assert(!src || (src == MULTIPASS_BIN_MASK));
-        //
-        // - MP voice always clears MP bin
-        assert(!src || (clr == MULTIPASS_BIN_MASK));
-        //
-        // - MP source voices are ordered consecutively in voice lists
-        assert(src || (dst & MULTIPASS_BIN_MASK) ||
-               !(dirty & MULTIPASS_BIN_MASK));
-
-        if ((dst & MULTIPASS_BIN_MASK) & ~dirty) {
+        if (serial) {
+            group = true;
+        } else if ((dst & MULTIPASS_BIN_MASK) & ~dirty) {
             group = true;
         }
 
@@ -2594,7 +2586,7 @@ static void voice_work_schedule(MCPXAPUState *d, uint8_t *c)
         vwd->workers_pending |= 1 << next_worker_to_schedule;
 
         dirty = (dirty & ~clr) | dst;
-        if (clr & MULTIPASS_BIN_MASK) {
+        if ((clr & MULTIPASS_BIN_MASK) && !serial) {
             group = false;
         }
 
