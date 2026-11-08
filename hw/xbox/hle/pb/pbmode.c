@@ -510,6 +510,11 @@ static uint32_t ctx_base(uint32_t handle)
     return inst ? dma_base(inst) : 0;
 }
 
+uint32_t hle_pb_dma_base(uint32_t handle)
+{
+    return ctx_base(handle);
+}
+
 /* w x h pixels of a blit (bpp bytes each) from (ix, iy) at sbase/sp to
  * (ox, oy) at dbase/dp: between linear render targets, their images' copy
  * (a render target's pixels are in its image); else the copy in memory, now
