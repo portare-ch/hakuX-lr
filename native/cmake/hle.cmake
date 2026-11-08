@@ -56,6 +56,7 @@ add_library(hakux_hle STATIC
   ${NC_HLE}/pb/pbstate.c
   ${NC_HLE}/pb/pusher.c
   ${NC_HLE}/pb/wclip.c
+  ${NC_HLE}/pb/blitclip.c
   ${NC_HLE}/shader/ff_gen.c
   ${NC_HLE}/shader/ffhw.c
   ${NC_HLE}/shader/glsl_compile.c
