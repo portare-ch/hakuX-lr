@@ -31,7 +31,8 @@
 #define USER_HI   0x7FFE0000u
 #define VA_GRAIN  0x10000u
 #define MAX_REGIONS 4096
-#define MAX_CONTIG  4096
+/* One allocation per 4 KiB page of a 128 MiB console. */
+#define MAX_CONTIG  ((128u << 20) / NC_PAGE)
 
 typedef struct Region {
     uint32_t base, size, protect;
