@@ -273,15 +273,15 @@ static const char k_conv_glsl[] =
     "uSmp[nonuniformEXT(si)]), uv).y;\n"
     "  if ((when & (lod > 0.0 ? 1u : 2u)) == 0u)\n"
     "    return textureGrad(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), "
-    "uv, gx, gy);\n"
+    "GLC2(s, uv), gx, gy);\n"
     "  vec2 d = sc / sz;\n"
-    "  vec4 diag = tap(ti, ci, uv - d) + tap(ti, ci, uv + d) +\n"
-    "              tap(ti, ci, uv + vec2(d.x, -d.y)) + tap(ti, ci, uv + vec2(-d.x, d.y));\n"
+    "  vec4 diag = tap(ti, ci, GLC2(s, uv - d)) + tap(ti, ci, GLC2(s, uv + d)) +\n"
+    "              tap(ti, ci, GLC2(s, uv + vec2(d.x, -d.y))) + tap(ti, ci, GLC2(s, uv + vec2(-d.x, d.y)));\n"
     "  if (kern == 1u)\n"
-    "    return 0.5 * tap(ti, ci, uv) + 0.125 * diag;\n"
-    "  vec4 edge = tap(ti, ci, uv + vec2(d.x, 0.0)) + tap(ti, ci, uv - vec2(d.x, 0.0)) +\n"
-    "              tap(ti, ci, uv + vec2(0.0, d.y)) + tap(ti, ci, uv - vec2(0.0, d.y));\n"
-    "  return (4.0 * tap(ti, ci, uv) + 2.0 * edge + diag) / 16.0;\n"
+    "    return 0.5 * tap(ti, ci, GLC2(s, uv)) + 0.125 * diag;\n"
+    "  vec4 edge = tap(ti, ci, GLC2(s, uv + vec2(d.x, 0.0))) + tap(ti, ci, GLC2(s, uv - vec2(d.x, 0.0))) +\n"
+    "              tap(ti, ci, GLC2(s, uv + vec2(0.0, d.y))) + tap(ti, ci, GLC2(s, uv - vec2(0.0, d.y)));\n"
+    "  return (4.0 * tap(ti, ci, GLC2(s, uv)) + 2.0 * edge + diag) / 16.0;\n"
     "}\n";
 
 /* A D3D blend factor (Vulkan's as vk/draw.c blend_factor maps them) as a
@@ -367,13 +367,14 @@ static void shadow_sample(Buf *b, const HlePshKey *k, unsigned s, bool project3d
            "    if ((pc.flags & (1u << %uu)) != 0u)\n"
            /* a scaled surface's texel coordinates: sz / the resolution scale */
            "      uv /= sz / ((pc.flags & (256u << %uu)) != 0u ? float(pc.flags >> 24) : 1.0);\n"
+           "    uv = GLC2(%uu, uv);\n"
            "    float m = %s, r = %s;\n"
            "    vec4 d = textureGather(sampler2D(uTex2D[nonuniformEXT(ti)], "
            "uSmp[nonuniformEXT(si)]), uv) * %s;\n"
            "    vec4 p = vec4(%s(d, vec4(r)));\n"
            "    vec2 f = fract(uv * sz - 0.5);\n"
            "    t%u = vec4(mix(mix(p.w, p.z, f.x), mix(p.x, p.y, f.x), f.y));\n",
-        s, s, s, s, s, s, k_max[fmt], r, k_scale[fmt], k_op[func], s);
+        s, s, s, s, s, s, s, k_max[fmt], r, k_scale[fmt], k_op[func], s);
     if (k->debug == 17) {               /* debug view 17: stored depth, r, result */
         put(b, "    shdbg = vec4(d.x / m, r / m, t%u.x, 1.0);\n", s);
     }
@@ -512,23 +513,28 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
         put(&b, "float q9(float x) { return floor(x * 255.0 + 0.500244140625) / 255.0; }\n"
                 "vec3 q9(vec3 x) { return floor(x * 255.0 + 0.500244140625) / 255.0; }\n");
     }
-    /* Clamp selected axes before sampling. The default macros pass coordinates through. */
+    /* Clamp the sampling coordinates and preserve the original gradients for LOD. */
     char glc[720];
     if (k->tex_modes >> 20) {
         snprintf(glc, sizeof(glc),
                  "const uint GLCLAMP = 0x%03xu;\n"
                  "vec2 glc2(uint s, vec2 v) {\n"
                  "  uint m = GLCLAMP >> (3u * s);\n"
-                 "  return vec2((m & 1u) != 0u ? clamp(v.x, 0.0, 1.0) : v.x,\n"
-                 "              (m & 2u) != 0u ? clamp(v.y, 0.0, 1.0) : v.y);\n"
+                 "  return vec2((m & 1u) != 0u ? clamp(v.x, 0.0, 0.99999994) : v.x,\n"
+                 "              (m & 2u) != 0u ? clamp(v.y, 0.0, 0.99999994) : v.y);\n"
                  "}\n"
                  "vec3 glc3(uint s, vec3 v) {\n"
-                 "  return vec3(glc2(s, v.xy), ((GLCLAMP >> (3u * s)) & 4u) != 0u ? clamp(v.z, 0.0, 1.0) : v.z);\n"
+                 "  return vec3(glc2(s, v.xy), ((GLCLAMP >> (3u * s)) & 4u) != 0u ? clamp(v.z, 0.0, 0.99999994) : v.z);\n"
                  "}\n"
                  "#define GLC2(s, v) glc2(s, v)\n"
-                 "#define GLC3(s, v) glc3(s, v)\n", k->tex_modes >> 20);
+                 "#define GLC3(s, v) glc3(s, v)\n"
+                 "#define GLT2(t, s, v) (((GLCLAMP >> (3u * (s))) & 3u) != 0u ? "
+                 "textureGrad(t, glc2(s, v), dFdx(v), dFdy(v)) : texture(t, v))\n"
+                 "#define GLT3(t, s, v) (((GLCLAMP >> (3u * (s))) & 7u) != 0u ? "
+                 "textureGrad(t, glc3(s, v), dFdx(v), dFdy(v)) : texture(t, v))\n", k->tex_modes >> 20);
     } else {
-        snprintf(glc, sizeof(glc), "#define GLC2(s, v) (v)\n#define GLC3(s, v) (v)\n");
+        snprintf(glc, sizeof(glc), "#define GLC2(s, v) (v)\n#define GLC3(s, v) (v)\n"
+                 "#define GLT2(t, s, v) texture(t, v)\n#define GLT3(t, s, v) texture(t, v)\n");
     }
     put(&b, "layout(set = 0, binding = 0) uniform texture2D uTex2D[];\n"
             "layout(set = 0, binding = 1) uniform sampler uSmp[];\n"
@@ -553,12 +559,11 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "  if ((pc.flags & (1u << s)) != 0u)\n"
             "    uv /= vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[0]), 0)) /\n"
             "          ((pc.flags & (256u << s)) != 0u ? float(pc.flags >> 24) : 1.0);\n"
-            "  return texture(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), GLC2(s, uv));\n"
+            "  return GLT2(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), s, uv);\n"
             "}\n"
             "vec4 samp3(uint s, vec3 uvw) {\n"
             "  uint ti = pc.tex[s] & 0xFFFFu, si = (pc.tex[s] >> 16) & 0xFFu;\n"
-            "  return texture(sampler3D(uTex3D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), "
-            "GLC3(s, uvw));\n"
+            "  return GLT3(sampler3D(uTex3D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), s, uvw);\n"
             "}\n"
             "vec4 sampc(uint s, vec3 dir) {\n"
             "  uint ti = pc.tex[s] & 0xFFFFu, si = (pc.tex[s] >> 16) & 0xFFu;\n"
@@ -786,8 +791,8 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             }
             put(&b, "  vec4 t%u;\n"
                     "  { uint ti = pc.tex[%u] & 0xFFFFu, si = (pc.tex[%u] >> 16) & 0xFFu;\n"
-                    "    t%u = texture(sampler2D(uTex2D[nonuniformEXT(ti)], "
-                    "uSmp[nonuniformEXT(si)]), GLC2(%uu, %s.%s)); }\n",
+                    "    t%u = GLT2(sampler2D(uTex2D[nonuniformEXT(ti)], "
+                    "uSmp[nonuniformEXT(si)]), %uu, %s.%s); }\n",
                 s, s, s, s, s, tex_read(ts, sizeof(ts), k, in), m == HLE_PST_DPNDNT_AR ? "ar" : "gb");
             break;
         }
@@ -855,8 +860,8 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             } else {
                 put(&b, "  vec4 t%u;\n"
                         "  { uint ti = pc.tex[%u] & 0xFFFFu, si = (pc.tex[%u] >> 16) & 0xFFu;\n"
-                        "    t%u = texture(sampler2D(uTex2D[nonuniformEXT(ti)], "
-                        "uSmp[nonuniformEXT(si)]), GLC2(%uu, vec2(%s.g, %s.g))); }\n",
+                        "    t%u = GLT2(sampler2D(uTex2D[nonuniformEXT(ti)], "
+                        "uSmp[nonuniformEXT(si)]), %uu, vec2(%s.g, %s.g)); }\n",
                     s, s, s, s, s, ts, ts2);
             }
             break;

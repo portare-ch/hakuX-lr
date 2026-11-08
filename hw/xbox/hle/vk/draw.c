@@ -1864,7 +1864,8 @@ static uint32_t sampler_index(const uint32_t *tss, uint32_t lod_down, uint16_t s
     /* Decode the LOD clamps packed by kelvin.c. */
     const uint32_t lod = tss[TSS_MAXMIPLEVEL];
     uint32_t base = lod & 0xF;
-    const uint32_t key3 = lod >> 8;
+    /* Key the fractional minimum and maximum only when mipmapping. */
+    const uint32_t key3 = (tss[TSS_MIPFILTER] & 7) ? lod >> 8 : 0;
     /* CONTROL0's MAX_ANISOTROPY (pb/kelvin.c): the degree the title set,
      * whatever the minification filter, which stays the title's (the NV2A
      * tests vary the degree under nearest filtering; xemu applies it there
