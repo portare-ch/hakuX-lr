@@ -103,6 +103,45 @@ def main():
         if saved[0x1C] != 0xA5 or saved[0x90] != 5 or saved[0x00:0x1C] != one[0x00:0x1C]:
             fail(f'after a setting saved: 0x1C {saved[0x1C]:02x} (written a5), language {saved[0x90]}')
         print('PASS: saving a setting leaves the encrypted section written on the SMBus')
+
+        # Read XboxHDKey from a title to check persistence and legacy fallbacks.
+        code = (b'\xa1\x04\x0f\x01\x00'          # mov eax, [thunk 1]: &XboxHDKey
+                b'\xff\x70\x0c\xff\x70\x08\xff\x70\x04\xff\x30'  # push its four dwords
+                b'\x68\x20\x10\x01\x00'          # push the format at 0x11020
+                b'\xff\x15\x00\x0f\x01\x00'      # call [thunk 0]: DbgPrint
+                b'\x83\xc4\x14\xf4').ljust(0x20, b'\0') + b'khdkey %08x %08x %08x %08x\0'
+        check.disc(root / 'hdkey.iso', code, [8, 323])
+
+        def hd_key(data):
+            out = subprocess.run([str(build / 'xboxrun'), '--headless', str(root / 'hdkey.iso'), str(data)], env=env,
+                                 capture_output=True, text=True, timeout=15)
+            words = [w for line in (out.stdout + out.stderr).splitlines() if 'khdkey ' in line
+                     for w in [line.split('khdkey ', 1)[1].split()]]
+            if out.returncode or not words:
+                print(out.stdout + out.stderr)
+                fail('the HD key title printed nothing')
+            return words[-1]
+
+        legacy = ['30303030', '30303030', '50003130', '010000f2']
+        key = hd_key(root / 'hdkey')
+        if key == legacy or key == ['00000000'] * 4:
+            fail(f'a new console has the HD key {key}')
+        if hd_key(root / 'hdkey') != key:
+            fail('the HD key changed at the next boot')
+        print('PASS: a new console has a random HD key, kept at the next boot')
+        (root / 'hdkey-saves' / 'hdd' / 'Partition1' / 'UDATA' / '4d530004').mkdir(parents=True)
+        if hd_key(root / 'hdkey-saves') != legacy:
+            fail('a console whose first boot finds saves on E: has a new HD key')
+        print('PASS: a console whose first boot finds saves on E: keeps the old HD key')
+        (root / 'hdkey-content' / 'hdd' / 'Partition1' / 'TDATA' / '4d530004').mkdir(parents=True)
+        if hd_key(root / 'hdkey-content') != legacy:
+            fail('a console whose first boot finds downloaded content on E: has a new HD key')
+        print('PASS: a console whose first boot finds downloaded content on E: keeps the old HD key')
+        (root / 'hdkey-damaged' / 'hdd').mkdir(parents=True)
+        (root / 'hdkey-damaged' / 'hdd' / 'eeprom.bin').write_bytes(b'\0' * 16)
+        if hd_key(root / 'hdkey-damaged') != legacy or hd_key(root / 'hdkey-damaged') != legacy:
+            fail('a damaged eeprom.bin left as it is gave a new HD key each run')
+        print('PASS: a damaged eeprom.bin keeps the old HD key, run after run')
     return 0
 
 

@@ -141,4 +141,64 @@ class SaveArchiveTest {
       e.deleteRecursively()
     }
   }
+
+  /** Sign a console-locked save with a zero title key and the supplied HDD key. */
+  private fun locked(d: ByteArray, hd: ByteArray) = d + XCrypto.hmac(hd, XCrypto.hmac(ByteArray(16), d))
+
+  @Test
+  fun transferBetweenConsoles() {
+    val tmp = Files.createTempDirectory("transfer").toFile()
+    try {
+      val hdA = ByteArray(16) { (it * 7 + 1).toByte() }
+      val hdB = ByteArray(16) { (it * 11 + 3).toByte() }
+      val data = ByteArray(200) { (it * 3).toByte() }
+      val title = File(tmp, "a/UDATA/4d530004")
+      file(File(title, "TitleMeta.xbx"), "TitleName=Halo")
+      val sav = File(title, "a1/blam.sav").apply { parentFile!!.mkdirs(); writeBytes(locked(data, hdA)) }
+
+      // Export re-signs staged copies with the legacy key.
+      val stage = File(tmp, "stage")
+      val picks = SaveArchive.portable(listOf(SaveArchive.Pick(title)), hdA, stage)
+      assertArrayEquals(locked(data, hdA), sav.readBytes())
+      assertArrayEquals(locked(data, SaveResigner.LEGACY_HD), File(picks[0].title, "a1/blam.sav").readBytes())
+      val zip = ByteArrayOutputStream()
+      SaveArchive.write(zip, picks)
+      // Saves already signed with the legacy key can skip staging.
+      val same = listOf(SaveArchive.Pick(title))
+      assertEquals(same, SaveArchive.portable(same, SaveResigner.LEGACY_HD.copyOf(), File(tmp, "unused")))
+      assertFalse(File(tmp, "unused").exists())
+
+      // Import re-signs the extracted saves with the destination key.
+      val e = File(tmp, "b")
+      val plan = SaveArchive.plan(ByteArrayInputStream(zip.toByteArray()), e)
+      assertEquals("saves", plan.kind)
+      assertEquals(null, plan.eeprom)
+      val r = SaveArchive.extract(ByteArrayInputStream(zip.toByteArray()), e)
+      SaveResigner.hakux(SaveResigner.LEGACY_HD, hdB).resign(e, r.written) { null }
+      assertArrayEquals(locked(data, hdB), File(e, "UDATA/4d530004/a1/blam.sav").readBytes())
+    } finally {
+      tmp.deleteRecursively()
+    }
+  }
+
+  @Test
+  fun backupGivesItsKey() {
+    val eeprom = ByteArray(256)
+    val key = ByteArray(16) { (0x40 + it).toByte() }
+    key.copyInto(eeprom, 0x36)                // an image from before: its section in the clear
+    val b = ByteArrayOutputStream()
+    ZipOutputStream(b).use { z ->
+      Backup.putMarker(z, Backup.Info("backup", 1_650_000_000_000L, states = false, caches = false))
+      z.putNextEntry(ZipEntry("hdd/Partition1/UDATA/4d530004/a1/blam.sav"))
+      z.write(byteArrayOf(1, 2, 3))
+      z.closeEntry()
+      z.putNextEntry(ZipEntry("hdd/eeprom.bin"))
+      z.write(eeprom)
+      z.closeEntry()
+    }
+    val plan = SaveArchive.plan(ByteArrayInputStream(b.toByteArray()), File("/nonexistent"))
+    assertEquals("backup", plan.kind)
+    assertArrayEquals(key, SaveResigner.hdKeyOf(plan.eeprom!!))
+    assertEquals(mapOf("4d530004" to setOf("a1")), plan.saves)
+  }
 }

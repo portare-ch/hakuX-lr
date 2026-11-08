@@ -7,6 +7,10 @@
   are removed; older Android network choices migrate to On.
 - **System link** — Consoles negotiate distinct IP addresses before DHCP
   leasing. An address conflict discovered afterward is reported.
+- **Console HDD keys** — New consoles store a random HDD key in EEPROM.
+  Existing consoles keep their key. First boots with saves or downloaded
+  content already on E: use the legacy key. Android re-signs saves when
+  transferring them between hakuX consoles.
 - **Launch folders** (#189) — Games launched from a disc subfolder now use
   that folder as `D:`. This fixes asset loading for the games on the
   Star Wars - The Clone Wars + Tetris Worlds disc.
