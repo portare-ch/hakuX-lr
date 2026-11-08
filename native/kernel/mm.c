@@ -8,6 +8,7 @@
  * reached through the 0x80000000 window, so VA = 0x80000000 | PA there.
  */
 #include "native/kernel/kernel.h"
+#include "native/kernel/contig_run.h"
 
 #include <pthread.h>
 #include <stdio.h>
@@ -92,8 +93,12 @@ static void instance_release(NcKernel *k, uint32_t pa, uint32_t size)
     }
 }
 
-uint32_t nc_mm_contig_end(uint32_t pa)
+/* Check adjacent allocations only if the target exceeds its first block.
+ * Candidate storage covers every tracked allocation. */
+uint32_t nc_mm_contig_end(uint32_t pa, uint32_t limit)
 {
+    static NcContigRun runs[MAX_CONTIG];
+    static uint64_t scratch[MAX_CONTIG];
     uint32_t end = 0;
     pthread_mutex_lock(&g_contig_mu);
     for (unsigned i = 0; i < g_ncontig && !end; i++) {
@@ -101,6 +106,13 @@ uint32_t nc_mm_contig_end(uint32_t pa)
         if (pa >= cpa && pa - cpa < size) {
             end = cpa + size;
         }
+    }
+    if (end && limit > end) {
+        for (unsigned i = 0; i < g_ncontig; i++) {
+            runs[i] = (NcContigRun){g_contig[i].va & ~NC_CONTIG_WINDOW, g_contig[i].size, g_contig[i].slack,
+                                    g_contig[i].ra};
+        }
+        end = nc_contig_run_end(runs, g_ncontig, pa, limit, scratch, MAX_CONTIG);
     }
     pthread_mutex_unlock(&g_contig_mu);
     return end;

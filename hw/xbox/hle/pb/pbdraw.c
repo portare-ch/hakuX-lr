@@ -628,7 +628,7 @@ static uint32_t tile_pitch(uint32_t bytes)
  * into zeros after its intro. */
 static uint32_t rows_in_block(uint32_t pa, uint32_t pitch, uint32_t h)
 {
-    const uint32_t end = pitch ? hle_host_contig_end(pa) : 0;
+    const uint32_t end = pitch ? hle_host_contig_end(pa, (uint32_t)MIN((uint64_t)pa + (uint64_t)pitch * h, UINT32_MAX)) : 0;
     if (!end || (uint64_t)pitch * h <= end - pa) {
         return h;
     }
@@ -762,7 +762,7 @@ static PbObj *evict_slot(void)
  * target's), and goes once nothing holds it (object). */
 static bool past_block(const HleSurfDesc *d)
 {
-    const uint32_t end = d->pitch ? hle_host_contig_end(d->pa) : 0;
+    const uint32_t end = d->pitch ? hle_host_contig_end(d->pa, (uint32_t)MIN((uint64_t)d->pa + (uint64_t)d->pitch * d->h, UINT32_MAX)) : 0;
     return end && (uint64_t)d->pitch * d->h > end - d->pa;
 }
 

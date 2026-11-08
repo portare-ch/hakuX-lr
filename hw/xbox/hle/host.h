@@ -156,10 +156,9 @@ int hle_host_frame_pace(void);
  * the system's), as a void pointer; NULL if none. */
 void *hle_host_vk_loader(void);
 
-/* The end of the title's contiguous allocation that holds guest physical
- * address pa (render targets live in them), 0 when none does or the host
- * doesn't know. */
-uint32_t hle_host_contig_end(uint32_t pa);
+/* End of the allocation run containing pa, extended through adjacent
+ * blocks from the same caller up to limit. Returns 0 if unknown. */
+uint32_t hle_host_contig_end(uint32_t pa, uint32_t limit);
 
 /* Disc reads so far: operations, bytes and the time spent in them
  * (diagnostics: the hitch monitor); false if the host doesn't count them. */

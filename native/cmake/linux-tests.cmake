@@ -65,6 +65,12 @@ target_include_directories(xdvdfs-test PRIVATE "${NC_REPO}")
 target_link_libraries(xdvdfs-test PRIVATE hakux_native Threads::Threads)
 add_test(NAME xdvdfs-test COMMAND xdvdfs-test)
 set_tests_properties(xdvdfs-test PROPERTIES TIMEOUT 10)
+# Test contiguous allocation boundaries and lookup limits.
+add_executable(contig-run-test "${NC_REPO}/tests/native/linux/contig_run.c" "${NC_REPO}/native/kernel/contig_run.c")
+target_include_directories(contig-run-test PRIVATE "${NC_REPO}")
+add_test(NAME contig-run-test COMMAND contig-run-test)
+set_tests_properties(contig-run-test PROPERTIES TIMEOUT 10)
+
 # Alias-table overflow must preserve page ownership and protection.
 add_executable(vm-alias-test "${NC_REPO}/tests/native/linux/vm_alias.c")
 target_include_directories(vm-alias-test PRIVATE "${NC_REPO}")
