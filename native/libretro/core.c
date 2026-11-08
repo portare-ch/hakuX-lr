@@ -32,6 +32,8 @@
 #include "native/core/cheats.h"
 #include "native/core/core.h"
 #include "native/core/irq.h"
+#include "native/core/mods.h"
+#include "native/core/xbe_patch.h"
 #include "native/dev/dev.h"
 #include "native/hle/hle_native.h"
 #include "native/kernel/kernel.h"
@@ -818,6 +820,8 @@ static void run_stat(uint64_t t0, uint64_t tv, uint64_t t1)
     }
 }
 
+static void xbe_patches_changed(void);
+
 RETRO_API void retro_run(void)
 {
     const uint64_t now = now_ns();
@@ -831,6 +835,7 @@ RETRO_API void retro_run(void)
     run_stat(now, tv, now_ns());
     nc_lr_options_run();
     nc_lr_net_run();
+    xbe_patches_changed();
 
     /* A title's relaunch (XLaunchNewImage): the same game boots again, into
      * the XBE its launch data page names, in the process. */
@@ -893,25 +898,57 @@ static bool cheat_told(const char *code)
     return false;
 }
 
+static uint64_t g_xbe_told = UINT64_MAX;      /* the patch set told about (none: 0 is the empty set's) */
+
 static void cheats_forget(void)
 {
     nc_cheat_front_reset();
+    nc_xbe_patch_front_reset();
     g_ncheat_bad = 0;
+    g_xbe_told = UINT64_MAX;
 }
 
 RETRO_API void retro_cheat_reset(void)
 {
     nc_cheat_front_reset();
+    nc_xbe_patch_front_reset();
 }
 
+/* Route XBE patches separately from memory cheats. */
 RETRO_API void retro_cheat_set(unsigned index, bool enabled, const char *code)
 {
     char err[96];
     code = code ? code : "";
+    const bool xbe = nc_xbe_patch_is(code);
+    if (xbe) {
+        nc_cheat_front_set(index, false, NULL, NULL, 0);
+        if (!nc_xbe_patch_front_set(index, enabled, code, err, sizeof(err)) && !cheat_told(code)) {
+            nc_log("hakuX-libretro", "cheat %u: XBE patch \"%.60s%s\": %s; it stays off", index, code,
+                   strlen(code) > 60 ? "..." : "", err);
+        }
+        return;
+    }
+    nc_xbe_patch_front_set(index, false, NULL, NULL, 0);
     if (!nc_cheat_front_set(index, enabled, code, err, sizeof(err)) && !cheat_told(code)) {
         nc_log("hakuX-libretro", "cheat %u \"%s\": %s; it stays off (mods/README.md has the codes)", index, code,
                err);
     }
+}
+
+/* Show one restart reminder per change from the booted patch set. */
+static void xbe_patches_changed(void)
+{
+    const uint64_t now = nc_xbe_patch_front_hash();
+    if (now == nc_mods_xbe_patches_booted()) {
+        g_xbe_told = UINT64_MAX;
+        return;
+    }
+    if (now == g_xbe_told || __atomic_load_n(&g_core_state, __ATOMIC_ACQUIRE) != 2) {
+        return;
+    }
+    g_xbe_told = now;
+    message("XBE patches changed: restart the game (Quick Menu, Restart) to apply them", 360);
+    nc_log("hakuX-libretro", "XBE patches changed since the boot: they apply at the next restart");
 }
 
 RETRO_API void *retro_get_memory_data(unsigned id)

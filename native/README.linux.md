@@ -148,6 +148,39 @@ A. Cheats apply from the next frame, also when applied before the game has
 started, and stay through a reset. A code the core can't read is logged once
 and that cheat stays off.
 
+XBE patches (including widescreen hacks) use RetroArch's Cheats menu.
+An emulator-handled `.cht` entry contains an `xbe-patch-v1` code:
+
+```ini
+cheats = 1
+cheat0_desc = "Widescreen (16:9) [restart]"
+cheat0_handler = 0
+cheat0_code = "xbe-patch-v1 DF0DB6D8:00157000+0004E163:70+0004E18E:70"
+cheat0_enable = false
+```
+
+The code identifies the stock XBE by CRC-32 and size, followed by up
+to 128 sorted, non-overlapping `+OFFSET:BYTES` runs of 1–64 bytes each.
+CRC-32, size and offsets use eight hex digits; offsets start at byte 4 to
+preserve the XBE signature. All matching runs apply together at boot or
+relaunch, including to sections loaded later. Mismatches, invalid codes
+or multiple matching patches leave the XBE unchanged and are logged.
+ISO and CHD copies of the same XBE use the same patch. Memory cheats
+continue to work alongside XBE patches.
+
+Load the `.cht` from **Quick Menu → Cheats**, enable it, select
+**Apply Changes**, then **Restart**. A reminder appears if the enabled
+patches differ from the running game. For widescreen patches, set
+**Screen Format** to **Widescreen** and the aspect ratio to
+**Core provided**. To undo a patch, disable it, apply changes and restart.
+
+Convert an IPS/BPS patch (requires Floating IPS, `flips`) or a
+patched XBE with `tools/mods/xbe-to-cht.py`:
+
+```sh
+python3 tools/mods/xbe-to-cht.py stock.xbe widescreen.ips > "Game (USA).cht"
+```
+
 Core options (`native/libretro/options.c`) apply on the next game start,
 except Crop Overscan, Rumble and Frame Pacing, which update immediately:
 

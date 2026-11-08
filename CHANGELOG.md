@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### What's new
+
+- **XBE patches via RetroArch cheats** (#167) — Load widescreen and other
+  XBE patches from `.cht` files. Patches apply on restart when the game's
+  CRC-32 and size match. Use `tools/mods/xbe-to-cht.py` to convert IPS,
+  BPS, or patched XBEs.
+
 ## linux-v0.22.0 (Linux, aarch64 and x86-64, and Android)
 
 ### Graphics
