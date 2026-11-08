@@ -232,7 +232,7 @@ void nc_lr_net_apply(const char *mode)
     }
     nc_net_option("net=off");
     if (nc_lr_dashboard()) {
-        /* Registering the console and creating accounts in the dashboard need the network. */
+        /* Insignia setup in the dashboard requires networking. */
         static const struct retro_message msg = {"Xbox Live in the dashboard needs Network on in the core options",
                                                  480};
         nc_lr_env(RETRO_ENVIRONMENT_SET_MESSAGE, (void *)&msg);

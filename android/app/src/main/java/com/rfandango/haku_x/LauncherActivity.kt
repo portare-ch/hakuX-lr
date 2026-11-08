@@ -51,7 +51,7 @@ class LauncherActivity : ComponentActivity() {
       return
     }
 
-    // Insignia's setup started the dashboard, now closed: it opens again
+    // Reopen the Insignia wizard after the dashboard exits.
     val openInsignia = prefs.insigniaWizardResume.also { if (it) prefs.insigniaWizardResume = false }
 
     AppTheme.load(this)

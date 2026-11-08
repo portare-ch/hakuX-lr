@@ -89,8 +89,7 @@ def chd(path, image, hunk=4096, cd=False, lead=0):
 # Use a test NAT port and an unanswered loopback SSDP endpoint so tests
 # never change the real router's mappings.
 NAT_TEST = 'natport=43080 upnp=127.0.0.1:9'
-# The cable is plugged in by default; runs that don't test the network keep
-# it out (no NAT, LAN or UPnP on the machine running them).
+# Disable networking for tests that do not exercise it.
 OFF = 'hakux_network=disabled'
 
 
@@ -492,7 +491,9 @@ def main():
             config.unlink()
         else:
             config.write_bytes(before)
-        # Start Core can boot the bundle or an existing dashboard without a disc.
+        # Start Core boots the bundle without a disc. Another dashboard is
+        # replaced under its own name; NC_DASH_KEEP=1, for checks that bring
+        # their own XBEs, leaves C: as it is.
         c_drive = root / 'saves' / 'hdd' / 'Partition2'
         shutil.rmtree(c_drive, ignore_errors=True)
         run([args.harness, args.core, '-', 60, root / 'saves'], 0,
@@ -502,12 +503,18 @@ def main():
         shutil.rmtree(c_drive)
         c_drive.mkdir()
         (c_drive / 'XBOXDASH.XBE').write_bytes(xbe_of(root / 'halt.iso'))     # Check case-insensitive lookup.
+        keep = dict(os.environ, NC_DASH_KEEP='1')
         run([args.harness, args.core, '-', 600, root / 'saves'], 0,
             ('loaded the dashboard (no content)', 'message: Xbox Live in the dashboard needs Network on',
-             'guest executed HLT', 'the core asked to shut down', 'unload: the core stopped in'))
-        (c_drive / 'XBOXDASH.XBE').unlink()
+             'guest executed HLT', 'the core asked to shut down', 'unload: the core stopped in'), keep)
+        run([args.harness, args.core, '-', 60, root / 'saves'], 0,
+            ("dash: replaced another dashboard with hakuX-lr's at", 'Partition2/XBOXDASH.XBE',
+             'loaded the dashboard (no content)', 'ran 60 frames'))
+        if (c_drive / 'xboxdash.xbe').exists() or \
+                (c_drive / 'XBOXDASH.XBE').read_bytes() != (c_drive / 'xodash' / 'xonlinedash.xbe').read_bytes():
+            raise SystemExit("FAIL: another XBOXDASH.XBE wasn't replaced by the bundle under its own name")
+        shutil.rmtree(c_drive)
         # Dashboard users need no prompt to create an Insignia account.
-        (c_drive / 'xboxdash.xbe').write_bytes(xbe_of(root / 'spin.iso'))
         run_without([args.harness, args.core, '-', 30, root / 'saves'],
                     ('network: on (Xbox Live through Insignia', 'network: no Insignia account on this console',
                      'ran 30 frames'), ('No Insignia account', 'needs Network on'), insignia)
@@ -521,7 +528,7 @@ def main():
              'again', 'ran 60 frames'), dict(vk, HARNESS_REINIT_AT='20'))
         cycles([args.harness, args.core, '-', 30, root / 'saves'], vk, 5, 'loaded the dashboard (no content)')
         # Switching between a game and the dashboard boots the correct XBE.
-        # The game halts; the dashboard spins.
+        # The game halts; the dashboard runs.
         run([args.harness, args.core, '-', 300, root / 'saves'], 0,
             ('loaded the dashboard (no content)', 'then: ', 'guest executed HLT', 'the core asked to shut down'),
             dict(os.environ, HARNESS_THEN=str(root / 'halt.iso')))
@@ -541,10 +548,10 @@ def main():
                 'relaunch into \\Device\\Harddisk0\\Partition2\\xboxdash.xbe',
                 'relaunch: \\Device\\Harddisk0\\Partition2\\xboxdash.xbe', 'guest executed HLT')
         run([args.harness, args.core, '-', 600, root / 'saves'], 0,
-            hops + ("relaunch: the dashboard boots again in RetroArch's process", 'unload: the core stopped in'))
+            hops + ("relaunch: the dashboard boots again in RetroArch's process", 'unload: the core stopped in'), keep)
         # Restart on -L <core>, using environment variables for harness frames
         # and saves.
-        restart = dict(old, HARNESS_FRAMES='600', HARNESS_SAVES=str(root / 'saves'))
+        restart = dict(old, HARNESS_FRAMES='600', HARNESS_SAVES=str(root / 'saves'), NC_DASH_KEEP='1')
         run([args.harness, args.core, '-', 600, root / 'saves'], 0,
             hops + ('relaunch: starting RetroArch again for the dashboard', 'ending the process'), restart)
         # Both menu-loaded and -L/--menu starts must restart on -L <core>,

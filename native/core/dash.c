@@ -1,7 +1,6 @@
 /* Copyright (C) 2026-present PortareOS */
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/* Install the bundled XBE at the two dashboard paths used by disc launchers
- * and Xbox Live. The certificate title identifies builds managed by the core. */
+/* Install the bundled XBE at the dashboard paths used by disc launchers and Xbox Live. */
 #include "native/core/dash.h"
 #include "native/core/nc.h"
 
@@ -149,27 +148,28 @@ static bool subdir(const char *dir, const char *name, char *out, size_t n)
     return mkdir(out, 0775) == 0 || errno == EEXIST;
 }
 
-/* Install or update one dashboard path. Return false for a foreign XBE. */
-static bool place(const char *dir, const char *name, const uint8_t *xbe, size_t size, bool *ok)
+/* Replace the XBE in place, retaining its filename casing. */
+static void place(const char *dir, const char *name, const uint8_t *xbe, size_t size, bool *ok)
 {
     char host[600];
     const bool have = find(dir, name, false, host, sizeof(host));
-    if (have && !nc_dash_is_ours(host)) {
-        return false;
-    }
     if (have && same_as(host, xbe, size)) {
-        return true;
+        return;
     }
+    const bool other = have && !nc_dash_is_ours(host);
     struct stat st;
     const ino_t old = have && stat(host, &st) == 0 ? st.st_ino : 0;
     if (!have) {
         snprintf(host, sizeof(host), "%s/%s", dir, name);
     }
     if (write_xbe(host, xbe, size, old)) {
-        nc_log("hakuX-native", "dash: %s hakuX-lr's dashboard as %s", have ? "updated" : "installed", host);
+        if (other) {
+            nc_log("hakuX-native", "dash: replaced another dashboard with hakuX-lr's at %s", host);
+        } else {
+            nc_log("hakuX-native", "dash: %s hakuX-lr's dashboard as %s", have ? "updated" : "installed", host);
+        }
     }
     *ok = stat(host, &st) == 0;             /* Another boot may have published it. */
-    return true;
 }
 
 static bool mkdirs(const char *path)
@@ -190,6 +190,11 @@ static bool mkdirs(const char *path)
 
 bool nc_dash_install(const char *hdd)
 {
+    /* Let tests keep their own dashboard XBEs. */
+    const char *keep = getenv("NC_DASH_KEEP");
+    if (keep && *keep && strcmp(keep, "0") != 0) {
+        return true;
+    }
     size_t size;
     const uint8_t *xbe = nc_dash_xbe(&size);
     char c_drive[600], online[600];
@@ -199,9 +204,7 @@ bool nc_dash_install(const char *hdd)
         return false;
     }
     bool ok = true;
-    if (!place(c_drive, "xboxdash.xbe", xbe, size, &ok)) {
-        return true;                        /* Preserve both paths for a foreign dashboard. */
-    }
+    place(c_drive, "xboxdash.xbe", xbe, size, &ok);
     if (ok && subdir(c_drive, "xodash", online, sizeof(online))) {
         bool online_ok = true;
         place(online, "xonlinedash.xbe", xbe, size, &online_ok);

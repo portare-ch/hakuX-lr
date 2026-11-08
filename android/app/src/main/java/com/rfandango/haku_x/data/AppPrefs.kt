@@ -137,9 +137,8 @@ class AppPrefs(context: Context) {
     set(value) = sp.edit { putString(KEY_AV_PACK, value) }
 
   /**
-   * The console's network cable: plugged in (the Internet, for Xbox Live through Insignia, and system link with
-   * the consoles on this network, at once) or not; plugged in until the user unplugs it. Stored as "on" or "off";
-   * a connection an earlier version chose (lan, kai, insignia) reads as plugged in.
+   * Enables Xbox Live and system link. Defaults to on and treats the legacy
+   * LAN, Kai and Insignia modes as on.
    */
   var networkOn: Boolean
     get() = (sp.getString(KEY_NETWORK, NET_ON) ?: NET_ON) != NET_OFF
@@ -155,7 +154,7 @@ class AppPrefs(context: Context) {
     get() = sp.getString(KEY_INSIGNIA_DNS, "") ?: ""
     set(value) = sp.edit { putString(KEY_INSIGNIA_DNS, value) }
 
-  /** Insignia's setup wizard started the dashboard: the app opens it again after. */
+  /** Reopen the Insignia wizard when the dashboard exits. */
   var insigniaWizardResume: Boolean
     get() = sp.getBoolean(KEY_INSIGNIA_RESUME, false)
     set(value) = sp.edit { putBoolean(KEY_INSIGNIA_RESUME, value) }

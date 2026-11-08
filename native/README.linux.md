@@ -233,17 +233,16 @@ network keeps (`native/net/lan.c`), and Insignia's DNS server,
 server's address in `insignia-dns.txt` in the save directory, using the same
 format as `lan-peers.txt`. Only the first address is used.
 
-**Load Core → Microsoft - Xbox (hakuX) → Start Core** boots the dashboard
-without loading a game. The core bundles
-[hakux-lr-dash](https://github.com/portare-ch/hakux-lr-dash) and installs it
-on C: as `xboxdash.xbe` and `xodash/xonlinedash.xbe` when needed.
-Games can open its Xbox Live pages. **Network** is on by default.
+**Load Core → Microsoft - Xbox (hakuX) → Start Core** opens
+[hakux-lr-dash](https://github.com/portare-ch/hakux-lr-dash) without a game.
+At boot the core installs it at `C:\xboxdash.xbe` and
+`C:\xodash\xonlinedash.xbe`, replacing any dashboard executables at those
+paths. It keeps the other files on C:.
 
-Its **Xbox Live** page registers the console with Insignia and creates
-Insignia accounts (with the subscription code Insignia emails), without
-Insignia's Setup Assistant or Microsoft's dashboard. Recovering an existing
-account on the console isn't supported yet. The core updates XBEs with the
-`hakux-dash` certificate title and leaves other dashboards alone.
+Under **Xbox Live**, select **Register this console**, then
+**Create an Insignia account** with the subscription code Insignia emails
+you. **Network** is on by default. Account recovery from this dashboard is
+still pending.
 
 PAL60 is always enabled; 480p, 720p and 1080i are disabled. Use RetroArch's
 shaders for filters such as FXAA and **Core provided** for the core's 4:3 or

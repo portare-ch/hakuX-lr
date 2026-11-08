@@ -9,7 +9,6 @@ import com.rfandango.haku_x.data.AppPrefs
 import com.rfandango.haku_x.data.PreviousVersion
 import com.rfandango.haku_x.data.hdd.Backup
 import com.rfandango.haku_x.data.hdd.ConsoleFiles
-import com.rfandango.haku_x.data.hdd.Dashboard
 import com.rfandango.haku_x.data.hdd.DiskImport
 import com.rfandango.haku_x.data.hdd.HddStore
 import com.rfandango.haku_x.data.hdd.LibraryKeys
@@ -41,12 +40,10 @@ class HddViewModel(app: Application) : AndroidViewModel(app) {
     val console: ConsoleFiles.Status? = null,
     /** The xemu-based release's disk image, brought over already: there to delete. */
     val previousImage: File? = null,
-    /** The dashboard on C: (Dashboard): Xbox Live's account sign-up. */
-    val dashboard: Boolean = false,
   )
 
-  /** A long job: a disk image's import, a backup, a restore, the dashboard's install. */
-  enum class Kind { IMAGE_IMPORT, BACKUP, RESTORE, DASHBOARD }
+  /** Disk image import, backup or restore. */
+  enum class Kind { IMAGE_IMPORT, BACKUP, RESTORE }
 
   /** A long job: running (done of total), or finished (result or error). */
   data class Job(
@@ -94,7 +91,7 @@ class HddViewModel(app: Application) : AndroidViewModel(app) {
     viewModelScope.launch {
       val c = withContext(Dispatchers.IO) {
         Contents(store.usage(), store.saves(), store.titleData(), store.caches(), store.states(), false,
-                 console.status(), previousImage(), Dashboard.installed(store.root))
+                 console.status(), previousImage())
       }
       _contents.value = c
     }
@@ -136,24 +133,6 @@ class HddViewModel(app: Application) : AndroidViewModel(app) {
         }
       }
       _job.update { it?.copy(result = r.getOrNull(), resign = report, error = r.exceptionOrNull()?.let(::message)) }
-      refresh()
-    }
-  }
-
-  /** The dashboard's files from the zip at uri into C: (Dashboard.install). */
-  fun installDashboard(uri: Uri) {
-    if (_job.value?.finished == false) return
-    _job.value = Job(Kind.DASHBOARD)
-    val app = getApplication<Application>()
-    viewModelScope.launch {
-      val r = withContext(Dispatchers.IO) {
-        runCatching {
-          Dashboard.install({ app.contentResolver.openInputStream(uri)!! }, store.root) { d, t, w ->
-            _job.update { it?.copy(done = d, total = t, what = w) }
-          }
-        }
-      }
-      _job.update { it?.copy(result = r.getOrNull(), error = r.exceptionOrNull()?.let(::message)) }
       refresh()
     }
   }

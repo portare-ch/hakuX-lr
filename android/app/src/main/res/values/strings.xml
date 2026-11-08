@@ -454,13 +454,6 @@
   <string name="hdd_saves_import_foreign_nokeys">They come from a console or xemu. Without the console files (From an Xbox or xemu) they come in as they are, and games that check signatures report them as damaged.</string>
   <string name="hdd_import">Import a disk image</string>
   <string name="hdd_import_desc">xemu\'s (qcow2) or a raw dump. It replaces this console\'s saves, game data, caches and system files; its saves are re-signed for hakuX.</string>
-  <string name="hdd_dashboard">Dashboard</string>
-  <string name="hdd_dashboard_install">Install the dashboard</string>
-  <string name="hdd_dashboard_desc">hakuX-lr\'s own dashboard is on the C: drive. Choose a zip of the Xbox dashboard\'s files (5960) to put yours there instead: Xbox Live accounts, Insignia\'s, are made in it. The library\'s Dashboard button starts it.</string>
-  <string name="hdd_dashboard_installed">Installed: the library\'s Dashboard button starts it. Choose a zip to install it again.</string>
-  <string name="hdd_dashboard_installing">Installing the dashboard</string>
-  <string name="hdd_dashboard_done">Dashboard installed</string>
-  <string name="hdd_dashboard_failed">The dashboard couldn\'t be installed</string>
   <string name="hdd_import_confirm_title">Replace the hard disk?</string>
   <string name="hdd_import_confirm">Everything on this console\'s hard disk is replaced by the image\'s contents. Back it up first (Back up everything) to keep a copy.</string>
   <string name="hdd_importing">Importing the disk image</string>

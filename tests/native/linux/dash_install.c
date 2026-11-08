@@ -132,7 +132,7 @@ int main(void)
     nc_dash_install(g_hdd);
     CHECK(embedded("xboxdash.xbe") && embedded("xodash/xonlinedash.xbe"), "an older copy of ours is replaced");
 
-    /* Preserve an existing dashboard with a different certificate title. */
+    /* Replace another dashboard's XBE and keep its other files. */
     uint8_t *theirs = malloc(n);
     memcpy(theirs, xbe, n);
     uint32_t base, cert;
@@ -141,19 +141,31 @@ int main(void)
     theirs[cert - base + 0xC] = 'H';        /* Use a different certificate title. */
     fresh();
     put("XBOXDASH.XBE", theirs, n);
+    path(p, sizeof(p), "fonts");
+    mkdir(p, 0775);
+    put("fonts/Xbox.xtf", (const uint8_t *)"font", 4);
     nc_dash_install(g_hdd);
-    CHECK(size_of("XBOXDASH.XBE") == (long)n && !embedded("XBOXDASH.XBE") && size_of("xboxdash.xbe") < 0 &&
-              size_of("xodash") < 0,
-          "someone else's XBOXDASH.XBE: left alone, nothing added");
+    CHECK(embedded("XBOXDASH.XBE") && size_of("xboxdash.xbe") < 0 && embedded("xodash/xonlinedash.xbe") &&
+              size_of("fonts/Xbox.xtf") == 4,
+          "someone else's XBOXDASH.XBE: replaced under its name, its other files kept");
 
-    /* Reuse an existing XODash folder and preserve its XBE. */
+    /* Reuse an existing XODash folder and replace another XBE in it. */
     fresh();
     path(p, sizeof(p), "XODash");
     mkdir(p, 0775);
     put("XODash/xonlinedash.xbe", theirs, n);
     nc_dash_install(g_hdd);
-    CHECK(embedded("xboxdash.xbe") && size_of("xodash") < 0 && !embedded("XODash/xonlinedash.xbe"),
-          "an XODash folder is used as it is, someone else's xonlinedash.xbe in it left alone");
+    CHECK(embedded("xboxdash.xbe") && size_of("xodash") < 0 && embedded("XODash/xonlinedash.xbe"),
+          "an XODash folder is used as it is, someone else's xonlinedash.xbe in it replaced");
+
+    /* Skip dashboard installation with NC_DASH_KEEP=1. */
+    fresh();
+    put("xboxdash.xbe", theirs, n);
+    setenv("NC_DASH_KEEP", "1", 1);
+    nc_dash_install(g_hdd);
+    unsetenv("NC_DASH_KEEP");
+    CHECK(size_of("xboxdash.xbe") == (long)n && !embedded("xboxdash.xbe") && size_of("xodash") < 0,
+          "NC_DASH_KEEP=1: someone else's xboxdash.xbe kept, nothing added");
 
     /* An xboxrun HDD override can point to a missing directory. */
     char cmd[600], q[600], r[600];

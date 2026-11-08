@@ -21,7 +21,7 @@ data class InsigniaStatus(
   val accounts: List<String> = emptyList(),
 )
 
-/** Insignia's setup wizard: its steps' state. */
+/** Loads the setup wizard's state from preferences and disk. */
 class InsigniaViewModel(app: Application) : AndroidViewModel(app) {
   private val prefs = AppPrefs(app)
   private val hddRoot = HddStore(app).root
@@ -39,7 +39,7 @@ class InsigniaViewModel(app: Application) : AndroidViewModel(app) {
     accounts = Insignia.accounts(hddRoot),
   )
 
-  /** Back on screen (from the dashboard, the settings): the state read again. */
+  /** Refresh after returning from the dashboard or settings. */
   fun refresh() {
     _status.value = read()
   }

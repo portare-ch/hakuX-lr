@@ -4,11 +4,7 @@ import android.content.Context
 import com.rfandango.haku_x.data.hdd.XboxHdd
 import java.io.File
 
-/**
- * Insignia, the Xbox Live revival (insignia.live): what its setup wizard (ui/insignia) checks. hakuX-lr's
- * dashboard registers the console and makes its accounts; both go in the hard disk's config area, which
- * the native core keeps as raw-partition0.bin.
- */
+/** Reads Insignia registration and accounts from the disk's config area (raw-partition0.bin). */
 object Insignia {
   const val SITE = "https://insignia.live"
 
@@ -18,24 +14,20 @@ object Insignia {
   private const val FIRST_USER_SECTOR = 12
   private const val USER_SLOTS = 8
 
-  /**
-   * An earlier version downloaded Insignia's Setup Assistant here; the dashboard registers the console
-   * now, so the ISO only takes space.
-   */
+  /** Delete the Setup Assistant ISO cached by older app versions. */
   fun forgetSetupAssistant(context: Context) {
     File(context.filesDir, "insignia").takeIf { it.exists() }?.deleteRecursively()
   }
 
-  /** The console is registered: the config area holds its machine credential (sector 9). */
+  /** Check for the machine credential in config sector 9. */
   fun registered(hddRoot: File): Boolean {
     val d = configArea(hddRoot) ?: return false
     return validSector(d, MACHINE_SECTOR)
   }
 
   /**
-   * The Insignia accounts on the console, their gamertags: the user table (sector 11) names the slots in
-   * use, each an account sector from 12 with its gamertag at +0x18 and its domain at +0x30 ("insignia.live").
-   * The machine credential and slots the table doesn't name are not accounts.
+   * The user table (sector 11) marks the active account slots starting at sector 12.
+   * Each account stores its gamertag at +0x18 and domain at +0x30.
    */
   fun accounts(hddRoot: File): List<String> {
     val d = configArea(hddRoot) ?: return emptyList()

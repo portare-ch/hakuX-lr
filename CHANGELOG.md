@@ -2,10 +2,8 @@
 
 ## Unreleased
 
-- **Network** — A single Off/On option controls Xbox Live (Insignia) and
-  system link together, on by default. The separate LAN, Xbox Live and
-  XLink Kai settings are removed; older Android network choices migrate to
-  On.
+- **Network** — One switch enables Xbox Live and system link, on by default.
+  On Android, older LAN, Xbox Live and XLink Kai settings migrate to On.
 - **System link** — Consoles negotiate distinct IP addresses before DHCP
   leasing. An address conflict discovered afterward is reported.
 - **Console HDD keys** — New consoles store a random HDD key in EEPROM.
@@ -15,15 +13,13 @@
 - **Launch folders** (#189) — Games launched from a disc subfolder now use
   that folder as `D:`. This fixes asset loading for the games on the
   Star Wars - The Clone Wars + Tetris Worlds disc.
-- **Dashboard** — The core installs the bundled dashboard on C: when
-  needed. **Start Core** boots it without content, and games can open its
-  Xbox Live pages. The bundled dashboard also lets the Star Wars - The
-  Clone Wars + Tetris Worlds launcher skip its disc updater (#120).
-- **Insignia** (experimental) — The bundled dashboard's Xbox Live page
-  registers the console with Insignia and creates Insignia accounts,
-  without the Setup Assistant or Microsoft's dashboard. Android's Xbox Live
-  setup opens the dashboard for both and no longer downloads the Setup
-  Assistant. Recovering an account on the console isn't supported yet.
+- **Dashboard** — The core replaces existing dashboard XBEs on C: with its
+  bundled dashboard. **Start Core** boots it without a game. Games can open
+  its Xbox Live pages, and the Star Wars - The Clone Wars + Tetris Worlds
+  launcher skips its disc updater (#120).
+- **Insignia** (experimental) — Register the console and create an account
+  from **Xbox Live** in the bundled dashboard. Android's setup wizard opens
+  the dashboard for both steps. On-console account recovery is still pending.
 
 ## linux-v0.23.0 (Linux, aarch64 and x86-64, and Android)
 

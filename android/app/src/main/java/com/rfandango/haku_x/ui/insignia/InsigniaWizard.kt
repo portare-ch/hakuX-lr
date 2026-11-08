@@ -61,11 +61,7 @@ private fun firstStep(s: InsigniaStatus): Step {
   }
 }
 
-/**
- * Insignia's setup (Settings): everything Xbox Live through Insignia needs, one step after the other:
- * the connection, then the console's registration and the account, both in hakuX-lr's dashboard. The
- * dashboard runs as a game; the app opens the wizard again when it closes (AppPrefs.insigniaWizardResume).
- */
+/** Guides users through networking, console registration and account creation. */
 @Composable
 fun InsigniaWizard(
   onBack: () -> Unit,
@@ -80,7 +76,7 @@ fun InsigniaWizard(
     onPauseOrDispose {}
   }
   val current = Step.entries[step]
-  /* the wizard opens again once the dashboard closes */
+  // Resume the wizard when the dashboard exits.
   val launchDashboard = { AppPrefs(context).insigniaWizardResume = true; onLaunchDashboard() }
 
   SubScreen(
