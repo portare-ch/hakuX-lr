@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## linux-v0.25.0 (Linux, aarch64 and x86-64, and Android)
+
 - **Insignia account recovery** (#185) — Under **Xbox Live**, select
   **Recover an Insignia account** and enter your gamertag and the 16-digit
   recovery number revealed on Insignia's website. Recovery refreshes the
