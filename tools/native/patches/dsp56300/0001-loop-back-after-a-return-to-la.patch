@@ -1,0 +1,168 @@
+DSP56300 JIT: handle returns at DO loop boundaries
+Based on xemu-project/dsp56300 b36db2c (tools/native/linux-deps.json).
+Applied by tools/native/dsp-jit-source.py.
+
+When a DO loop ends with a subroutine call, returning to LA+1 must
+complete the iteration. The JIT only checked fall-through, leaving
+the loop stack active and causing broken audio or shutdown hangs.
+
+Mark RTS/RTI returns in compiled and stepped execution. Regression
+tests cover JSR and BSR calls at the end of a DO loop.
+
+diff --git a/crates/emu/src/core.rs b/crates/emu/src/core.rs
+index 09f248c..4617c67 100644
+--- a/crates/emu/src/core.rs
++++ b/crates/emu/src/core.rs
+@@ -469,6 +469,11 @@ pub struct DspState {
+     pub pc: u32,
+     /// PC advance after instruction execution (word count added to PC)
+     pub pc_advance: u32,
++    /// Set after RTS/RTI and cleared by the next loop-end check.
++    /// Returning to LA+1 completes the current DO iteration,
++    /// even when the PC did not advance sequentially.
++    /// An ordinary branch to LA+1 must not trigger a loop-back.
++    pub returned: u32,
+     /// Where a dynamic-address store lands when its address misses the
+     /// space's RAM: the emitter selects between the RAM element and this
+     /// word so the store itself is unconditional (`write_mem_dyn`). Never
+@@ -539,6 +544,7 @@ impl DspState {
+         Self {
+             pc: 0,
+             pc_advance: 0,
++            returned: 0,
+             mem_write_sink: 0,
+             cycle_count: 0,
+             registers,
+@@ -735,9 +741,11 @@ impl DspState {
+         // instruction at LA triggers the loop-back (pc_advance != 0); a
+         // branch that lands on LA+1 does not. Hardware-verified: BRKcc jumps
+         // to LA+1 with the loop state left live, and the loop neither
+-        // re-enters nor decrements LC.
++        // re-enters nor decrements LC. A return to LA+1 does complete the
++        // iteration because the call's final word was fetched at LA.
++        let returned = std::mem::take(&mut self.returned) != 0;
+         if (self.registers[reg::SR] & (1 << sr::LF)) != 0
+-            && self.pc_advance != 0
++            && (self.pc_advance != 0 || returned)
+             && self.pc == mask_pc(self.registers[reg::LA] + 1)
+         {
+             self.registers[reg::LC] = self.registers[reg::LC].wrapping_sub(1) & REG_MASKS[reg::LC];
+diff --git a/crates/emu/src/emit/control.rs b/crates/emu/src/emit/control.rs
+index 0196644..ffe6f36 100644
+--- a/crates/emu/src/emit/control.rs
++++ b/crates/emu/src/emit/control.rs
+@@ -115,8 +115,15 @@ impl<'a> Emitter<'a> {
+         self.store_pc(a);
+     }
+ 
++    /// Record an RTS/RTI for the next DO loop-end check.
++    fn mark_returned(&mut self) {
++        let one = self.builder.ins().iconst(types::I32, 1);
++        self.store_u32(super::OFF_RETURNED, one);
++    }
++
+     pub(super) fn emit_rts(&mut self) {
+         self.set_inst_len(0);
++        self.mark_returned();
+         self.set_cycles(3);
+         // RTS/RTI underflow budget: 3 - len (silicon: the branch to
+         // slot-0 storage executes, then 2 more stream words).
+@@ -127,6 +134,7 @@ impl<'a> Emitter<'a> {
+ 
+     pub(super) fn emit_rti(&mut self) {
+         self.set_inst_len(0);
++        self.mark_returned();
+         self.set_cycles(3);
+         let budget = 3u32.saturating_sub(self.cur_decode_len.max(1));
+         let (ssh, ssl) = self.stack_pop(budget);
+diff --git a/crates/emu/src/emit/mod.rs b/crates/emu/src/emit/mod.rs
+index 2354e2e..2af8888 100644
+--- a/crates/emu/src/emit/mod.rs
++++ b/crates/emu/src/emit/mod.rs
+@@ -58,6 +58,7 @@ const OFF_STACK: i32 = offset_of!(DspState, stack) as i32;
+ const OFF_LOOP_REP: i32 = offset_of!(DspState, loop_rep) as i32;
+ const OFF_PC_ON_REP: i32 = offset_of!(DspState, pc_on_rep) as i32;
+ const OFF_PC_ADVANCE: i32 = offset_of!(DspState, pc_advance) as i32;
++const OFF_RETURNED: i32 = offset_of!(DspState, returned) as i32;
+ const OFF_MEM_WRITE_SINK: i32 = offset_of!(DspState, mem_write_sink) as i32;
+ const OFF_INTERRUPT_STATE: i32 = offset_of!(DspState, interrupts.state) as i32;
+ 
+diff --git a/crates/emu/src/jit.rs b/crates/emu/src/jit.rs
+index bd793c5..dbdd14b 100644
+--- a/crates/emu/src/jit.rs
++++ b/crates/emu/src/jit.rs
+@@ -1191,8 +1191,10 @@ impl DspState {
+             // Only sequential fall-through from LA triggers the loop-back
+             // (pc_advance != 0); a branch landing on LA+1 does not. Matches
+             // hardware BRKcc, which jumps to LA+1 leaving the loop state live.
++            // A return to LA+1 also completes the DO iteration.
++            let returned = std::mem::take(&mut self.returned) != 0;
+             if (self.registers[reg::SR] & (1 << sr::LF)) != 0
+-                && self.pc_advance != 0
++                && (self.pc_advance != 0 || returned)
+                 && self.pc == mask_pc(self.registers[reg::LA] + 1)
+             {
+                 self.registers[reg::LC] =
+diff --git a/crates/emu/tests/emu/loops.rs b/crates/emu/tests/emu/loops.rs
+index caaf7d0..2e0bf93 100644
+--- a/crates/emu/tests/emu/loops.rs
++++ b/crates/emu/tests/emu/loops.rs
+@@ -3434,3 +3434,58 @@ fn test_wedge_case_2838_block_preempts() {
+         s.cycle_count
+     );
+ }
++
++/// A DO loop ending with a subroutine call must repeat on return to LA+1.
++/// Some Xbox GP programs use this sequence.
++/// Check JSR and BSR in compiled and stepped execution.
++fn call_at_la(call: [u32; 2], stepped: bool) {
++    let mut jit = JitEngine::new(PRAM_SIZE);
++    let mut xram = [0u32; XRAM_SIZE];
++    let mut yram = [0u32; YRAM_SIZE];
++    let mut pram = [0u32; PRAM_SIZE];
++    let mut s = DspState::new(MemoryMap::test(&mut xram, &mut yram, &mut pram));
++    s.registers[reg::LA] = 0x1234; // restored after the loop
++    s.registers[reg::LC] = 0x5678;
++    pram[0] = 0x060480; // do #4,$0003
++    pram[1] = 0x000003; // LA points to the call's second word
++    pram[2] = call[0];
++    pram[3] = call[1];
++    pram[4] = 0x0C0004; // jmp $0004 (halt)
++    pram[0x10] = 0x000008; // inc A
++    pram[0x11] = 0x00000C; // rts
++    if stepped {
++        for _ in 0..64 {
++            if s.pc == 4 {
++                break;
++            }
++            run_one(&mut s, &mut jit);
++        }
++    } else {
++        s.run(&mut jit, 1000);
++    }
++    assert_eq!(s.registers[reg::A0], 4);
++    assert_eq!(s.pc, 4);
++    assert_eq!(s.registers[reg::SR] & (1 << sr::LF), 0);
++    assert_eq!(s.registers[reg::LA], 0x1234);
++    assert_eq!(s.registers[reg::LC], 0x5678);
++}
++
++#[test]
++fn test_run_do_loop_bsr_at_la() {
++    call_at_la([0x0D1080, 0x00000E], false); // bsr $0010
++}
++
++#[test]
++fn test_step_do_loop_bsr_at_la() {
++    call_at_la([0x0D1080, 0x00000E], true);
++}
++
++#[test]
++fn test_run_do_loop_jsr_at_la() {
++    call_at_la([0x0BF080, 0x000010], false); // jsr $0010
++}
++
++#[test]
++fn test_step_do_loop_jsr_at_la() {
++    call_at_la([0x0BF080, 0x000010], true);
++}

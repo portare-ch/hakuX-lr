@@ -55,9 +55,10 @@ otherwise, chosen at run time; `NC_APU_SIMD=sse2|scalar` caps the level.
 Releases include an experimental x86-64 archive; see the
 [installation guide](../README.md#play-on-amd64-x86-64-linux-systems).
 
-The Linux builds (ARM64 and x86-64) enable `HAKUX_DSP_JIT` by default. It builds
-dsp56300 1.0.0 from pinned sources using Cargo's locked dependencies;
-release archives include their license notices and Rust toolchain version.
+ARM64 and x86-64 Linux builds enable `HAKUX_DSP_JIT` by default. The
+pinned dsp56300 sources are patched in the build directory and built with
+Cargo's locked dependencies. Release archives retain license notices and
+Rust toolchain details.
 `-DHAKUX_DSP_JIT=OFF` builds the C interpreter without requiring Rust.
 
 The build produces the core, diagnostic tools, `libretro-harness` and smoke
