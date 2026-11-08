@@ -12,16 +12,29 @@ static void test_texture(void)
     HT_EQ_U32(hle_kdma_texture(0x00010608 | 2), HLE_KDMA_B);
 }
 
-/* the palette's offset moves by the base; context and length stay */
+/* the palette's context, start (base added; 0 is a palette too) and
+ * entries (256 >> length) */
 static void test_palette(void)
 {
-    const uint32_t pal = 0x00123440 | 4 | 1;          /* 128 entries, context B */
-    HT_EQ_U32(hle_kdma_palette(pal), HLE_KDMA_B);
-    HT_EQ_U32(hle_kdma_palette(pal & ~1u), HLE_KDMA_A);
-    HT_EQ_U32(hle_kdma_palette_at(pal, 0), pal);
-    HT_EQ_U32(hle_kdma_palette_at(pal, 0x03000000), 0x03123440 | 4 | 1);
-    /* an adjust below 64 bytes doesn't reach the fields */
-    HT_EQ_U32(hle_kdma_palette_at(pal, 0x20) & 0x3F, 4 | 1);
+    uint32_t pa, n;
+    HT_EQ_U32(hle_kdma_palette(0x00123440 | 1), HLE_KDMA_B);
+    HT_EQ_U32(hle_kdma_palette(0x00123440), HLE_KDMA_A);
+    hle_kdma_palette_ref(0x00123440 | 4 | 1, 0, &pa, &n);
+    HT_EQ_U32(pa, 0x00123440);
+    HT_EQ_U32(n, 128);
+    /* the word 0: 256 entries at the start of context A, wherever it is */
+    hle_kdma_palette_ref(0, 0x03000000, &pa, &n);
+    HT_EQ_U32(pa, 0x03000000);
+    HT_EQ_U32(n, 256);
+    hle_kdma_palette_ref(0, 0, &pa, &n);
+    HT_EQ_U32(pa, 0);
+    HT_EQ_U32(n, 256);
+    hle_kdma_palette_ref(0x40 | 0xC, 0x02000000, &pa, &n);
+    HT_EQ_U32(pa, 0x02000040);
+    HT_EQ_U32(n, 32);
+    /* an adjust below 64 bytes doesn't move it off its alignment */
+    hle_kdma_palette_ref(0x00123440, 0x20, &pa, &n);
+    HT_EQ_U32(pa & 0x3F, 0);
 }
 
 /* bit 31 picks vertex context B; the rest is the offset */

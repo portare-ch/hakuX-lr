@@ -2965,15 +2965,20 @@ static uint32_t texture(unsigned s, bool *unset, bool *lin)
     if (best) {
         return best->id;
     }
-    uint32_t pal_reg = code == HLE_XFMT_P8 ? R(NV097_SET_TEXTURE_PALETTE + b) : 0;
-    if (pal_reg) {
-        pal_reg = hle_kdma_palette_at(pal_reg, dma_base(hle_kdma_palette(pal_reg)));
+    /* a P8 texture's palette, whatever its word (0: 256 entries at the
+     * start of context A) */
+    const bool p8 = code == HLE_XFMT_P8;
+    uint32_t pal_pa = 0, pal_n = 0, pal_key = 0;
+    if (p8) {
+        const uint32_t word = R(NV097_SET_TEXTURE_PALETTE + b);
+        hle_kdma_palette_ref(word, dma_base(hle_kdma_palette(word)), &pal_pa, &pal_n);
+        pal_key = pal_pa | (word & 0x3Fu);
     }
     /* colour sign: the signed 8-bit channels uploaded offset binary, an
      * object apart from the texture read unsigned */
     const uint32_t sign = R(NV097_SET_TEXTURE_FILTER + b) >> 28;
     const uint32_t sxor = hle_fmt_sign_xor(code, sign);
-    uint32_t key[5] = { off, fmt, size, pal_reg, sxor };
+    uint32_t key[5] = { off, fmt, size, pal_key, sxor };
     uint32_t h = hash32(key, sizeof(key)) % TEX_SLOTS;
     PbTex *t = &g_pd.tex[h];
     while (t->id && memcmp(t->key, key, sizeof(key))) {
@@ -3008,14 +3013,14 @@ static uint32_t texture(unsigned s, bool *unset, bool *lin)
     static uint32_t pal[256];
     uint32_t npal = 0, pal_hash = 0;
     const uint8_t *pal_mem = NULL;
-    if (pal_reg) {
+    if (p8) {
         /* hashed by words where it is (byte by byte, 4 stages a draw, it was
          * a sixth of the decoder's time); copied only to define */
-        npal = 256u >> ((pal_reg >> 2) & 3);
-        coh_pend_wait(pal_reg & 0x0FFFFFC0u, 4 * npal);    /* a copy queued into it lands first */
-        pal_mem = hle_pa_ptr(pal_reg & 0x0FFFFFC0u, 4 * npal);
+        npal = pal_n;
+        coh_pend_wait(pal_pa, 4 * npal);    /* a copy queued into it lands first */
+        pal_mem = hle_pa_ptr(pal_pa, 4 * npal);
         if (pal_mem) {
-            const uint32_t ppa = pal_reg & 0x0FFFFFC0u;
+            const uint32_t ppa = pal_pa;
             PalHash *ph = &g_pal_hash[(ppa >> 6) % PAL_HASHES];
             if (ph->ok && ph->pa == ppa && ph->n == npal && !memcmp(ph->bytes, pal_mem, 4 * npal)) {
                 pal_hash = ph->hash;
