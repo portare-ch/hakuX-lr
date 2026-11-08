@@ -9,10 +9,12 @@
  * context_reset starts the guest; context_destroy stops it before RetroArch
  * destroys the device.
  *
- * Each retro_run copies the cropped front display slot into an image for
- * the current sync index. set_command_buffers gives RetroArch the copy,
- * and set_image gives it the output image. Keep the slot acquired until
- * video_cb has submitted the copy so the renderer cannot overwrite it.
+ * A retro_run with a new front display slot copies it, cropped, into an
+ * image for the current sync index. set_command_buffers gives RetroArch the
+ * copy, and set_image gives it the output image. Keep the slot acquired
+ * until video_cb has submitted the copy so the renderer cannot overwrite it.
+ * The slot handed last (and its crop) gets no video_cb: RetroArch keeps
+ * showing it, and its FPS counter counts the game's frames, not repeats.
  *
  * A swapchain rebuild with an unchanged sync mask remains undetected:
  * wait_sync_index may miss an in-flight command buffer before it is reset.
@@ -118,8 +120,16 @@ static void retire(void)
     hle_vk_check(r, "vkQueueWaitIdle (libretro images)");
 }
 
+/* The front slot RetroArch was handed last, as cropped then; valid false:
+ * none since its images were made. */
+static struct {
+    bool valid;
+    uint32_t gen, swap_id, w, h, cx, cy;
+} g_handed;
+
 static void destroy_images(void)
 {
+    g_handed.valid = false;
     for (unsigned i = 0; i < MAX_SYNC; i++) {
         if (g_ex[i].view) {
             T.vkDestroyImageView(g_hvk.dev, g_ex[i].view, NULL);
@@ -292,14 +302,14 @@ static bool export_image(unsigned idx, uint32_t w, uint32_t h)
     return true;
 }
 
-bool nc_lr_vk_run(retro_video_refresh_t video)
+bool nc_lr_vk_run(retro_video_refresh_t video, bool *shown)
 {
+    *shown = false;
     if (!g_hw) {
         return false;
     }
     if (!g_vk) {
-        video(NULL, 640, 480, 0);   /* the device isn't up: RetroArch shows what it has */
-        return true;
+        return true;                /* the device isn't up: RetroArch shows what it has */
     }
     const unsigned mask = g_vk->get_sync_index_mask(g_vk->handle);
     if (mask != g_mask) {
@@ -315,17 +325,21 @@ bool nc_lr_vk_run(retro_video_refresh_t video)
     nc_lr_video_pickup();
     if (idx >= MAX_SYNC || !hle_disp_acquire(&f)) {
         hle_disp_use_end();
-        video(NULL, 640, 480, 0);   /* no frame yet (the boot) */
-        return true;
+        return true;                /* no frame yet (the boot) */
     }
     uint32_t cx, cy;
     nc_lr_overscan(f.w, f.h, &cx, &cy);
+    if (g_handed.valid && f.gen == g_handed.gen && f.swap_id == g_handed.swap_id && f.w == g_handed.w &&
+        f.h == g_handed.h && cx == g_handed.cx && cy == g_handed.cy) {
+        hle_disp_release(f.slot);   /* the game drew nothing new */
+        hle_disp_use_end();
+        return true;
+    }
     const uint32_t ow = f.w - 2 * cx, oh = f.h - 2 * cy;
     if (!export_image(idx, ow, oh)) {
         hle_disp_release(f.slot);
         hle_disp_use_end();
         nc_lr_fail("no image for RetroArch");
-        video(NULL, ow, oh, 0);
         return true;
     }
     VkCommandBuffer cb = g_ex[idx].cb;
@@ -353,6 +367,8 @@ bool nc_lr_vk_run(retro_video_refresh_t video)
     g_vk->set_command_buffers(g_vk->handle, 1, &cb);
     g_vk->set_image(g_vk->handle, &g_ex[idx].ri, 0, NULL, VK_QUEUE_FAMILY_IGNORED);
     video(RETRO_HW_FRAME_BUFFER_VALID, ow, oh, 0);   /* RetroArch submits the copy here */
+    g_handed = (typeof(g_handed)){true, f.gen, f.swap_id, f.w, f.h, cx, cy};
+    *shown = true;
     hle_disp_release(f.slot);
     hle_disp_use_end();
     return true;

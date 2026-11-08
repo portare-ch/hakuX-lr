@@ -54,15 +54,15 @@ void nc_lr_input_describe(retro_environment_t env);
 void nc_lr_input_reset(void);
 void nc_lr_input_set_device(unsigned port, unsigned device);
 
-/* video.c — the newest front frame to RetroArch, exactly one video_cb
- * (retro_run); its source size and the aspect it is shown at; the overscan
+/* video.c — a new front frame to RetroArch, one video_cb at most (retro_run;
+ * false: the game drew none, no video_cb); its source size and the aspect it is shown at; the overscan
  * a TV hid, on each side of a w x h frame; a frame of w x h shown as ow x oh
  * (RetroArch told when that changes); the console set to widescreen, which
  * shows a standard-definition frame 16:9 (before the first frame); the
  * overscan cropped (the default) or shown, from the next frame on. The
  * front frame looked at, now (vulkan.c, and the read-back here): the
  * NV2A's vblank keeps clear of the moment. */
-void nc_lr_video_run(retro_video_refresh_t video);
+bool nc_lr_video_run(retro_video_refresh_t video);
 void nc_lr_video_pickup(void);
 void nc_lr_video_geometry(struct retro_game_geometry *g);
 void nc_lr_overscan(uint32_t w, uint32_t h, uint32_t *cx, uint32_t *cy);
@@ -88,9 +88,10 @@ void nc_lr_net_run(void);
 
 /* vulkan.c — the renderer on RetroArch's Vulkan device, the guest booted in
  * its context_reset (load: false when the frontend has none, the frames then
- * read back); the frame handed over as an image (false: not with Vulkan). */
+ * read back); a new frame handed over as an image, *shown (false: not with
+ * Vulkan). */
 bool nc_lr_vk_negotiate(void);
-bool nc_lr_vk_run(retro_video_refresh_t video);
+bool nc_lr_vk_run(retro_video_refresh_t video, bool *shown);
 /* The game unloaded (after context_destroy): the negotiation forgotten. */
 void nc_lr_vk_reset(void);
 

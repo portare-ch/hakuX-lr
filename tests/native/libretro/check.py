@@ -319,6 +319,24 @@ def main():
         # the crop, rumble and frame pacing don't. Rumble on asks RetroArch
         # for its interface, which the harness doesn't have.
         disc(root / 'spin.iso', b'\xeb\xfe')
+        # RetroArch gets a frame only when the game draws a new one, so its
+        # FPS counter counts the game's frames: one that never presents
+        # hands it none, and retro_run keeps the display's pace without them.
+        run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
+            ('ran 30 frames: 0 video calls', '0 dupes, 30 without a frame'))
+        # A frontend that paces by its presents (vsync, no audio sync) calls
+        # again at once when there is no present to wait in; the core waits
+        # out the period, so 30 calls still take 29 of them (the first
+        # doesn't wait).
+        unpaced = subprocess.run([str(x) for x in (args.harness, args.core, root / 'spin.iso', 30, root / 'saves')],
+                                 env=dict(os.environ, HARNESS_UNPACED='1'), capture_output=True, text=True,
+                                 timeout=60)
+        took = re.search(r'ran 30 frames: .* without a frame, \d+ audio frames in ([\d.]+) s', unpaced.stdout)
+        if unpaced.returncode or not took or float(took.group(1)) < 29 * 1001 / 60000 * 0.95:
+            print(unpaced.stdout[-4000:], unpaced.stderr[-4000:])
+            raise SystemExit(f'FAIL: retro_run without frames, called back to back: exit {unpaced.returncode}, '
+                             f'{took.group(1) if took else "?"} s for 30 calls')
+        print(f'PASS: 30 retro_run calls without frames, back to back, took {took.group(1)} s')
         env = dict(os.environ, HARNESS_OPTIONS_LATER=f'{OFF};hakux_render_scale=3;hakux_video_region=pal;'
                    'hakux_crop_overscan=disabled;hakux_rumble=enabled;hakux_frame_pace=2')
         run([args.harness, args.core, root / 'spin.iso', 60, root / 'saves'], 0,
@@ -497,7 +515,8 @@ def main():
         c_drive = root / 'saves' / 'hdd' / 'Partition2'
         shutil.rmtree(c_drive, ignore_errors=True)
         run([args.harness, args.core, '-', 60, root / 'saves'], 0,
-            ("dash: installed hakuX-lr's dashboard as", 'loaded the dashboard (no content)', 'ran 60 frames'))
+            ("dash: installed hakuX-lr's dashboard as", 'loaded the dashboard (no content)', 'ran 60 frames',
+             ', 0 dupes,'))
         if not (c_drive / 'xboxdash.xbe').is_file() or not (c_drive / 'xodash' / 'xonlinedash.xbe').is_file():
             raise SystemExit('FAIL: Start Core left no xboxdash.xbe or xodash\\xonlinedash.xbe on C:')
         shutil.rmtree(c_drive)

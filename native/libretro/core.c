@@ -776,6 +776,10 @@ void nc_lr_end(const char *why)
     _exit(0);
 }
 
+/* When the last retro_run started, or was due (paced); 0: none since the
+ * load. */
+static uint64_t g_last_run_at;
+
 RETRO_API void retro_unload_game(void)
 {
     nc_lr_end("unload");
@@ -786,6 +790,7 @@ RETRO_API void retro_unload_game(void)
     handlers_restore();
     nc_lr_video_reset();
     nc_lr_vk_reset();
+    g_last_run_at = 0;
     cheats_forget();                /* the next game's come from RetroArch again */
     g_game[0] = 0;
     g_dash = false;
@@ -793,11 +798,13 @@ RETRO_API void retro_unload_game(void)
 }
 
 /* HAKUX_LR_STATS=1: every 10 s, how long retro_run takes RetroArch's thread
- * (avg, max) and its video part. */
-static void run_stat(uint64_t t0, uint64_t tv, uint64_t t1)
+ * (avg, max), its video part, and the frames it handed RetroArch (what
+ * RetroArch's FPS counter shows), from after the wait for the period
+ * (paced). */
+static void run_stat(uint64_t t0, uint64_t tv, uint64_t t1, bool shown)
 {
     static int on = -1;
-    static uint64_t start, n, run_sum, run_max, vid_sum, vid_max;
+    static uint64_t start, n, run_sum, run_max, vid_sum, vid_max, frames;
     if (on < 0) {
         const char *e = getenv("HAKUX_LR_STATS");
         on = e && atoi(e) != 0;
@@ -807,32 +814,61 @@ static void run_stat(uint64_t t0, uint64_t tv, uint64_t t1)
     }
     start = start ? start : t0;
     n++;
+    frames += shown;
     run_sum += t1 - t0;
     run_max = t1 - t0 > run_max ? t1 - t0 : run_max;
     vid_sum += t1 - tv;
     vid_max = t1 - tv > vid_max ? t1 - tv : vid_max;
     if (t1 - start >= 10000000000ull) {
-        nc_log("hakuX-libretro", "stats: %.2f retro_run/s, %.2f ms each (max %.2f), video %.2f ms (max %.2f)",
-               (double)n * 1e9 / (double)(t1 - start), (double)run_sum / (double)n / 1e6, (double)run_max / 1e6,
-               (double)vid_sum / (double)n / 1e6, (double)vid_max / 1e6);
+        nc_log("hakuX-libretro", "stats: %.2f retro_run/s, %.2f frames/s to RetroArch, %.2f ms each (max %.2f), "
+               "video %.2f ms (max %.2f)", (double)n * 1e9 / (double)(t1 - start),
+               (double)frames * 1e9 / (double)(t1 - start), (double)run_sum / (double)n / 1e6,
+               (double)run_max / 1e6, (double)vid_sum / (double)n / 1e6, (double)vid_max / 1e6);
         start = t1;
-        n = run_sum = run_max = vid_sum = vid_max = 0;
+        n = run_sum = run_max = vid_sum = vid_max = frames = 0;
     }
 }
 
 static void xbe_patches_changed(void);
 
+/* RetroArch gets a frame only when the game draws one, so a frontend that
+ * paces by its presents alone (vsync, no audio sync) no longer waits in
+ * them: with a free swapchain image the present returns at once, and
+ * without one there is no present. Its next call comes early, and the
+ * vblank, locked to these calls, would run fast. So a call that comes over
+ * 2 ms before the Xbox's period (1001/60000 s) has passed since the last
+ * one waits for it, and the vblank keeps the Xbox's rate. A frontend that
+ * spaces the calls itself (Sync to Exact Content Framerate, audio sync,
+ * presents that wait) never makes one wait, and fast-forward, frame steps
+ * and rewinding are left alone. */
+static uint64_t paced(uint64_t now)
+{
+    const uint64_t due = g_last_run_at + NC_LR_FRAME_NS;
+    struct retro_throttle_state t = {RETRO_THROTTLE_NONE, 0.0f};
+    if (!g_last_run_at || now + 2000000ull >= due ||
+        (g_env(RETRO_ENVIRONMENT_GET_THROTTLE_STATE, &t) && t.mode != RETRO_THROTTLE_NONE &&
+         t.mode != RETRO_THROTTLE_VSYNC)) {
+        g_last_run_at = now;
+        return now;
+    }
+    const struct timespec ts = {(time_t)(due / 1000000000ull), (long)(due % 1000000000ull)};
+    while (clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, NULL) == EINTR) {
+    }
+    g_last_run_at = due;            /* the schedule, without the wake-up's lateness */
+    return now_ns();
+}
+
 RETRO_API void retro_run(void)
 {
-    const uint64_t now = now_ns();
+    const uint64_t now = paced(now_ns());
     nc_lr_input_run(g_input_poll, g_input_state);
     nc_lr_mic_run();
     nc_dev_nv2a_display_vsync(now);         /* RetroArch's frame tick is the display's vsync */
     gap_tick(now);
     nc_lr_audio_run(g_audio_batch);
     const uint64_t tv = now_ns();
-    nc_lr_video_run(g_video);
-    run_stat(now, tv, now_ns());
+    const bool shown = nc_lr_video_run(g_video);
+    run_stat(now, tv, now_ns(), shown);
     nc_lr_options_run();
     nc_lr_net_run();
     xbe_patches_changed();

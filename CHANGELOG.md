@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Frame rate** — RetroArch's FPS counter, and overlays such as MangoHud,
+  show the game's own frame rate. The core hands RetroArch only the frames
+  the game draws; it used to repeat the last one at the display's rate, so
+  the counter stayed near 60 while a game ran slowly.
 - **Insignia account recovery** (#185) — Under **Xbox Live**, select
   **Recover an Insignia account** and enter your gamertag and the 16-digit
   recovery number revealed on Insignia's website. Recovery refreshes the

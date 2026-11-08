@@ -8,8 +8,8 @@
  * Loads the core as RetroArch does (dlopen, every retro_* symbol), reports
  * its system and AV info, loads a disc ("-" for Start Core without content)
  * and calls retro_run at
- * the core's rate, checking that each call hands over exactly one video
- * frame. Core options are the core's defaults, or HARNESS_OPTIONS's
+ * the core's rate, checking that each call hands over one video frame at
+ * most (none: the game drew no new one). Core options are the core's defaults, or HARNESS_OPTIONS's
  * ("key=value;..."), and from the 30th call HARNESS_OPTIONS_LATER's, as
  * if changed in RetroArch's menu; RetroArch's language is HARNESS_LANGUAGE's
  * (RETRO_LANGUAGE_*, English without it). It stops after <frames>, or when
@@ -28,6 +28,8 @@
  *
  * HARNESS_VULKAN=1: the core renders on a Vulkan device the harness's
  * frontend (vk.c) negotiates with it, as RetroArch does, without a window.
+ * HARNESS_UNPACED=1: each retro_run right after the last, as RetroArch calls
+ * it when no present waits for the vsync (the core then keeps the period).
  * HARNESS_RESET_AT=N: retro_reset before the Nth retro_run.
  * HARNESS_REINIT_AT=N (with HARNESS_VULKAN): before the Nth, the video
  * driver rebuilt as RetroArch does it uncached: context_destroy, another
@@ -102,7 +104,7 @@ SYMS(DECLARE)
 
 static const char *g_save_dir;
 static bool g_shutdown;
-static unsigned g_video_calls, g_new_frames, g_dupes, g_frame_w, g_frame_h;
+static unsigned g_video_calls, g_new_frames, g_dupes, g_frame_w, g_frame_h, g_frameless;
 static size_t g_audio_frames;
 static const struct retro_core_option_v2_definition *g_options;
 static bool g_vulkan;           /* HARNESS_VULKAN */
@@ -566,7 +568,7 @@ static int play(const struct retro_game_info *game, long frames)
     g_shutdown = false;
     g_ran = 0;
     g_options_changed = false;
-    g_video_calls = g_new_frames = g_dupes = g_frame_w = g_frame_h = 0;
+    g_video_calls = g_new_frames = g_dupes = g_frame_w = g_frame_h = g_frameless = 0;
     g_audio_frames = 0;
     memset(&g_hw, 0, sizeof(g_hw));
     g_neg = NULL;
@@ -647,17 +649,23 @@ static int play(const struct retro_game_info *game, long frames)
         const unsigned before = g_video_calls;
         p_retro_run();
         g_ran = ran + 1;
-        if (g_video_calls != before + 1) {
+        if (g_video_calls > before + 1) {
             fprintf(stderr, "FAIL: retro_run %ld made %u video calls\n", ran, g_video_calls - before);
             return 1;
         }
+        g_frameless += g_video_calls == before;
         /* at the core's rate exactly: the next call's time from the first's */
         const double t = t0 + (double)(ran + 1) * 1e9 / av.timing.fps;
         const struct timespec next = {(time_t)(t / 1e9), (long)(t - (double)(time_t)(t / 1e9) * 1e9)};
-        clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &next, NULL);
+        if (!getenv("HARNESS_UNPACED")) {
+            clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &next, NULL);
+        }
     }
-    printf("ran %ld frames: %u video calls, %u new frames (last %ux%u), %u dupes, %zu audio frames%s\n", ran,
-           g_video_calls, g_new_frames, g_frame_w, g_frame_h, g_dupes, g_audio_frames,
+    struct timespec end;
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    printf("ran %ld frames: %u video calls, %u new frames (last %ux%u), %u dupes, %u without a frame, "
+           "%zu audio frames in %.3f s%s\n", ran, g_video_calls, g_new_frames, g_frame_w, g_frame_h, g_dupes,
+           g_frameless, g_audio_frames, ((double)end.tv_sec * 1e9 + (double)end.tv_nsec - t0) / 1e9,
            g_shutdown ? ", the core asked to shut down" : "");
     fflush(stdout);
     if (g_hw.context_destroy) {             /* RetroArch: the context goes before the game */

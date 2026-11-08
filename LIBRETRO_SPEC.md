@@ -115,8 +115,8 @@ poll input; publish each port's NcPadState
 nc_dev_nv2a_display_vsync(now): RetroArch's frame tick is the vsync
 resume if the emulation was paused for a gap
 drain the APU's ring into audio_batch_cb
-take the newest front frame: nc_dev_nv2a_display_pickup(now), export it
-video_cb exactly once (a new frame, or the last one again)
+take the newest front frame: nc_dev_nv2a_display_pickup(now)
+video_cb once if the game drew a new frame (exported); none otherwise
 ```
 
 - The rate is the real Xbox's, exactly (owner's requirement): 60000/1001 Hz
@@ -128,7 +128,19 @@ video_cb exactly once (a new frame, or the last one again)
   vblanks half a period from the pickups, as it does with Choreographer.
 - The guest keeps its pipelining: the CPU, the render thread and the export
   overlap as they do today. `retro_run` never waits for the guest to finish
-  a frame; a 30 fps title or a static screen shows its last frame again.
+  a frame. RetroArch gets only the frames the game draws (owner's
+  requirement: its FPS counter, and overlays such as MangoHud, must show the
+  game's frame rate), and keeps showing the last one of a 30 fps title or a
+  static screen.
+- Without repeats, RetroArch's presents no longer wait for the vsync: there
+  is none in a call without a frame, and a free swapchain image lets one
+  return at once. When RetroArch paces by its presents alone, its next call
+  comes early; a call over 2 ms early waits until the Xbox's period
+  (1001/60000 s) has passed since the last one, so the vblank keeps the
+  Xbox's rate. A frontend that spaces the calls itself (Sync to Exact
+  Content Framerate, audio sync, presents that wait) never makes one wait,
+  so there is no second clock there; fast-forward, frame steps and
+  rewinding are not held.
 - A gap (the menu, a long stall): when no `retro_run` comes for two periods,
   `nc_pause_set(true)`; the next `retro_run` resumes. The guest's time leaves
   the pause out, as on Android. A pause that leaves the vCPU running is a bug.
@@ -137,8 +149,8 @@ video_cb exactly once (a new frame, or the last one again)
   stay off in the core until AV info renegotiation is done for them.
 - A mode change (50/60 Hz) updates `retro_system_av_info` through
   `RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO` before frames come at the new rate.
-- A stalled guest is not hidden: no synthetic frames beyond repeating the
-  last one, no extra vblanks. A 5 s watchdog without a new frame logs the
+- A stalled guest is not hidden: no synthetic frames, not even repeats, and
+  no extra vblanks. A 5 s watchdog without a new frame logs the
   CPU, renderer and vblank state; it does not kill anything.
 
 ## 6. Stop, unload and living in RetroArch's process
@@ -329,7 +341,7 @@ Home + Start stays PortareOS's; the core adds no exit chord.
 | `retro_get_system_info` | name, version; `need_fullpath = true`, `block_extract = true`; extensions `iso` and `chd` |
 | `retro_load_game` | check the image, resolve paths, negotiate Vulkan, boot; false with full cleanup on failure |
 | `retro_get_system_av_info` | 60000/1001 (the Xbox's, exactly), 48000 Hz, the source size and aspect |
-| `retro_run` | section 5: one `video_cb`, at least one input poll |
+| `retro_run` | section 5: at most one `video_cb` (a new frame), at least one input poll |
 | `retro_reset` | stop and boot again in process |
 | `retro_unload_game` | stop, join, destroy; a later load works |
 | `retro_deinit` | release the rest; `dlclose` is safe |
@@ -416,8 +428,9 @@ folder. Run-ahead stays off (section 10).
 0021 notes that the display offers FIFO only and keeps presents blocking
 under Sync to Exact Content Framerate: the goal is no independent pacing
 clock and no fixed-refresh beat, not a ban on FIFO. A 30 fps title gives one
-`retro_run` per 59.94 Hz period with its image repeated, so the kernel shows
-each submission twice; that is expected. The standalone's `start_hakux.sh`
+`retro_run` per 59.94 Hz period and a frame every other one; RetroArch's
+pacing spaces the calls, and the kernel repeats each submission until the
+next; that is expected. The standalone's `start_hakux.sh`
 part of #8 is superseded by this route, as the issue records.
 
 Measured on the Nova on 2026-10-25 with 0.2.1, through `runemu.sh`, with
