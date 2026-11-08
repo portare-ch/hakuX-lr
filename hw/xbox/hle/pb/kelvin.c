@@ -35,7 +35,7 @@ enum {
     RS_FOGDENSITY = 96, RS_SPECULARENABLE = 103, RS_POINTSPRITEENABLE = 118,
     RS_FOGCOLOR = 138, RS_FILLMODE = 139, RS_BACKFILLMODE = 140, RS_TWOSIDEDLIGHTING = 141,
     RS_ZENABLE = 143, RS_STENCILENABLE = 144, RS_STENCILFAIL = 145,
-    RS_FRONTFACE = 146, RS_CULLMODE = 147, RS_EDGEANTIALIAS = 151, RS_SHADOWFUNC = 156,
+    RS_FRONTFACE = 146, RS_CULLMODE = 147, RS_LOGICOP = 150, RS_EDGEANTIALIAS = 151, RS_SHADOWFUNC = 156,
     RS_LINEWIDTH = 157,
 };
 enum {
@@ -234,6 +234,8 @@ void hle_kelvin_state(HleCmdState *st)
             rs[k_rs_map[i].rs] = R(k_rs_map[i].m);
         }
     }
+    /* D3DRS_LOGICOP holds the active GL op, or zero when disabled. */
+    rs[RS_LOGICOP] = (R(0x17BC) & 1) ? R(0x17C0) : 0;
     st->aactl = W(0x1D7C) ? R(0x1D7C) : 0xFFFF0001u;   /* SET_ANTI_ALIASING_CONTROL */
     static const float k_eye[3] = { 0.0f, 0.0f, -1.0f };
     for (unsigned i = 0; i < 3; i++) {  /* SET_EYE_VECTOR (envytools' TEX_SHADER_CONST_EYE) */
