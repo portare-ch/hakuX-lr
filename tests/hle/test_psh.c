@@ -360,7 +360,7 @@ static void test_brdf(void)
     HT_CHECK(n > 0 && n == strlen(buf));
     dump("psh_brdf_2d");
     HT_EQ_U32(un, 0);
-    HT_CHECK(strstr(buf, "uSmp[nonuniformEXT(si)]), 2u, vec2(t0.g, t1.g)); }") != NULL);
+    HT_CHECK(strstr(buf, "uSmp[nonuniformEXT(si)]), vec2(t0.g, t1.g)); }") != NULL);
     HT_CHECK(strstr(buf, "samp3(2u") == NULL);
     /* stage 3: stages 1 and 2 */
     rs[HLE_PS_TEXMODES] = 1 | 3u << 5 | 3u << 10 | (unsigned)HLE_PST_BRDF << 15;
@@ -562,7 +562,7 @@ static void test_sign(void)
     dump("psh_sign_dot");
     HT_CHECK(strstr(buf, "dot1 = dot(vTex1.xyz, dmap(0u, tsh(t0, bvec4(true, true, true, false))));")
              != NULL);
-    HT_CHECK(strstr(buf, "uSmp[nonuniformEXT(si)]), 2u, tsh(t0, bvec4(true, true, true, false)).gb); }")
+    HT_CHECK(strstr(buf, "uSmp[nonuniformEXT(si)]), tsh(t0, bvec4(true, true, true, false)).gb); }")
              != NULL);
     k.sgn_ob = 0;                                       /* unsigned: as before */
     HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), NULL) > 0);
@@ -657,7 +657,7 @@ static void test_convolution(void)
     const char *grad = strstr(seg, "vec2 gx = dFdx(uv), gy = dFdy(uv);");
     const char *br = strstr(seg, "if ((when & (lod > 0.0 ? 1u : 2u)) == 0u)");
     HT_CHECK(grad != NULL && br != NULL && grad < br);
-    HT_CHECK(strstr(seg, "uSmp[nonuniformEXT(si)]), GLC2(s, uv), gx, gy);") != NULL);
+    HT_CHECK(strstr(seg, "uSmp[nonuniformEXT(si)]), uv, gx, gy);") != NULL);
     /* the stages' own samplers: the index's 8 bits */
     HT_CHECK(strstr(buf, "uint ti = pc.tex[s] & 0xFFFFu, si = (pc.tex[s] >> 16) & 0xFFu;\n"
                          "  if ((pc.flags & (1u << s)) != 0u)") != NULL);
@@ -984,10 +984,9 @@ static void test_gl_clamp(void)
     HlePshKey k;
     hle_psh_key(rs, &k);
     HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), NULL) > 0);
-    HT_CHECK(strstr(buf, "#define GLC2(s, v) (v)") != NULL);
-    HT_CHECK(strstr(buf, "GLCLAMP") == NULL);
-    HT_CHECK(strstr(buf, "#define GLT2(t, s, v) texture(t, v)") != NULL);
-    HT_CHECK(strstr(buf, "GLT2(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), s, uv)") != NULL);
+    /* Keep unclamped shader text stable for the disk cache. */
+    HT_CHECK(strstr(buf, "GLC") == NULL && strstr(buf, "GLT") == NULL);
+    HT_CHECK(strstr(buf, "  return texture(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), uv);\n") != NULL);
     k.tex_modes |= 3u << 20 | 4u << 23;                 /* t0 u and v, t1 w */
     HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), NULL) > 0);
     dump("psh_gl_clamp");
