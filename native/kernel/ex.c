@@ -140,6 +140,10 @@ static const NvSetting k_nv[] = {
 
 static uint8_t g_eeprom[EEPROM_SIZE];
 static bool g_eeprom_ready;
+static bool g_eeprom_dirty;             /* pending SMBus writes */
+static uint8_t g_stored[EEPROM_SIZE];   /* last contents of eeprom.bin */
+static bool g_stored_known;
+static bool g_keep_file;                /* preserve an invalid existing file */
 
 /* The app's video settings (nc_kernel_set_video). */
 static int64_t g_video_flags = -1;
@@ -206,6 +210,8 @@ static const uint32_t k_eeprom_keys[][2][5] = {
 };
 static void eeprom_store(void);
 static uint8_t g_sec[0x30];             /* the section decrypted */
+static uint8_t g_sec_sealed[0x1C];      /* last sealed plaintext, 0x14–0x2F */
+static bool g_sec_raw;                  /* preserve raw SMBus changes */
 static bool g_sec_plain;                /* kept in the clear (an image from before) */
 static unsigned g_sec_key;              /* the k_eeprom_keys entry it's under */
 
@@ -259,10 +265,13 @@ static bool sec_decrypt(void)
     return false;
 }
 
+/* Update checksums. Re-encrypt only when the plaintext changes, and never
+ * overwrite encrypted bytes modified through SMBus. */
 static void eeprom_seal(void)
 {
-    if (!g_sec_plain) {
+    if (!g_sec_plain && !g_sec_raw && memcmp(g_sec_sealed, g_sec + 0x14, sizeof(g_sec_sealed))) {
         sec_encrypt();
+        memcpy(g_sec_sealed, g_sec + 0x14, sizeof(g_sec_sealed));
     }
     nc_wr32(g_eeprom + 0x30, eeprom_checksum(g_eeprom + 0x34, 0x2C));
     nc_wr32(g_eeprom + 0x60, eeprom_checksum(g_eeprom + 0x64, 0x5C));
@@ -363,9 +372,12 @@ static void eeprom_renew(void)
     nc_log("hakuX-native", "ex: a new identity for the console, as the app asked (its HD key kept)");
 }
 
-/* The image, whole or not at all: a new file put in the old one's place. */
+/* Atomically replace the EEPROM file only when its contents change. */
 static void eeprom_store(void)
 {
+    if (g_keep_file || (g_stored_known && !memcmp(g_stored, g_eeprom, sizeof(g_eeprom)))) {
+        return;
+    }
     char p[320], tmp[330];
     eeprom_path(p, sizeof(p));
     snprintf(tmp, sizeof(tmp), "%s.new", p);
@@ -378,7 +390,10 @@ static void eeprom_store(void)
     if (!ok || rename(tmp, p) != 0) {
         nc_log("hakuX-native", "ex: can't keep the EEPROM in %s", p);
         unlink(tmp);
+        return;
     }
+    memcpy(g_stored, g_eeprom, sizeof(g_stored));
+    g_stored_known = true;
 }
 
 static uint8_t *eeprom(NcKernel *k)
@@ -392,16 +407,20 @@ static uint8_t *eeprom(NcKernel *k)
             fclose(in);
         }
         if (!have && in) {
-            eeprom_create(k);                   /* the file kept as it is: someone's, maybe a real console's */
+            g_keep_file = true;
+            eeprom_create(k);
             nc_log("hakuX-native", "ex: %s isn't a whole EEPROM: a new one for this run", p);
         } else if (!have) {
-            eeprom_create(k);
-            eeprom_store();
+            eeprom_create(k);                   /* save after applying frontend settings */
             nc_log("hakuX-native", "ex: new console EEPROM in %s", p);
         } else {
+            memcpy(g_stored, g_eeprom, sizeof(g_stored));
+            g_stored_known = true;
             g_sec_plain = !sec_decrypt();
             if (g_sec_plain) {
                 memcpy(g_sec, g_eeprom, sizeof(g_sec));
+            } else {
+                memcpy(g_sec_sealed, g_sec + 0x14, sizeof(g_sec_sealed));
             }
             eeprom_upgrade();
             eeprom_renew();
@@ -431,6 +450,7 @@ static uint8_t *eeprom(NcKernel *k)
         memset(g_eeprom + 0x78, 0, 8);
         memset(g_eeprom + 0x88, 0, 8);
         eeprom_seal();
+        eeprom_store();
         g_eeprom_ready = true;
         nc_log("hakuX-native", "ex: video flags %08x, AV pack %d, AV region %08x, language %u, time zone bias %d min",
                nc_rd32(g_eeprom + 0x94), g_av_pack, nc_rd32(g_eeprom + 0x58), nc_rd32(g_eeprom + 0x90),
@@ -957,7 +977,10 @@ static uint64_t HalInitiateShutdown(NcKernel *k, NcFrame *f, const uint32_t *a)
 #define SMC_SCRATCH 0x1Bu
 static uint32_t g_smc_scratch;
 
-/* HalReadSMBusValue(Address, Command, ReadWord, DataValue): SMC version, tray, AV pack, scratch. */
+/* SMBus access shares the EEPROM image with ExQueryNonVolatileSetting.
+ * The kernel keeps the decrypted HDD key it loaded at boot. */
+#define SMB_EEPROM 0xA8u
+
 static uint64_t HalReadSMBusValue(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
     static const char version[3] = {'P', '0', '1'};
@@ -971,6 +994,10 @@ static uint64_t HalReadSMBusValue(NcKernel *k, NcFrame *f, const uint32_t *a)
         case SMC_SCRATCH: v = g_smc_scratch; break;
         default: break;
         }
+    } else if ((a[0] & 0xFE) == SMB_EEPROM) {
+        const uint8_t *e = eeprom(k);
+        const uint8_t o = (uint8_t)a[1];
+        v = e[o] | (a[2] & 0xFF ? (uint32_t)e[(uint8_t)(o + 1)] << 8 : 0);
     }
     if (a[3]) {
         nc_vm_wr32(k->vm, a[3], v);
@@ -978,12 +1005,20 @@ static uint64_t HalReadSMBusValue(NcKernel *k, NcFrame *f, const uint32_t *a)
     return NC_STATUS_SUCCESS;
 }
 
-/* HalWriteSMBusValue(Address, Command, WriteWord, DataValue): the SMC's scratch
- * register keeps what is written to it; the rest is ignored. */
+/* Accept writes to the SMC scratch register and EEPROM. */
 static uint64_t HalWriteSMBusValue(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
     if ((a[0] & 0xFE) == 0x20 && (uint8_t)a[1] == SMC_SCRATCH) {
         g_smc_scratch = a[2] & 0xFF ? a[3] & 0xFFFF : a[3] & 0xFF;
+    } else if ((a[0] & 0xFE) == SMB_EEPROM) {
+        uint8_t *e = eeprom(k);
+        const uint8_t o = (uint8_t)a[1];
+        e[o] = (uint8_t)a[3];
+        if (a[2] & 0xFF) {
+            e[(uint8_t)(o + 1)] = (uint8_t)(a[3] >> 8);
+        }
+        g_sec_raw = g_sec_raw || o < 0x30 || ((a[2] & 0xFF) && o + 1 < 0x30);
+        g_eeprom_dirty = true;
     }
     return NC_STATUS_SUCCESS;
 }
@@ -1149,9 +1184,22 @@ void nc_ex_register(NcKernel *k)
     nc_kernel_impl(k, "KeInitializeDpc", KeInitializeDpc);
 }
 
+void nc_ex_flush(void)
+{
+    if (g_eeprom_dirty) {
+        eeprom_store();
+        g_eeprom_dirty = false;
+    }
+}
+
 void nc_ex_reset(void)
 {
+    nc_ex_flush();
     memset(g_eeprom, 0, sizeof(g_eeprom));
+    g_stored_known = false;
+    g_keep_file = false;
+    g_sec_raw = false;
+    memset(g_sec_sealed, 0, sizeof(g_sec_sealed));
     g_eeprom_ready = false;     /* the next title reads it again, with the front end's settings */
     g_av_saved = 0;
     g_smc_scratch = 0;

@@ -300,6 +300,8 @@ void nc_kernel_destroy(NcKernel *k);
 /* nc_kernel_destroy's, one per module. */
 void nc_ke_reset(void);
 void nc_ex_reset(void);
+/* Persist pending SMBus EEPROM writes. */
+void nc_ex_flush(void);
 void nc_mm_reset(void);
 void nc_page_reset(void);
 void nc_timer_reset(void);

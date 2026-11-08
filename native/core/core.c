@@ -299,6 +299,7 @@ void nc_core_run(NcCore *c)
     /* a savestate: the thread it was running, or the scheduler first */
     const NcCpuContext *start = g_loaded ? nc_kstate_start_context(&c->kernel) : &g_boot->ctx;
     nc_cpu_run(c->cpu, start ? start : &g_boot->ctx);
+    nc_ex_flush();
     const NcKernel *k = &c->kernel;
     if (k->stop) {
         nc_log("hakuX-native-frontier", "stop: %s", k->stop_reason);
