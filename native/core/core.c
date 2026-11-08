@@ -200,6 +200,7 @@ bool nc_core_boot(NcCore *c, int disc_fd)
         }
         if (have_page && nc_kernel_launch_xbe(page, xbe_path, sizeof(xbe_path))) {
             snprintf(c->kernel.image_path, sizeof(c->kernel.image_path), "%s", xbe_path);
+            nc_kernel_launch_dir(page, c->kernel.launch_dir, sizeof(c->kernel.launch_dir));
             nc_log("hakuX-native-frontier", "relaunch: %s (launch type %u)", c->kernel.image_path,
                    *(const uint32_t *)page);
         } else {

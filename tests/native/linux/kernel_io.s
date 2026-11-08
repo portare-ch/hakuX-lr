@@ -1,10 +1,8 @@
 /* Copyright (C) 2026-present PortareOS */
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/* Guest test of the kernel's queues, I/O completion ports, IRPs and drivers
- * (a driver with StartIo and completion routines, IRPs to \Device\CdRom0),
- * thread notify routines and RtlSprintf, run by kernel_io.py. Linked at
- * 0x11000; the kernel thunks are at 0x10f00 in kernel_io.py's IMPORTS order.
- * Ends in HLT after DbgPrint "k85: all passed", or "k85: failed at step n". */
+/* Guest tests for queues, I/O completion, IRPs, drivers, thread callbacks,
+ * RtlSprintf, and symbolic links. Code starts at 0x11000. Thunks at
+ * 0x10f00 follow the IMPORTS order in kernel_io.py. */
 .intel_syntax noprefix
 .set THUNK, 0x10f00
 .set DbgPrint,                     THUNK + 4*0
@@ -42,6 +40,7 @@
 .set NtCreateFile,                 THUNK + 4*32
 .set NtWriteFile,                  THUNK + 4*33
 .set NtClose,                      THUNK + 4*34
+.set IoCreateSymbolicLink,         THUNK + 4*35
 
 /* push imm32 (LLVM's Intel syntax makes "push offset sym" a 16-bit push) */
 .macro PUSHI sym
@@ -569,6 +568,26 @@ _start:
     push dword ptr [fhandle]
     call dword ptr [NtClose]
 
+    /* 34. Creating a second D: link fails with a name collision. */
+    STEP 34
+    PUSHI cdname
+    PUSHI dname
+    call dword ptr [IoCreateSymbolicLink]
+    cmp eax, 0xC0000035                 /* STATUS_OBJECT_NAME_COLLISION */
+    jne fail
+    /* 35. A new link succeeds once. */
+    STEP 35
+    PUSHI cdname
+    PUSHI qname
+    call dword ptr [IoCreateSymbolicLink]
+    test eax, eax
+    jnz fail
+    PUSHI cdname
+    PUSHI qname
+    call dword ptr [IoCreateSymbolicLink]
+    cmp eax, 0xC0000035
+    jne fail
+
     PUSHI passed
     call dword ptr [DbgPrint]
     add esp, 4
@@ -774,6 +793,12 @@ fattr: .long 0, fname, 0x40         /* OBJ_CASE_INSENSITIVE */
 fhandle: .long 0
 fiosb: .long 0, 0
 foffset: .long 0, 0
+dname: .word 6, 7
+    .long dstr
+dstr: .asciz "\\??\\D:"
+qname: .word 6, 7
+    .long qstr
+qstr: .asciz "\\??\\Q:"
 fmt: .asciz "%d-%s"
 ok: .asciz "ok"
 passed: .asciz "k85: all passed"

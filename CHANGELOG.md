@@ -7,6 +7,9 @@
   are removed; older Android network choices migrate to On.
 - **System link** — Consoles negotiate distinct IP addresses before DHCP
   leasing. An address conflict discovered afterward is reported.
+- **Launch folders** (#189) — Games launched from a disc subfolder now use
+  that folder as `D:`. This fixes asset loading for the games on the
+  Star Wars - The Clone Wars + Tetris Worlds disc.
 
 ## linux-v0.23.0 (Linux, aarch64 and x86-64, and Android)
 
