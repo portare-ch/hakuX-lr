@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Network** — A single Off/On option controls Xbox Live (Insignia) and
+  system link together. The separate LAN, Xbox Live and XLink Kai settings
+  are removed; older Android network choices migrate to On.
+- **System link** — Consoles negotiate distinct IP addresses before DHCP
+  leasing. An address conflict discovered afterward is reported.
+
 ## linux-v0.23.0 (Linux, aarch64 and x86-64, and Android)
 
 A compatibility-focused release with fixes for Xbox audio, rendering,

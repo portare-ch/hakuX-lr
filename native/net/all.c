@@ -1,0 +1,75 @@
+/*
+ * Combined network backend (net=on).
+ *
+ * Gateway and DNS frames go to NAT; frames for other consoles go to LAN.
+ * Broadcast and multicast traffic reaches both. Each console keeps its
+ * own NAT gateway while sharing system-link traffic over the LAN.
+ */
+#include "native/net/net.h"
+#include "native/core/nc.h"
+
+#include <poll.h>
+
+static int g_nat_fds;                   /* this round's: the NAT's first, then the LAN's */
+
+static bool all_init(void)
+{
+    nc_net_nat_shared(true);
+    if (!nc_net_nat.init()) {
+        nc_net_nat_shared(false);
+        return false;
+    }
+    if (!nc_net_lan.init()) {
+        nc_net_nat.close();
+        nc_net_nat_shared(false);
+        return false;
+    }
+    return true;
+}
+
+/* Both, as the stop closes only the backend it started (net.c). */
+static void all_close(void)
+{
+    nc_net_nat.close();
+    nc_net_lan.close();
+    nc_net_nat_shared(false);
+}
+
+static void all_input(const uint8_t *frame, size_t len)
+{
+    if (len < 14) {
+        return;
+    }
+    if (frame[0] & 1) {                 /* broadcast, multicast */
+        nc_net_nat.input(frame, len);
+        nc_net_lan.input(frame, len);
+    } else if (nc_net_nat_address(frame)) {
+        nc_net_nat.input(frame, len);
+    } else {
+        nc_net_lan.input(frame, len);
+    }
+}
+
+static int all_fill(struct pollfd *fds, int max, int *timeout_ms)
+{
+    g_nat_fds = nc_net_nat.fill(fds, max - 1, timeout_ms);
+    int lan_timeout = *timeout_ms;
+    const int n = nc_net_lan.fill(fds + g_nat_fds, max - g_nat_fds, &lan_timeout);
+    *timeout_ms = lan_timeout < *timeout_ms ? lan_timeout : *timeout_ms;
+    return g_nat_fds + n;
+}
+
+static void all_poll(struct pollfd *fds, int n)
+{
+    nc_net_nat.poll(fds, g_nat_fds);
+    nc_net_lan.poll(fds + g_nat_fds, n - g_nat_fds);
+}
+
+const NcNetBackend nc_net_all = {
+    .name = "all",
+    .init = all_init,
+    .input = all_input,
+    .fill = all_fill,
+    .poll = all_poll,
+    .close = all_close,
+};

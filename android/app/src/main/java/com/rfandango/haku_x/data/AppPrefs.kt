@@ -137,22 +137,18 @@ class AppPrefs(context: Context) {
     set(value) = sp.edit { putString(KEY_AV_PACK, value) }
 
   /**
-   * The console's network: off, lan (system link with consoles on this network), kai (XLink Kai) or
-   * insignia (the Internet through NAT: Xbox Live via Insignia).
+   * The console's network cable: plugged in (the Internet, for Xbox Live through Insignia, and system link with
+   * the consoles on this network, at once) or not. Stored as "on" or "off"; a connection an earlier version chose
+   * (lan, kai, insignia) reads as plugged in.
    */
-  var networkMode: String
-    get() = sp.getString(KEY_NETWORK, NET_OFF) ?: NET_OFF
-    set(value) = sp.edit { putString(KEY_NETWORK, value) }
+  var networkOn: Boolean
+    get() = (sp.getString(KEY_NETWORK, NET_OFF) ?: NET_OFF) != NET_OFF
+    set(value) = sp.edit { putString(KEY_NETWORK, if (value) NET_ON else NET_OFF) }
 
   /** LAN: consoles reached directly as well (another subnet, a VPN): "ip[:port], ...". */
   var lanPeers: String
     get() = sp.getString(KEY_LAN_PEERS, "") ?: ""
     set(value) = sp.edit { putString(KEY_LAN_PEERS, value) }
-
-  /** XLink Kai: the engine's address on this network, "ip[:port]". */
-  var kaiEngine: String
-    get() = sp.getString(KEY_KAI_ENGINE, "") ?: ""
-    set(value) = sp.edit { putString(KEY_KAI_ENGINE, value) }
 
   /** Insignia: the DNS server the console is given, "" Insignia's own (another: insigniaDNS on this network). */
   var insigniaDns: String
@@ -257,15 +253,12 @@ class AppPrefs(context: Context) {
     const val AV_SVIDEO = "svideo"
     private const val KEY_NETWORK = "console_network"
     private const val KEY_LAN_PEERS = "network_lan_peers"
-    private const val KEY_KAI_ENGINE = "network_kai_engine"
     private const val KEY_INSIGNIA_DNS = "network_insignia_dns"
     private const val KEY_INSIGNIA_REGISTERED = "insignia_registered"
     private const val KEY_INSIGNIA_SETUP_URI = "insignia_setup_uri"
     private const val KEY_INSIGNIA_RESUME = "insignia_wizard_resume"
-    const val NET_OFF = "off"
-    const val NET_LAN = "lan"
-    const val NET_KAI = "kai"
-    const val NET_INSIGNIA = "insignia"
+    private const val NET_OFF = "off"
+    private const val NET_ON = "on"
     /** Insignia's DNS server (insignia.live/connect): the console's primary. */
     const val INSIGNIA_DNS = "46.101.64.175"
     private const val KEY_LANGUAGE = "console_language"

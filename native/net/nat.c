@@ -1,26 +1,14 @@
 /*
- * hakuX native core — the NAT backend (net=nat): the Internet through a
- * user-mode TCP/IP stack (libslirp, as xemu's NAT), so the console reaches
- * Xbox Live through Insignia with no host privileges.
+ * NAT backend using libslirp for Internet and Insignia access.
  *
- * The console's network is 10.0.2.0/24: the gateway is 10.0.2.2 and DHCP
- * leases from 10.0.2.15. The DNS server DHCP gives is the configured one
- * itself (dns=, Insignia's by default), outside that network: the queries
- * leave as any UDP does, so libslirp never looks for the host's resolver
- * (Android has no /etc/resolv.conf) and the console needs no settings. One
- * host socket serves each port the console sends from, whoever it sends to,
- * and takes datagrams from anyone (Xbox Live's peer-to-peer traffic on UDP
- * 3074). The phone's own loopback stays out of reach.
+ * The guest uses 10.0.2.0/24 with gateway 10.0.2.2. NAT-only mode keeps
+ * the legacy 10.0.2.15 lease. Combined mode chooses 10.0.2.16–215 from
+ * the console MAC and probes the LAN before leasing it, retrying taken
+ * addresses. Frames are held during the probe.
  *
- * Forward the console's UDP 3074 through the host's natport (default 3074).
- * libslirp reuses this socket for outgoing traffic, keeping the source port
- * stable. With a router forward (manual or UPnP, upnp.c), peers can reach
- * the console before it sends to them. If the host port is busy, outgoing
- * traffic falls back to a free port.
- *
- * Everything runs on the network thread: libslirp's descriptors join its
- * poll (fill/poll), its timers are checked there, and the guest's frames are
- * handed to it there (input).
+ * DHCP supplies the configured DNS server. UDP 3074 is forwarded through
+ * natport (default 3074), with optional router forwarding via UPnP.
+ * All libslirp I/O and timers run on the network thread.
  */
 #include "native/net/net.h"
 #include "native/core/nc.h"
@@ -30,12 +18,16 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <poll.h>
+#include <stdio.h>
 #include <string.h>
 #include <time.h>
 
 #define INSIGNIA_DNS "46.101.64.175"
 #define XBOX_LIVE_PORT 3074
 #define TIMERS 4
+#define PROBE_MS 300                    /* the LAN's time to answer before the first lease */
+#define PROBES 6                        /* rounds at most: then the last address picked */
+#define HELD 8                          /* the console's frames held meanwhile */
 
 typedef struct Timer {
     bool used, armed;
@@ -50,6 +42,14 @@ static struct {
     struct pollfd *fds;                 /* this round's, while fill and poll run */
     int nfds, maxfds;
     uint64_t overflow;                  /* descriptors that didn't fit */
+    uint8_t mac[6];                     /* the console's */
+    uint32_t lease;                     /* its address (network order) */
+    uint32_t candidate;                 /* the address probed for */
+    int64_t probe_until;                /* ms: the first lease waits for the LAN; 0: none */
+    unsigned probes;                    /* the rounds so far */
+    uint8_t held[HELD][NC_NET_FRAME_MAX];
+    size_t held_len[HELD];
+    unsigned nheld;
 } g_nat;
 
 static int64_t now_ns(void)
@@ -148,13 +148,58 @@ static void nat_forward(const NcNetConfig *c, struct in_addr guest)
     }
 }
 
-static bool nat_init(void)
+static bool g_nat_shared;               /* beside the LAN (net=on): a MAC-derived lease */
+
+void nc_net_nat_shared(bool shared)
 {
-    const NcNetConfig *c = nc_net_config();
+    g_nat_shared = shared;
+}
+
+bool nc_net_nat_address(const uint8_t mac[6])
+{
+    return mac[0] == 0x52 && mac[1] == 0x55;   /* libslirp's: 52:55 and the address */
+}
+
+uint32_t nc_net_nat_lease(void)
+{
+    return __atomic_load_n(&g_nat.lease, __ATOMIC_ACQUIRE);
+}
+
+static int64_t now_ms(void)
+{
+    return now_ns() / 1000000;
+}
+
+/* Beside the LAN, the console's address: from its MAC's hash in
+ * 10.0.2.16-215, the first one on from there no other console keeps. */
+static uint32_t nat_pick(const uint8_t mac[6])
+{
+    const uint32_t h = ((uint32_t)mac[3] * 31u + mac[4]) * 31u + mac[5];
+    for (unsigned i = 0; i < 200; i++) {
+        const uint32_t ip = htonl(0x0A000200u | (16 + (h + i) % 200));
+        if (!nc_net_lan_taken(mac, ip)) {
+            return ip;
+        }
+    }
+    return htonl(0x0A000200u | (16 + h % 200));     /* all taken: the hash's */
+}
+
+/* The DNS server DHCP gives the console: dns=, or Insignia's. */
+static struct in_addr nat_dns(const NcNetConfig *c)
+{
     struct in_addr dns = { .s_addr = c->dns[0] };
     if (!dns.s_addr) {
         inet_pton(AF_INET, INSIGNIA_DNS, &dns);
     }
+    return dns;
+}
+
+/* The stack, for the console with this MAC (its frames' source), leasing
+ * it ip. */
+static bool nat_start(const uint8_t mac[6], uint32_t ip)
+{
+    const NcNetConfig *c = nc_net_config();
+    const struct in_addr dns = nat_dns(c);
     SlirpConfig cfg = {
         .version = 4,
         .in_enabled = true,
@@ -166,7 +211,10 @@ static bool nat_init(void)
     inet_pton(AF_INET, "10.0.2.0", &cfg.vnetwork);
     inet_pton(AF_INET, "255.255.255.0", &cfg.vnetmask);
     inet_pton(AF_INET, "10.0.2.2", &cfg.vhost);
-    inet_pton(AF_INET, "10.0.2.15", &cfg.vdhcp_start);
+    /* the console's own address: libslirp leases from vdhcp_start */
+    cfg.vdhcp_start.s_addr = ip;
+    char start[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &cfg.vdhcp_start, start, sizeof(start));
     g_nat.slirp = slirp_new(&cfg, &g_cb, NULL);
     if (!g_nat.slirp) {
         nc_log("hakuX-native-net", "nat: libslirp didn't start");
@@ -174,13 +222,91 @@ static bool nat_init(void)
     }
     char b[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &dns, b, sizeof(b));
-    nc_log("hakuX-native-net", "nat: libslirp %s, 10.0.2.0/24, DNS %s", slirp_version_string(), b);
+    nc_log("hakuX-native-net", "nat: libslirp %s, 10.0.2.0/24, the console's address %s, DNS %s",
+           slirp_version_string(), start, b);
+    memcpy(g_nat.mac, mac, 6);
+    __atomic_store_n(&g_nat.lease, ip, __ATOMIC_RELEASE);
+    if (g_nat_shared) {
+        nc_net_lan_claim(mac, ip, true);
+    }
     nat_forward(c, cfg.vdhcp_start);
+    return true;
+}
+
+/* A probe round: claim ip, ask the LAN who has it, wait PROBE_MS. */
+static void nat_probe_round(uint32_t ip)
+{
+    g_nat.candidate = ip;
+    g_nat.probes++;
+    char a[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &ip, a, sizeof(a));
+    nc_log("hakuX-native-net", "nat: asking the LAN who has %s (round %u)", a, g_nat.probes);
+    nc_net_lan_claim(g_nat.mac, ip, false);
+    nc_net_lan_probe(ip);
+    g_nat.probe_until = now_ms() + PROBE_MS;
+}
+
+/* Beside the LAN, the first frame: a probe round for the address the MAC
+ * picks; the console's frames held meanwhile. */
+static void nat_probe(const uint8_t *frame, size_t len)
+{
+    if (!g_nat.probe_until) {
+        memcpy(g_nat.mac, frame + 6, 6);
+        g_nat.probes = 0;
+        nat_probe_round(nat_pick(g_nat.mac));
+    }
+    if (g_nat.nheld < HELD && len <= NC_NET_FRAME_MAX) {
+        memcpy(g_nat.held[g_nat.nheld], frame, len);
+        g_nat.held_len[g_nat.nheld++] = len;
+    }
+}
+
+/* A round is up: another console keeps the candidate, so a round for the
+ * next free one (PROBES at most); else lease it and give the stack the
+ * frames held. */
+static void nat_probed(void)
+{
+    uint32_t ip = g_nat.candidate;
+    if (nc_net_lan_taken(g_nat.mac, ip)) {
+        ip = nat_pick(g_nat.mac);
+        if (g_nat.probes < PROBES && ip != g_nat.candidate) {
+            nat_probe_round(ip);
+            return;
+        }
+    }
+    g_nat.probe_until = 0;
+    if (!nat_start(g_nat.mac, ip)) {
+        g_nat.nheld = 0;
+        return;
+    }
+    for (unsigned i = 0; i < g_nat.nheld; i++) {
+        slirp_input(g_nat.slirp, g_nat.held[i], (int)g_nat.held_len[i]);
+    }
+    g_nat.nheld = 0;
+}
+
+static bool nat_init(void)
+{
+    /* the stack starts with the console's first frame, which carries its MAC */
+    const struct in_addr dns = nat_dns(nc_net_config());
+    char b[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &dns, b, sizeof(b));
+    nc_log("hakuX-native-net", "nat: DNS %s, the stack starts with the console's first frame", b);
     return true;
 }
 
 static void nat_input(const uint8_t *frame, size_t len)
 {
+    if (len < 14) {
+        return;
+    }
+    if (!g_nat.slirp && g_nat_shared) {
+        nat_probe(frame, len);
+        return;
+    }
+    if (!g_nat.slirp && !nat_start(frame + 6, htonl(0x0A00020Fu))) {     /* alone: 10.0.2.15 */
+        return;
+    }
     slirp_input(g_nat.slirp, frame, (int)len);
 }
 
@@ -211,6 +337,13 @@ static int get_revents(int idx, void *opaque)
 
 static int nat_fill(struct pollfd *fds, int max, int *timeout_ms)
 {
+    if (g_nat.probe_until) {
+        const int64_t left = g_nat.probe_until - now_ms();
+        *timeout_ms = left <= 0 ? 0 : left < *timeout_ms ? (int)left : *timeout_ms;
+    }
+    if (!g_nat.slirp) {
+        return 0;
+    }
     g_nat.fds = fds;
     g_nat.maxfds = max;
     g_nat.nfds = 0;
@@ -230,6 +363,13 @@ static int nat_fill(struct pollfd *fds, int max, int *timeout_ms)
 
 static void nat_poll(struct pollfd *fds, int n)
 {
+    if (g_nat.probe_until && now_ms() >= g_nat.probe_until) {
+        nat_probed();
+        return;                         /* its descriptors join the next round */
+    }
+    if (!g_nat.slirp) {
+        return;
+    }
     g_nat.fds = fds;
     g_nat.nfds = n;
     slirp_pollfds_poll(g_nat.slirp, 0, get_revents, NULL);

@@ -1,23 +1,13 @@
 /*
- * hakuX native core — the network behind the emulated NIC (native/dev/nvnet.c).
+ * Emulated Xbox Ethernet network.
  *
- * The NIC hands whole Ethernet frames to the network and takes the frames it
- * received; in between, one host thread runs the backend:
+ *   off  Link down.
+ *   on   NAT for Xbox Live/Insignia and LAN for system link together.
+ *   nat  NAT only (testing).
+ *   lan  LAN only (testing).
  *
- *   off  no network: the link is down (titles see no cable)
- *   nat  a user-mode TCP/IP stack and NAT (libslirp): DHCP, the Internet;
- *        Insignia DNS via DHCP, UDP 3074 forwarding and UPnP for Xbox Live
- *   lan  Ethernet frames in UDP datagrams among the consoles on the local
- *        network (system link): broadcast to the subnet, unicast once a MAC
- *        is known; xemu's UDP tunnel carries the same datagrams, and peers
- *        named directly reach consoles on a VPN (ZeroTier, Tailscale)
- *   kai  system link over the Internet through XLink Kai: frames to and from
- *        a Kai engine on the local network (a PC, a Raspberry Pi), the
- *        emulator protocol Dolphin speaks to it
- *
- * The network thread never touches guest memory: frames go through two
- * queues, guest to network (nc_net_send, any thread) and network to guest
- * (nc_net_recv, the NIC's thread).
+ * The network thread exchanges whole Ethernet frames with the NIC through
+ * queues; it does not access guest memory.
  */
 #ifndef NATIVE_NET_NET_H
 #define NATIVE_NET_NET_H
@@ -30,12 +20,12 @@
 extern "C" {
 #endif
 
-typedef enum NcNetMode { NC_NET_OFF, NC_NET_NAT, NC_NET_LAN, NC_NET_KAI } NcNetMode;
+typedef enum NcNetMode { NC_NET_OFF, NC_NET_ON, NC_NET_NAT, NC_NET_LAN } NcNetMode;
 
 #define NC_NET_FRAME_MAX 1536           /* an Ethernet frame, header included, no FCS */
 
 /* Options (native/core/options.c), before the boot:
- *   net=off|nat|lan|kai
+ *   net=off|on              the cable (nat or lan: that half alone, for tests)
  *   dns=A.B.C.D[,A.B.C.D]   nat: the DNS servers DHCP gives the guest
  *   natport=N               nat: host UDP port for the console's 3074,
  *                           used for outgoing and unsolicited incoming
@@ -47,11 +37,11 @@ typedef enum NcNetMode { NC_NET_OFF, NC_NET_NAT, NC_NET_LAN, NC_NET_KAI } NcNetM
  *   upnplease=S             nat: lease in seconds (0-604800), renewed
  *                           halfway through; default 3600, 0 is permanent
  *   lanport=N               lan: the UDP port (all consoles the same)
- *   lanbcast=A.B.C.D[/BITS] lan: the local network's broadcast address
- *                           (and its prefix: who is outside it)
+ *   lanbcast=A.B.C.D[/BITS][,...] lan: the local networks' broadcast
+ *                           addresses (and prefixes: who is outside them),
+ *                           up to NC_NET_BCASTS (Wi-Fi and Wi-Fi Direct)
  *   lanpeers=IP[:PORT],...  lan: consoles also reached directly (another
  *                           subnet, a tunnel's far end)
- *   kai=HOST[:PORT]         kai: the XLink Kai engine (port 34523)
  *   pcap=PATH               debug: every frame sent and received, to a
  *                           capture file (Wireshark's)
  * True if arg is one of them. */
@@ -86,7 +76,7 @@ void nc_net_wait_rx(uint64_t timeout_ns);
 void nc_net_twin(uint32_t ip);
 bool nc_net_take_twin(char *addr, size_t len);
 
-/* ---- backends (native/net/nat.c, lan.c, kai.c) ---- */
+/* ---- backends (native/net/nat.c, lan.c, all.c) ---- */
 
 struct pollfd;
 typedef struct NcNetBackend {
@@ -102,10 +92,37 @@ typedef struct NcNetBackend {
     void (*poll)(struct pollfd *fds, int n);
 } NcNetBackend;
 
-extern const NcNetBackend nc_net_nat, nc_net_lan, nc_net_kai;
+extern const NcNetBackend nc_net_nat, nc_net_lan, nc_net_all;
+
+/* nat.c: whether a frame's destination is the NAT's own (its gateway's and
+ * DNS's addresses, 52:55:...): all.c sends those to it alone. */
+bool nc_net_nat_address(const uint8_t mac[6]);
+/* nat.c: run beside the LAN (all.c), before its init: each console leases
+ * a MAC-derived address, 10.0.2.16-215; alone, NAT keeps 10.0.2.15, where
+ * the UDP 3074 forward and consoles set up by hand expect it. */
+void nc_net_nat_shared(bool shared);
+/* nat.c: the address the console is leased (network order), 0 before. */
+uint32_t nc_net_nat_lease(void);
+
+/* lan.c, beside the NAT (net=on), mac the console's (if the NIC hasn't
+ * said yet): the address the NAT is about to lease or has leased (leased),
+ * which the hellos claim; whether another console keeps ip against this
+ * one (heard within the stations' TTL: it uses ip, by its frames or a
+ * leased claim; it isn't hakuX's, so can't move; or it is about to lease
+ * ip too with a lower MAC); and an ARP probe for ip. */
+void nc_net_lan_claim(const uint8_t mac[6], uint32_t ip, bool leased);
+bool nc_net_lan_taken(const uint8_t mac[6], uint32_t ip);
+void nc_net_lan_probe(uint32_t ip);
+
+/* lan.c: another console uses the console's leased address (the front end
+ * tells the user, as with a twin); taken once. */
+void nc_net_conflict(uint32_t ip);
+bool nc_net_take_conflict(char *addr, size_t len);
 
 /* A backend, on the network thread: a frame for the guest. */
 void nc_net_deliver(const uint8_t *frame, size_t len);
+
+#define NC_NET_BCASTS 4
 
 /* Backends' configuration (the options). */
 typedef struct NcNetConfig {
@@ -116,14 +133,12 @@ typedef struct NcNetConfig {
     uint16_t upnp_port;
     unsigned upnp_lease;                /* seconds, 0: permanent */
     uint16_t lan_port;
-    uint32_t lan_bcast;                 /* network order, 0: 255.255.255.255 */
-    uint32_t lan_mask;                  /* network order, 0: not known */
+    unsigned nbcast;                    /* lan's networks, 0: 255.255.255.255 */
+    uint32_t lan_bcast[NC_NET_BCASTS];  /* network order */
+    uint32_t lan_mask[NC_NET_BCASTS];   /* network order, 0: not known */
     unsigned npeers;
     uint32_t peer_ip[8];                /* network order */
     uint16_t peer_port[8];
-    char kai_host[64];                  /* as given, "" none */
-    uint32_t kai_ip;                    /* network order, 0: kai_host is a name */
-    uint16_t kai_port;
 } NcNetConfig;
 const NcNetConfig *nc_net_config(void);
 

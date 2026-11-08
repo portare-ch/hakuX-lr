@@ -193,7 +193,7 @@ except Crop Overscan, Rumble and Frame Pacing, which update immediately:
 | `hakux_language` | `auto` (RetroArch's), `english`, `japanese`, `german`, `french`, `spanish`, `italian`, `korean`, `chinese`, `portuguese` | `auto` |
 | `hakux_video_region` | `auto` (the game's region), `ntsc-m`, `ntsc-j`, `pal` | `auto` |
 | `hakux_rumble` | `disabled`, `enabled` (controller vibration) | `disabled` |
-| `hakux_network` | `disabled` (no cable), `lan` (system link), `insignia` (Xbox Live through Insignia via NAT) | `disabled` |
+| `hakux_network` | `disabled` (no cable), `lan` (system link), `insignia` (Xbox Live through Insignia via NAT), `all` (both at once) | `disabled` |
 | `hakux_communicator` | `disabled`, `enabled` (an Xbox Live Communicator in player 1's controller; experimental) | `disabled` |
 | `hakux_mic_sensitivity` | `medium`, `low`, `high`, `off` (the Communicator's noise gate: -38, -30 or -46 dBFS, or none) | `medium` |
 | `hakux_audio_resampler` | `sinc` (higher quality, 32-tap filter; NEON on ARM64, AVX2+FMA or SSE2 on x86-64), `linear` (less CPU, softer high frequencies) | `sinc` |
@@ -224,16 +224,18 @@ output, 3 dB down in each channel. Voice with another player is untested.
 `NC_TRACE_MIC=1` logs the gate's decisions, and `NC_MIC_DUMP=<file>` saves the
 microphone's first 60 seconds as raw 16-bit mono.
 
-Insignia mode uses upstream's NAT backend (`native/net/nat.c`, libslirp).
-The console gets 10.0.2.15 via DHCP and uses Insignia's DNS server,
+With **Network** on, the console has upstream's NAT backend
+(`native/net/nat.c`, libslirp) for Xbox Live and the LAN backend for system link
+at once (`native/net/all.c`), as one cable on a home network. DHCP gives the
+console an address from its MAC, 10.0.2.16-215, one no other console on the
+network keeps (`native/net/lan.c`), and Insignia's DNS server,
 46.101.64.175. If your provider blocks that server, put an insigniaDNS
 server's address in `insignia-dns.txt` in the save directory, using the same
 format as `lan-peers.txt`. Only the first address is used. To boot the Xbox
 dashboard, copy your `xboxdash.xbe` and its folders into `hdd/Partition2/`
 under RetroArch's save directory,
 then choose **Load Core → Microsoft - Xbox (hakuX) → Start Core** without
-loading content. Enable **Network → Xbox Live (Insignia)** for its Xbox Live
-pages. Register the console with Insignia's Setup Assistant first.
+loading content. Turn **Network** on for its Xbox Live pages. Register the console with Insignia's Setup Assistant first.
 Dashboard navigation in real RetroArch and end-to-end Insignia account
 setup and sign-in still need device validation.
 

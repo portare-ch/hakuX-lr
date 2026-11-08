@@ -403,8 +403,8 @@ def main():
         # failed backend starts and failed boots must release their resources.
         for network, marker in (
                 ('net=lan lanport=43075 lanbcast=127.0.0.1', 'lan: started'),
-                ('net=kai kai=127.0.0.1:43076', 'kai: started'),
-                (f'net=nat {NAT_TEST}', 'nat: UDP 43080 forwarded')):
+                (f'net=nat {NAT_TEST}', 'nat: DNS 46.101.64.175'),
+                (f'net=on lanport=43078 lanbcast=127.0.0.1 {NAT_TEST}', 'all: started')):
             cycles([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'],
                    dict(os.environ, NC_NET=network), 5, marker)
         # a backend that fails to start (LAN's port taken, without
@@ -416,37 +416,35 @@ def main():
         cycles([args.harness, args.core, root / 'halt.iso', 60, root / 'saves'],
                dict(os.environ, NC_NET='net=lan lanport=43075 lanbcast=127.0.0.1', NC_BOOT_FAIL_AT='disc'),
                5, 'boot: failing after disc')
-        # The Network option: off by default (no cable); LAN on the local
-        # network's broadcast, with the consoles lan-peers.txt in the save
-        # directory names (comments, commas, spaces and lines).
+        # The Network option, the console's cable: off by default. On, the
+        # NAT and the LAN behind one switch (native/net/all.c): Insignia's
+        # DNS server, or the first address insignia-dns.txt in the save
+        # directory names (an insigniaDNS server; NAT gives the console
+        # one), never a word that isn't one; the LAN on the local network's
+        # broadcast, with the consoles lan-peers.txt names (comments, commas,
+        # spaces and lines). The NAT's stack and port forward start with the
+        # console's first frame, which spin.iso never sends (nat-smoke does).
         run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
             ('network off', 'network off: the NIC has no link', 'console timing on', 'ran 30 frames'))
+        insignia = dict(os.environ, HARNESS_OPTIONS='hakux_network=enabled', NC_NET=NAT_TEST)
         peers = root / 'saves' / 'lan-peers.txt'
         peers.write_text('# other consoles\n127.0.0.1:43077, 10.0.0.5\n\n10.0.0.6  # over a VPN\n')
         run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
-            ('network lan', 'consoles named: 127.0.0.1:43077,10.0.0.5,10.0.0.6', 'lan: UDP port 3075',
-             '3 peers named', 'lan: started', 'ran 30 frames'),
-            dict(os.environ, HARNESS_OPTIONS='hakux_network=lan'))
-        peers.unlink()
-        # Xbox Live (Insignia): NAT with Insignia's DNS server, or the first
-        # address insignia-dns.txt in the save directory names (an
-        # insigniaDNS server; NAT gives the console one), never a word that
-        # isn't one
-        insignia = dict(os.environ, HARNESS_OPTIONS='hakux_network=insignia', NC_NET=NAT_TEST)
-        run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
-            ('network insignia', 'Xbox Live through Insignia (NAT), DNS 46.101.64.175',
-             'nat: libslirp 4.7.0, 10.0.2.0/24, DNS 46.101.64.175', "nat: UDP 43080 forwarded to the console's 3074",
-             'nat: started', 'ran 30 frames'),
+            ('network on', 'network: on (Xbox Live through Insignia and system link), DNS 46.101.64.175',
+             "nat: DNS 46.101.64.175, the stack starts with the console's first frame",
+             'consoles named: 127.0.0.1:43077,10.0.0.5,10.0.0.6', 'lan: UDP port 3075', '3 peers named',
+             'all: started', 'ran 30 frames'),
             insignia)
+        peers.unlink()
         dns = root / 'saves' / 'insignia-dns.txt'
         dns.write_text('# insigniaDNS at home\n192.168.1.20, 192.168.1.21\n192.168.1.22\n')
         run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
-            ('DNS 192.168.1.20 (insignia-dns.txt)', 'nat: libslirp 4.7.0, 10.0.2.0/24, DNS 192.168.1.20',
-             'nat: started', 'ran 30 frames'),
+            ('DNS 192.168.1.20 (insignia-dns.txt)', 'nat: DNS 192.168.1.20',
+             'all: started', 'ran 30 frames'),
             insignia)
         dns.write_text('insignia.example\n')
         run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
-            ('names no IPv4 address (insignia.example)', 'DNS 46.101.64.175', 'nat: started', 'ran 30 frames'),
+            ('names no IPv4 address (insignia.example)', 'DNS 46.101.64.175', 'all: started', 'ran 30 frames'),
             insignia)
         dns.unlink()
         # Log only Insignia accounts from the config area, as the app does.
@@ -475,14 +473,14 @@ def main():
             ("The Xbox dashboard isn't installed: copy its files (xboxdash.xbe and its folders) to", 'load: refused'))
         (c_drive / 'XBOXDASH.XBE').write_bytes(xbe_of(root / 'halt.iso'))     # case-insensitive lookup
         run([args.harness, args.core, '-', 600, root / 'saves'], 0,
-            ('loaded the dashboard (no content)', 'message: Xbox Live in the dashboard needs Network set to Xbox Live '
-             '(Insignia)', 'guest executed HLT', 'the core asked to shut down', 'unload: the core stopped in'))
+            ('loaded the dashboard (no content)', 'message: Xbox Live in the dashboard needs Network on',
+             'guest executed HLT', 'the core asked to shut down', 'unload: the core stopped in'))
         (c_drive / 'XBOXDASH.XBE').unlink()
         # Dashboard users need no prompt to create an Insignia account.
         (c_drive / 'xboxdash.xbe').write_bytes(xbe_of(root / 'spin.iso'))
         run_without([args.harness, args.core, '-', 30, root / 'saves'],
-                    ('network: Xbox Live through Insignia', 'network: no Insignia account on this console',
-                     'ran 30 frames'), ('No Insignia account', 'needs Network set'), insignia)
+                    ('network: on (Xbox Live through Insignia', 'network: no Insignia account on this console',
+                     'ran 30 frames'), ('No Insignia account', 'needs Network on'), insignia)
         # Reset, video driver rebuild and repeated loads reboot the dashboard
         # without opening a disc.
         vk = dict(os.environ, HARNESS_VULKAN='1')

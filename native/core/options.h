@@ -18,8 +18,8 @@
  *   lang=N           its language (XC_LANGUAGE: 1 English ... 9 Portuguese)
  *   clock=MS         its clock's distance from the phone's time
  *   tz=MINUTES       its time zone, east of UTC
- *   net=off|nat|lan|kai  its network (native/net/net.h); with it dns=,
- *                    lanport=, lanbcast=, lanpeers=, kai=
+ *   net=off|on       its network cable (native/net/net.h); with it dns=,
+ *                    lanport=, lanbcast=, lanpeers=
  *
  * The front end's own (the picture's shape and filters, the input, the
  * Vulkan driver) stay with it.

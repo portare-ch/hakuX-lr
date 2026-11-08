@@ -18,29 +18,25 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.rfandango.haku_x.R
 import com.rfandango.haku_x.data.AppPrefs
-import com.rfandango.haku_x.ui.common.ChoiceDialog
 import com.rfandango.haku_x.ui.common.Hint
 import com.rfandango.haku_x.ui.common.Section
+import com.rfandango.haku_x.ui.common.SwitchItem
 
 /**
- * The console's network (native/net): off; Xbox Live through Insignia (the Internet through NAT, its DNS
- * server or an insigniaDNS one); system link with the consoles on this network (LAN), others reached
- * directly too (another subnet, a VPN); or system link over the Internet through an XLink Kai engine on
- * this network. Read at the next game start.
+ * The console's network cable (native/net), as on a real console: plugged in, Xbox Live through Insignia (the
+ * Internet through NAT, its DNS server or an insigniaDNS one) and system link with the consoles on this network
+ * at once, others reached directly too (another subnet, a VPN); or not. Read at the next game start.
  */
 @Composable
 fun NetworkSettings(prefs: AppPrefs, onInsignia: () -> Unit) {
-  var mode by remember { mutableStateOf(prefs.networkMode) }
+  var on by remember { mutableStateOf(prefs.networkOn) }
   var peers by remember { mutableStateOf(prefs.lanPeers) }
-  var kai by remember { mutableStateOf(prefs.kaiEngine) }
   var dns by remember { mutableStateOf(prefs.insigniaDns) }
-  var modeDialog by remember { mutableStateOf(false) }
   var peersDialog by remember { mutableStateOf(false) }
-  var kaiDialog by remember { mutableStateOf(false) }
   var dnsDialog by remember { mutableStateOf(false) }
-  // back from Insignia's setup, which may have chosen the connection
+  // back from Insignia's setup, which may have plugged the cable in
   LifecycleResumeEffect(Unit) {
-    mode = prefs.networkMode
+    on = prefs.networkOn
     onPauseOrDispose {}
   }
 
@@ -52,14 +48,14 @@ fun NetworkSettings(prefs: AppPrefs, onInsignia: () -> Unit) {
     supportingContent = { Text(stringResource(R.string.insignia_settings_desc)) },
     modifier = Modifier.clickable(onClick = onInsignia),
   )
-  ListItem(
-    headlineContent = { Text(stringResource(R.string.settings_network_mode)) },
-    supportingContent = {
-      Text(stringResource(modeLabel(mode)) + ". " + stringResource(R.string.settings_applies_next_start))
-    },
-    modifier = Modifier.clickable { modeDialog = true },
+  SwitchItem(
+    title = stringResource(R.string.settings_network_cable),
+    summary = stringResource(R.string.settings_network_cable_desc) + " " +
+      stringResource(R.string.settings_applies_next_start),
+    checked = on,
+    onChange = { on = it; prefs.networkOn = it },
   )
-  if (mode == AppPrefs.NET_INSIGNIA) {
+  if (on) {
     ListItem(
       headlineContent = { Text(stringResource(R.string.settings_network_insignia_dns)) },
       supportingContent = {
@@ -68,8 +64,6 @@ fun NetworkSettings(prefs: AppPrefs, onInsignia: () -> Unit) {
       },
       modifier = Modifier.clickable { dnsDialog = true },
     )
-  }
-  if (mode == AppPrefs.NET_LAN) {
     ListItem(
       headlineContent = { Text(stringResource(R.string.settings_network_peers)) },
       supportingContent = {
@@ -79,26 +73,7 @@ fun NetworkSettings(prefs: AppPrefs, onInsignia: () -> Unit) {
       modifier = Modifier.clickable { peersDialog = true },
     )
   }
-  if (mode == AppPrefs.NET_KAI) {
-    ListItem(
-      headlineContent = { Text(stringResource(R.string.settings_network_kai)) },
-      supportingContent = {
-        Text(kai.ifBlank { stringResource(R.string.settings_network_kai_none) } + ". " +
-          stringResource(R.string.settings_network_kai_desc))
-      },
-      modifier = Modifier.clickable { kaiDialog = true },
-    )
-  }
 
-  if (modeDialog) {
-    ChoiceDialog(
-      title = stringResource(R.string.settings_network_mode),
-      options = MODES.map { it to stringResource(modeLabel(it)) },
-      current = mode,
-      onPick = { mode = it; prefs.networkMode = it; modeDialog = false },
-      onDismiss = { modeDialog = false },
-    )
-  }
   if (peersDialog) {
     TextDialog(
       title = stringResource(R.string.settings_network_peers),
@@ -106,15 +81,6 @@ fun NetworkSettings(prefs: AppPrefs, onInsignia: () -> Unit) {
       value = peers,
       onDone = { peers = it.trim(); prefs.lanPeers = peers; peersDialog = false },
       onDismiss = { peersDialog = false },
-    )
-  }
-  if (kaiDialog) {
-    TextDialog(
-      title = stringResource(R.string.settings_network_kai),
-      hint = stringResource(R.string.settings_network_kai_hint),
-      value = kai,
-      onDone = { kai = it.trim(); prefs.kaiEngine = kai; kaiDialog = false },
-      onDismiss = { kaiDialog = false },
     )
   }
   if (dnsDialog) {
@@ -126,15 +92,6 @@ fun NetworkSettings(prefs: AppPrefs, onInsignia: () -> Unit) {
       onDismiss = { dnsDialog = false },
     )
   }
-}
-
-private val MODES = listOf(AppPrefs.NET_OFF, AppPrefs.NET_INSIGNIA, AppPrefs.NET_LAN, AppPrefs.NET_KAI)
-
-private fun modeLabel(value: String) = when (value) {
-  AppPrefs.NET_INSIGNIA -> R.string.settings_network_insignia
-  AppPrefs.NET_LAN -> R.string.settings_network_lan
-  AppPrefs.NET_KAI -> R.string.settings_network_kai_mode
-  else -> R.string.settings_network_off
 }
 
 /** One line of text to edit (addresses). */

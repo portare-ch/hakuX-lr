@@ -84,14 +84,14 @@ static struct retro_core_option_v2_definition g_defs[OPT_COUNT + 1] = {
         "disabled"},
     [OPT_NETWORK] = {
         "hakux_network", "Network", NULL,
-        "LAN enables system link: turn it on on each device; discovery uses UDP port 3075. "
-        "For peers on another subnet or a VPN, add their addresses to lan-peers.txt in the save directory. "
-        "Xbox Live (Insignia) connects to Insignia, the Xbox Live revival, through the Internet; register the "
-        "console with Insignia's Setup Assistant first. If your provider blocks Insignia's DNS server, put the "
-        "address of an insigniaDNS server in insignia-dns.txt in the save directory." NEXT,
+        "Plugs in the console's network cable, as on a home network: Xbox Live through Insignia, the Xbox Live "
+        "revival, and system link with the consoles on this network, at once. Register the console with "
+        "Insignia's Setup Assistant before Xbox Live. System link: turn the network on on each device; "
+        "discovery uses UDP port 3075. For consoles on another subnet or a VPN, add their addresses to "
+        "lan-peers.txt in the save directory. If your provider blocks Insignia's DNS server, put the address of "
+        "an insigniaDNS server in insignia-dns.txt in the save directory." NEXT,
         NULL, NULL,
-        {{"disabled", "Off (no cable)"}, {"lan", "LAN (system link)"}, {"insignia", "Xbox Live (Insignia)"},
-         {NULL, NULL}},
+        {{"disabled", "Off (no cable)"}, {"enabled", "On"}, {NULL, NULL}},
         "disabled"},
     [OPT_COMMUNICATOR] = {
         "hakux_communicator", "Xbox Live Communicator", NULL,
@@ -298,7 +298,7 @@ void nc_lr_options_apply(void)
            "rumble %s, network %s, resampler %s, audio processing %s, frame pacing %s, communicator %s%s%s, combiner %s",
            scale, crop ? "cropped" : "shown", format, language,
            g_defs[OPT_LANGUAGE].values[g_applied[OPT_LANGUAGE]].value, region, rumble ? "on" : "off",
-           strcmp(network, "disabled") ? network : "off", resampler, dsp ? "dsp" : "fast",
+           strcmp(network, "disabled") ? "on" : "off", resampler, dsp ? "dsp" : "fast",
            pace_text(g_applied[OPT_PACE]), communicator ? "on (noise gate " : "off", communicator ? gate : "",
            communicator ? ")" : "", precise ? "accurate" : "fast");
 }
