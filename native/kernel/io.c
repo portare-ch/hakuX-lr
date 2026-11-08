@@ -101,10 +101,9 @@ typedef struct NcFile {
      * listing shifted under it and skipped every other file. */
     struct DirEntry *listing;
     unsigned nlisting;
-    /* Opened without FILE_SYNCHRONOUS_IO_*: a read or write with an event or
-     * APC (on the disc, any) that completes reports STATUS_PENDING, as the
-     * Xbox's DMA disk and DVD transfers do, with its result in the
-     * IoStatusBlock (io_finish); a write only with no_buffering. */
+    /* Asynchronous file I/O may return STATUS_PENDING even without an
+     * event or APC for disc transfers and unbuffered hard disk I/O.
+     * Cached writes can complete immediately. */
     bool async;
     /* The handle may change the file's data or size (its DesiredAccess has
      * FILE_WRITE_DATA / FILE_APPEND_DATA, GENERIC_WRITE / _ALL or
@@ -1375,18 +1374,12 @@ static void io_moved(NcKernel *k, NcFile *nf, uint32_t byte_offset, uint64_t end
 
 static int partition_root(const NcFile *nf);
 
-/* Ends a read or write: its IoStatusBlock, event and APC, and what it returns.
- * An overlapped request that completes reports STATUS_PENDING (NcFile.async);
- * one that fails up front (end of file) returns the error and, as NT does for
- * a failure before pending, leaves the IoStatusBlock, event and APC alone:
- * XAPI set the OVERLAPPED to STATUS_PENDING, which GetOverlappedResult reads
- * as success. Forza's read-ahead past the end of a file relies on that.
- * The DVD drive pends every transfer, an overlapped one with neither event
- * nor APC too (its completion sets the file object's event): Otogi's stream
- * reader (XDK 5455) counts the bytes only after ERROR_IO_PENDING, through
- * GetOverlappedResult, and took a disc read that succeeded at once as 0 bytes
- * read, a dirty disc. pend: a success may pend (not a read through the cache,
- * disc_cached). */
+/* Complete a read or write and return its guest-visible status.
+ * Failures before pending leave the IoStatusBlock and notifications alone.
+ * A successful asynchronous disc transfer or unbuffered hard disk request
+ * may return STATUS_PENDING without an explicit event or APC. Completion
+ * still updates the IoStatusBlock and signals the file object's event.
+ * Cached I/O may finish in the call; pend controls that distinction. */
 static uint32_t io_finish(NcKernel *k, const NcFile *nf, const uint32_t *a, uint32_t st, uint32_t n, bool pend)
 {
     if (nf->async && st >= 0xC0000000u) {
@@ -1394,7 +1387,8 @@ static uint32_t io_finish(NcKernel *k, const NcFile *nf, const uint32_t *a, uint
     }
     io_status(k, a[4], st, n);
     complete(k, a);
-    return pend && nf->async && (a[1] || a[2] || nf->kind == F_DISC) ? STATUS_PENDING : st;
+    const bool device = nf->kind == F_DISC || (nf->kind == F_HOST && nf->no_buffering);
+    return pend && nf->async && (a[1] || a[2] || device) ? STATUS_PENDING : st;
 }
 
 /* A disc read of part of a sector goes through the file system's cache, which
