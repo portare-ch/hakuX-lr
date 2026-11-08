@@ -231,11 +231,19 @@ console an address from its MAC, 10.0.2.16-215, one no other console on the
 network keeps (`native/net/lan.c`), and Insignia's DNS server,
 46.101.64.175. If your provider blocks that server, put an insigniaDNS
 server's address in `insignia-dns.txt` in the save directory, using the same
-format as `lan-peers.txt`. Only the first address is used. To boot the Xbox
-dashboard, copy your `xboxdash.xbe` and its folders into `hdd/Partition2/`
-under RetroArch's save directory,
-then choose **Load Core → Microsoft - Xbox (hakuX) → Start Core** without
-loading content. Turn **Network** on for its Xbox Live pages. Register the console with Insignia's Setup Assistant first.
+format as `lan-peers.txt`. Only the first address is used.
+
+**Load Core → Microsoft - Xbox (hakuX) → Start Core** boots the dashboard
+without loading a game. The core bundles
+[hakux-lr-dash](https://github.com/portare-ch/hakux-lr-dash) and installs it
+on C: as `xboxdash.xbe` and `xodash/xonlinedash.xbe` when needed.
+Games can open its Xbox Live pages. Enable **Network** for Xbox Live.
+
+To create an Insignia account, register the console with Insignia's Setup
+Assistant and use your own Xbox dashboard 5960 files. Replace the bundled
+files in `hdd/Partition2/` under RetroArch's save directory with your
+dashboard files. Keep one copy of each filename regardless of case.
+Automatic updates apply to XBEs with the `hakux-dash` certificate title.
 Dashboard navigation in real RetroArch and end-to-end Insignia account
 setup and sign-in still need device validation.
 

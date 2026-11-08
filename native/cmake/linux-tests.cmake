@@ -71,6 +71,12 @@ target_include_directories(contig-run-test PRIVATE "${NC_REPO}")
 add_test(NAME contig-run-test COMMAND contig-run-test)
 set_tests_properties(contig-run-test PROPERTIES TIMEOUT 10)
 
+add_executable(dash-install-test "${NC_REPO}/tests/native/linux/dash_install.c" "${NC_REPO}/native/core/dash.c"
+  "${NC_REPO}/native/core/dash_blob.c" "${NC_REPO}/native/core/log.c")
+target_include_directories(dash-install-test PRIVATE "${NC_REPO}")
+add_test(NAME dash-install-test COMMAND dash-install-test)
+set_tests_properties(dash-install-test PROPERTIES TIMEOUT 10)
+
 # Alias-table overflow must preserve page ownership and protection.
 add_executable(vm-alias-test "${NC_REPO}/tests/native/linux/vm_alias.c")
 target_include_directories(vm-alias-test PRIVATE "${NC_REPO}")

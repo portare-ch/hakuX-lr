@@ -121,6 +121,8 @@ add_library(hakux_native STATIC
   core/xbe_patch.c
   core/memscan.c
   core/core.c
+  core/dash.c
+  core/dash_blob.c
   core/mmio.c
   core/irq.c
   dev/nv2a.c
@@ -174,6 +176,11 @@ else()
   target_sources(hakux_native PRIVATE cpu/cpu_kvm.c)
 endif()
 target_include_directories(hakux_native PUBLIC "${NC_REPO}")
+# Rebuild the embedded dashboard when the pinned XBE changes.
+set(NC_DASH_XBE "${NC_REPO}/native/dash/hakux-dash.xbe")
+set_source_files_properties(core/dash_blob.c PROPERTIES
+  COMPILE_DEFINITIONS "NC_DASH_XBE=\"${NC_DASH_XBE}\""
+  OBJECT_DEPENDS "${NC_DASH_XBE}")
 # xxhash (single header, FEX's copy): the savestates' blob store (state/cache.c)
 target_include_directories(hakux_native PRIVATE "${HAKUX_FEX_DIR}/External/xxhash")
 # The HLE layer's pure modules build without QEMU in this mode.

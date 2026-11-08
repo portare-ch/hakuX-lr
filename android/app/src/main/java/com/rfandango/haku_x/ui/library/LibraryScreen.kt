@@ -3,8 +3,6 @@ package com.rfandango.haku_x.ui.library
 import android.content.res.Configuration
 import android.net.Uri
 import android.text.format.Formatter
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -128,17 +126,13 @@ fun LibraryScreen(
   onLoadState: (Game, SaveStateStore, Int) -> Unit,
   /** The game's mods and cheats (a disc whose title has some, mods/). */
   onMods: (Game, DiscInfo) -> Unit,
-  /** The dashboard started (installed on C:, Dashboard). */
+  /** Start the dashboard without a disc. */
   onDashboard: () -> Unit,
   vm: LibraryViewModel = viewModel(),
 ) {
   val state by vm.state.collectAsStateWithLifecycle()
   val update by Updates.available.collectAsStateWithLifecycle()
   var updateDialog by remember { mutableStateOf(false) }
-  var dashboardAsk by remember { mutableStateOf(false) }
-  val pickDashboard = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-    if (uri != null) vm.installDashboard(uri)
-  }
   LifecycleResumeEffect(Unit) {
     vm.onResume()
     onPauseOrDispose {}
@@ -151,11 +145,7 @@ fun LibraryScreen(
         Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
       ) {
-        // the dashboard (Xbox Live's accounts): started, or installed from its zip first
-        IconButton(
-          onClick = { if (state.dashboard) onDashboard() else dashboardAsk = true },
-          modifier = Modifier.padding(end = 4.dp),
-        ) {
+        IconButton(onClick = onDashboard, modifier = Modifier.padding(end = 4.dp)) {
           Icon(Icons.Filled.Home, contentDescription = stringResource(R.string.library_dashboard))
         }
         SearchField(state.query, vm::setQuery, Modifier.weight(1f))
@@ -206,58 +196,6 @@ fun LibraryScreen(
   if (updateDialog) {
     update?.let { UpdateDialog(it, onDismiss = { updateDialog = false }) }
   }
-  if (dashboardAsk) {
-    ConfirmDialog(
-      title = stringResource(R.string.library_dashboard_install_title),
-      text = stringResource(R.string.library_dashboard_install_text),
-      confirm = stringResource(R.string.library_dashboard_choose),
-      onConfirm = {
-        dashboardAsk = false
-        pickDashboard.launch(arrayOf("application/zip", "application/x-zip-compressed"))
-      },
-      onDismiss = { dashboardAsk = false },
-    )
-  }
-  state.dashboardInstall?.let { DashboardInstallDialog(it, onStart = onDashboard, onDismiss = vm::dismissDashboardInstall) }
-}
-
-/** The dashboard's install from its zip: its progress, then installed (to start now) or why not. */
-@Composable
-private fun DashboardInstallDialog(j: DashboardInstall, onStart: () -> Unit, onDismiss: () -> Unit) {
-  val context = LocalContext.current
-  AlertDialog(
-    onDismissRequest = { if (j.finished) onDismiss() },
-    properties = DialogProperties(dismissOnBackPress = j.finished, dismissOnClickOutside = j.finished),
-    title = {
-      Text(stringResource(when {
-        j.error != null -> R.string.hdd_dashboard_failed
-        j.finished -> R.string.hdd_dashboard_done
-        else -> R.string.hdd_dashboard_installing
-      }))
-    },
-    text = {
-      when {
-        j.error != null -> Text(j.error)
-        j.finished -> Text(stringResource(R.string.library_dashboard_installed))
-        else -> ProgressBlock(
-          fractionOf(j.done, j.total),
-          j.what.ifEmpty { "${Formatter.formatShortFileSize(context, j.done)} / ${Formatter.formatShortFileSize(context, j.total)}" },
-        )
-      }
-    },
-    confirmButton = {
-      if (j.finished && j.error == null) {
-        TextButton(onClick = { onDismiss(); onStart() }) { Text(stringResource(R.string.library_dashboard_start)) }
-      } else if (j.finished) {
-        TextButton(onClick = onDismiss) { Text(stringResource(android.R.string.ok)) }
-      }
-    },
-    dismissButton = {
-      if (j.finished && j.error == null) {
-        TextButton(onClick = onDismiss) { Text(stringResource(R.string.library_dashboard_later)) }
-      }
-    },
-  )
 }
 
 /**

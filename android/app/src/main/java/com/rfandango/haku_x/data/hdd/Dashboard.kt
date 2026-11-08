@@ -3,13 +3,14 @@ package com.rfandango.haku_x.data.hdd
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
+import java.io.RandomAccessFile
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.util.zip.ZipInputStream
 
 /**
- * The Xbox dashboard on the hard disk's C: drive (Partition2): xboxdash.xbe and its folders
- * (xboxdashdata.<version>, xodash with Xbox Live's xonlinedash.xbe, fonts). The user's own files: hakuX
- * has none. The core boots it with no disc (NativeCoreActivity, URI) and when a title asks for one of
- * its pages (Xbox Live's account sign-up, native/kernel/ex.c); Insignia's accounts are made there.
+ * Dashboard files live on C: (Partition2). The core supplies a dashboard for an empty disk.
+ * Insignia account setup still requires the user's Xbox dashboard files.
  */
 object Dashboard {
   /** NativeCoreActivity's disc for the dashboard: none, the core booting C:\xboxdash.xbe. */
@@ -18,7 +19,26 @@ object Dashboard {
 
   fun cDrive(root: File) = XboxHdd.folder(root, 2)
 
-  fun installed(root: File) = cDrive(root).listFiles()?.any { it.isFile && it.name.equals(XBE, ignoreCase = true) } == true
+  /** The certificate title of hakuX-lr's own dashboard (native/core/dash.c). */
+  private const val OURS = "hakux-dash"
+
+  /** Check for a user-supplied dashboard for Insignia account setup. */
+  fun installed(root: File) =
+    cDrive(root).listFiles()?.any { it.isFile && it.name.equals(XBE, ignoreCase = true) && !ours(it) } == true
+
+  private fun ours(xbe: File): Boolean = runCatching {
+    RandomAccessFile(xbe, "r").use { f ->
+      val head = ByteArray(0x120)
+      f.readFully(head)
+      val b = ByteBuffer.wrap(head).order(ByteOrder.LITTLE_ENDIAN)
+      if (b.getInt(0) != 0x48454258) return false   // "XBEH"
+      val cert = b.getInt(0x118).toLong() - b.getInt(0x104).toLong()
+      val name = ByteArray(2 * (OURS.length + 1))
+      f.seek(cert + 0xC)
+      f.readFully(name)
+      String(name, Charsets.UTF_16LE) == OURS + "\u0000"
+    }
+  }.getOrDefault(false)
 
   /**
    * The dashboard's files from a zip (open() reads it from the start, twice) into C:, over what's

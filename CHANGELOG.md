@@ -10,6 +10,10 @@
 - **Launch folders** (#189) — Games launched from a disc subfolder now use
   that folder as `D:`. This fixes asset loading for the games on the
   Star Wars - The Clone Wars + Tetris Worlds disc.
+- **Dashboard** — The core installs the bundled dashboard on C: when
+  needed. **Start Core** boots it without content, and games can open its
+  Xbox Live pages. The bundled dashboard also lets the Star Wars - The
+  Clone Wars + Tetris Worlds launcher skip its disc updater (#120).
 
 ## linux-v0.23.0 (Linux, aarch64 and x86-64, and Android)
 

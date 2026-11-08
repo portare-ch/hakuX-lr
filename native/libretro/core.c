@@ -31,6 +31,7 @@
 #include "native/libretro/libretro_int.h"
 #include "native/core/cheats.h"
 #include "native/core/core.h"
+#include "native/core/dash.h"
 #include "native/core/irq.h"
 #include "native/core/mods.h"
 #include "native/core/xbe_patch.h"
@@ -323,18 +324,17 @@ RETRO_API void retro_reset(void)
     boot_again("reset", false);
 }
 
-/* Find the dashboard on C: (<hdd>/Partition2), ignoring filename case.
- * If missing, tell the user where to install it. */
+/* Install the bundled dashboard if needed before starting without content. */
 static bool dashboard_installed(void)
 {
     char host[512];
     nc_io_set_hdd_root(g_hdd);
+    nc_dash_install(g_hdd);
     if (nc_io_host_file(NC_DASHBOARD_PATH, host, sizeof(host))) {
         return true;
     }
     static char text[PATH_MAX + 128];
-    snprintf(text, sizeof(text), "The Xbox dashboard isn't installed: copy its files (xboxdash.xbe and its folders) "
-             "to %s/Partition2", g_hdd);
+    snprintf(text, sizeof(text), "The dashboard couldn't be put on the hard disk's C: drive (%s/Partition2)", g_hdd);
     message(text, 600);
     nc_log("hakuX-libretro", "%s", text);
     return false;
