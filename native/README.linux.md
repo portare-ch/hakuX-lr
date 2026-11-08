@@ -250,8 +250,14 @@ shaders for filters such as FXAA and **Core provided** for the core's 4:3 or
 
 The remaining design targets are in [LIBRETRO_SPEC.md](../LIBRETRO_SPEC.md).
 
-`HAKUX_LR_STATS=1` logs time spent in `retro_run`. `HAKUX_DISP_STATS=1`
-logs new frames per second, frame age and gaps between frames in any frontend.
+The core skips unchanged frames by default so RetroArch and MangoHud
+show the game's frame rate. Early calls wait for the next Xbox frame
+period. Enable **Repeat Frames** for RetroArch recording, streaming or
+black-frame insertion. FPS counters then include repeats.
+
+`HAKUX_LR_STATS=1` logs time spent in `retro_run` and the frames handed to
+RetroArch each second. `HAKUX_DISP_STATS=1` logs new frames per second, frame
+age and gaps between frames in any frontend.
 
 Frame Pacing (from rfandango/hakuX#14) holds a game whose GPU work falls
 behind its simulation to the render pace, so frames don't queue up as input

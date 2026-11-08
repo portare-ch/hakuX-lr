@@ -4,8 +4,9 @@
  * hakuX libretro video output.
  *
  * Frames use Vulkan when available, otherwise CPU readback as XRGB8888.
- * If no new frame is ready, the previous frame is shown again. The renderer
- * applies gamma; RetroArch handles letterboxing using the reported aspect.
+ * By default, RetroArch keeps the previous image between submissions.
+ * Repeat Frames restores a callback each tick for capture and black-frame
+ * insertion. The renderer applies gamma and RetroArch handles letterboxing.
  *
  * Crop Overscan removes 3/80 of each edge from standard-definition frames.
  * This gives whole-pixel crops at 640x480 and 720x480 at every render scale
@@ -31,6 +32,7 @@ static struct {
     size_t cap;              /* pixels */
     uint32_t gen, swap;      /* the read-back frame's display generation and swap */
     bool dupe_checked, can_dupe;
+    bool repeat;             /* Repeat Frames: a video_cb every retro_run */
     bool widescreen;         /* the console is set to widescreen */
     bool full;               /* the overscan shown, not cropped */
 } g_v;
@@ -54,6 +56,11 @@ void nc_lr_video_reset(void)
 void nc_lr_video_set_widescreen(bool on)
 {
     g_v.widescreen = on;
+}
+
+void nc_lr_video_set_repeat(bool on)
+{
+    g_v.repeat = on;
 }
 
 void nc_lr_video_geometry(struct retro_game_geometry *g)
@@ -149,22 +156,29 @@ static bool take_new(void)
     return true;
 }
 
-void nc_lr_video_run(retro_video_refresh_t video)
+bool nc_lr_video_run(retro_video_refresh_t video)
 {
     static uint32_t black[640 * 480];
-    if (nc_lr_vk_run(video)) {
-        return;
+    bool shown;
+    if (nc_lr_vk_run(video, g_v.repeat, &shown)) {
+        return shown;
+    }
+    if (take_new()) {
+        video(g_v.buf, g_v.w, g_v.h, g_v.w * sizeof(uint32_t));
+        return true;
+    }
+    if (!g_v.repeat) {
+        return false;
     }
     if (!g_v.dupe_checked) {
         g_v.dupe_checked = true;
         g_v.can_dupe = false;
         nc_lr_env(RETRO_ENVIRONMENT_GET_CAN_DUPE, &g_v.can_dupe);
     }
-    if (take_new()) {
-        video(g_v.buf, g_v.w, g_v.h, g_v.w * sizeof(uint32_t));
-    } else if (g_v.buf) {
+    if (g_v.buf) {
         video(g_v.can_dupe ? NULL : g_v.buf, g_v.w, g_v.h, g_v.w * sizeof(uint32_t));
     } else {
         video(black, 640, 480, 640 * sizeof(uint32_t));
     }
+    return true;
 }

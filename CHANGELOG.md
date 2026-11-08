@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## linux-v0.25.1 (Linux, aarch64 and x86-64, and Android)
+
+- **Frame rate** — The core skips unchanged frames by default so FPS
+  counters show the game's frame rate. Enable **Repeat Frames** for
+  RetroArch recording, streaming or black-frame insertion.
+
 ## linux-v0.25.0 (Linux, aarch64 and x86-64, and Android)
 
 - **Insignia account recovery** (#185) — Under **Xbox Live**, select

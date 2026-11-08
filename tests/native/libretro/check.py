@@ -319,6 +319,43 @@ def main():
         # the crop, rumble and frame pacing don't. Rumble on asks RetroArch
         # for its interface, which the harness doesn't have.
         disc(root / 'spin.iso', b'\xeb\xfe')
+        # A title that never presents produces no video callbacks.
+        run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
+            ('ran 30 frames: 0 video calls', '0 dupes, 30 without a frame'))
+        # Without a blocking present, the core paces normal calls.
+        # Fast-forward bypasses that wait.
+        def unpaced(throttle=None, calls=30, interval=None):
+            env = dict(os.environ, HARNESS_UNPACED='1')
+            if interval is not None:
+                env = dict(os.environ, HARNESS_INTERVAL_US=str(interval))
+            if throttle is not None:
+                env['HARNESS_THROTTLE'] = str(throttle)
+            r = subprocess.run([str(x) for x in (args.harness, args.core, root / 'spin.iso', calls, root / 'saves')],
+                               env=env, capture_output=True, text=True, timeout=60)
+            took = re.search(rf'ran {calls} frames: .* without a frame, \d+ audio frames in ([\d.]+) s', r.stdout)
+            if r.returncode or not took:
+                print(r.stdout[-4000:], r.stderr[-4000:])
+                raise SystemExit(f'FAIL: retro_run called back to back (throttle {throttle}): exit {r.returncode}')
+            return float(took.group(1))
+        period = 1001 / 60000
+        for name, throttle in (('no throttle state', None), ('unblocked', 6), ('vsync', 5)):
+            took = unpaced(throttle)
+            if took < 29 * period * 0.95:
+                raise SystemExit(f'FAIL: 30 retro_run calls without frames, back to back ({name}): {took} s')
+            print(f'PASS: 30 retro_run calls without frames, back to back ({name}), took {took} s')
+        took = unpaced(2)
+        if took > 10 * period:
+            raise SystemExit(f'FAIL: fast-forward held to the period: 30 calls took {took} s')
+        print(f'PASS: fast-forward not held: 30 calls took {took} s')
+        # Slightly early calls must still span 119 Xbox frame periods.
+        took = unpaced(6, calls=120, interval=16000)
+        if took < 119 * period * 0.997:
+            raise SystemExit(f'FAIL: 120 calls 16 ms apart ran ahead of the Xbox\'s rate: {took} s')
+        print(f'PASS: 120 calls 16 ms apart kept the Xbox\'s rate: {took} s')
+        # Repeat Frames sends a callback even before the first guest frame.
+        run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
+            ('ran 30 frames: 30 video calls', ' 0 without a frame'),
+            dict(os.environ, HARNESS_OPTIONS=f'{OFF};hakux_repeat_frames=enabled'))
         env = dict(os.environ, HARNESS_OPTIONS_LATER=f'{OFF};hakux_render_scale=3;hakux_video_region=pal;'
                    'hakux_crop_overscan=disabled;hakux_rumble=enabled;hakux_frame_pace=2')
         run([args.harness, args.core, root / 'spin.iso', 60, root / 'saves'], 0,
@@ -497,7 +534,8 @@ def main():
         c_drive = root / 'saves' / 'hdd' / 'Partition2'
         shutil.rmtree(c_drive, ignore_errors=True)
         run([args.harness, args.core, '-', 60, root / 'saves'], 0,
-            ("dash: installed hakuX-lr's dashboard as", 'loaded the dashboard (no content)', 'ran 60 frames'))
+            ("dash: installed hakuX-lr's dashboard as", 'loaded the dashboard (no content)', 'ran 60 frames',
+             ', 0 dupes,'))
         if not (c_drive / 'xboxdash.xbe').is_file() or not (c_drive / 'xodash' / 'xonlinedash.xbe').is_file():
             raise SystemExit('FAIL: Start Core left no xboxdash.xbe or xodash\\xonlinedash.xbe on C:')
         shutil.rmtree(c_drive)

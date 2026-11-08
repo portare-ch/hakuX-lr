@@ -2,10 +2,8 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Libretro core options (LIBRETRO_SPEC.md section 10).
- * RetroArch handles display filters and aspect ratio. Crop (video.c),
- * rumble (input.c) and frame pacing (the decoder reads it at each swap)
- * update immediately; other options apply at the next boot (the
- * Communicator is plugged into player 1's controller as it boots).
+ * RetroArch handles display filters and aspect ratio. Crop, rumble,
+ * frame pacing and frame repeats update live. Other options apply at boot.
  */
 #include "native/libretro/libretro_int.h"
 #include "native/hle/hle_native.h"
@@ -33,7 +31,8 @@
 #endif
 
 enum { OPT_SCALE, OPT_CROP, OPT_FORMAT, OPT_LANGUAGE, OPT_REGION, OPT_RUMBLE, OPT_NETWORK, OPT_COMMUNICATOR,
-       OPT_MIC_GATE, OPT_RESAMPLER, OPT_PROCESSING, OPT_PRECISION, OPT_PACE, OPT_COUNT };
+       OPT_MIC_GATE, OPT_RESAMPLER, OPT_PROCESSING, OPT_PRECISION, OPT_PACE,
+       OPT_REPEAT, OPT_COUNT };
 
 /* The language values follow XC_LANGUAGE after auto: english is 1. */
 static struct retro_core_option_v2_definition g_defs[OPT_COUNT + 1] = {
@@ -144,6 +143,13 @@ static struct retro_core_option_v2_definition g_defs[OPT_COUNT + 1] = {
         NULL, NULL,
         {{"disabled", "Off"}, {"2", "On"}, {"1", "Lowest Latency"}, {NULL, NULL}},
         "disabled"},
+    [OPT_REPEAT] = {
+        "hakux_repeat_frames", "Repeat Frames", NULL,
+        "Send the previous frame again when the game has no new one. Enable for RetroArch "
+        "recording, streaming or black-frame insertion. FPS counters include repeats.",
+        NULL, NULL,
+        {{"disabled", "Off"}, {"enabled", "On"}, {NULL, NULL}},
+        "disabled"},
     {NULL},
 };
 
@@ -253,6 +259,7 @@ void nc_lr_options_apply(void)
     nc_lr_video_set_crop(crop);
     const bool rumble = strcmp(g_defs[OPT_RUMBLE].values[g_applied[OPT_RUMBLE]].value, "enabled") == 0;
     nc_lr_input_set_rumble(rumble);
+    nc_lr_video_set_repeat(!strcmp(g_defs[OPT_REPEAT].values[g_applied[OPT_REPEAT]].value, "enabled"));
 
     /* PAL60 always: RetroArch runs at 59.94 Hz, and an NTSC title ignores it.
      * No 480p, 720p or 1080i, as before the options. */
@@ -327,10 +334,15 @@ void nc_lr_options_run(void)
         nc_hle_set_frame_pace(pace_depth(pace));
         nc_log("hakuX-libretro", "options: frame pacing %s", pace_text(pace));
     }
+    const int repeat = value_of(OPT_REPEAT);
+    if (repeat != g_applied[OPT_REPEAT]) {
+        g_applied[OPT_REPEAT] = repeat;
+        nc_lr_video_set_repeat(!strcmp(g_defs[OPT_REPEAT].values[repeat].value, "enabled"));
+    }
     char names[256] = "";
     size_t n = 0;
     for (int i = 0; i < OPT_COUNT; i++) {
-        if (i != OPT_CROP && i != OPT_RUMBLE && i != OPT_PACE && value_of(i) != g_applied[i] &&
+        if (i != OPT_CROP && i != OPT_RUMBLE && i != OPT_PACE && i != OPT_REPEAT && value_of(i) != g_applied[i] &&
             n < sizeof(names)) {
             n += (size_t)snprintf(names + n, sizeof(names) - n, "%s%s", n ? ", " : "", g_defs[i].desc);
         }

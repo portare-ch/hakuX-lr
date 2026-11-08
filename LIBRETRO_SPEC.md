@@ -115,8 +115,8 @@ poll input; publish each port's NcPadState
 nc_dev_nv2a_display_vsync(now): RetroArch's frame tick is the vsync
 resume if the emulation was paused for a gap
 drain the APU's ring into audio_batch_cb
-take the newest front frame: nc_dev_nv2a_display_pickup(now), export it
-video_cb exactly once (a new frame, or the last one again)
+take the newest front frame: nc_dev_nv2a_display_pickup(now)
+call video_cb for a new frame, a Vulkan output change or Repeat Frames
 ```
 
 - The rate is the real Xbox's, exactly (owner's requirement): 60000/1001 Hz
@@ -126,9 +126,14 @@ video_cb exactly once (a new frame, or the last one again)
   exact accumulator. RetroArch calls `retro_run` at the reported rate; with
   one tick per frame the vblank thread locks to it (k = 1) and places
   vblanks half a period from the pickups, as it does with Choreographer.
-- The guest keeps its pipelining: the CPU, the render thread and the export
-  overlap as they do today. `retro_run` never waits for the guest to finish
-  a frame; a 30 fps title or a static screen shows its last frame again.
+- The CPU, renderer and frame export overlap. `retro_run` uses the
+  newest available frame. Skipping unchanged frames lets the FPS counter
+  show the game's rate. **Repeat Frames** is off by default. Enable it for
+  RetroArch recording, streaming or black-frame insertion.
+- Skipping a present can remove the frontend's vsync wait. Early calls
+  wait for their slot, spaced one Xbox period (1001/60000 s) apart. Late
+  calls start a new schedule to avoid a catch-up burst. Fast-forward,
+  frame stepping and rewind bypass the wait.
 - A gap (the menu, a long stall): when no `retro_run` comes for two periods,
   `nc_pause_set(true)`; the next `retro_run` resumes. The guest's time leaves
   the pause out, as on Android. A pause that leaves the vCPU running is a bug.
@@ -137,9 +142,8 @@ video_cb exactly once (a new frame, or the last one again)
   stay off in the core until AV info renegotiation is done for them.
 - A mode change (50/60 Hz) updates `retro_system_av_info` through
   `RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO` before frames come at the new rate.
-- A stalled guest is not hidden: no synthetic frames beyond repeating the
-  last one, no extra vblanks. A 5 s watchdog without a new frame logs the
-  CPU, renderer and vblank state; it does not kill anything.
+- After 5 s without a new frame, the watchdog logs CPU, renderer and
+  vblank state.
 
 ## 6. Stop, unload and living in RetroArch's process
 
@@ -329,7 +333,7 @@ Home + Start stays PortareOS's; the core adds no exit chord.
 | `retro_get_system_info` | name, version; `need_fullpath = true`, `block_extract = true`; extensions `iso` and `chd` |
 | `retro_load_game` | check the image, resolve paths, negotiate Vulkan, boot; false with full cleanup on failure |
 | `retro_get_system_av_info` | 60000/1001 (the Xbox's, exactly), 48000 Hz, the source size and aspect |
-| `retro_run` | section 5: one `video_cb`, at least one input poll |
+| `retro_run` | section 5: at most one `video_cb`, at least one input poll |
 | `retro_reset` | stop and boot again in process |
 | `retro_unload_game` | stop, join, destroy; a later load works |
 | `retro_deinit` | release the rest; `dlclose` is safe |
@@ -413,12 +417,10 @@ folder. Run-ahead stays off (section 10).
 | Burnout 3 for minutes without a beat | 10 minutes through the launcher, with step, image, present and flip traces. |
 | `vrr=0` | Fixed refresh, and no `VRR_ENABLED` left behind. |
 
-0021 notes that the display offers FIFO only and keeps presents blocking
-under Sync to Exact Content Framerate: the goal is no independent pacing
-clock and no fixed-refresh beat, not a ban on FIFO. A 30 fps title gives one
-`retro_run` per 59.94 Hz period with its image repeated, so the kernel shows
-each submission twice; that is expected. The standalone's `start_hakux.sh`
-part of #8 is superseded by this route, as the issue records.
+Patch 0021 keeps FIFO presentation and uses Sync to Exact Content
+Framerate to pace the core. At 30 fps, the guest produces a frame about
+every other core tick. PortareOS's display driver handles LFC repeats.
+This replaces the standalone `start_hakux.sh` path from #8.
 
 Measured on the Nova on 2026-10-25 with 0.2.1, through `runemu.sh`, with
 flip traces (PORTAREOS_HANDOFF.md, "Issue #8"):
