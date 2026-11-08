@@ -134,4 +134,36 @@ class ResignTest {
       tmp.deleteRecursively()
     }
   }
+
+  @Test
+  fun hakuxToHakux() {
+    val tmp = Files.createTempDirectory("resign-hakux").toFile()
+    try {
+      val from = bytes(16)
+      val to = bytes(16)
+      fun roam(d: ByteArray) = XCrypto.hmac(zero, d)
+      val e = File(tmp, "Partition1")
+      val save = File(e, "UDATA/4d530064/ABCDEF012345").apply { mkdirs() }
+      val d1 = bytes(120)
+      val d2 = bytes(90)
+      val locked = File(save, "locked.bin").apply { writeBytes(d1 + XCrypto.hmac(from, roam(d1))) }
+      val roaming = File(save, "roam.bin").apply { writeBytes(d2 + roam(d2)) }
+      val cm = bytes(0x80)
+      cm[0x18] = 0x60; cm[0x19] = 0; cm[0x1A] = 0; cm[0x1B] = 0
+      byteArrayOf(0x64, 0x00, 0x53, 0x4D).copyInto(cm, 0x24)
+      val tid = cm.copyOfRange(0x24, 0x28)
+      XCrypto.hmac(XCrypto.hmac(from, tid), cm, 0x14, 0x60 - 0x14).copyInto(cm, 0)
+      val content = File(e, "TDATA/4d530064/\$c/00000001/ContentMeta.xbx").apply { parentFile!!.mkdirs(); writeBytes(cm) }
+
+      // hakuX uses zero title keys, so the lookup can return null.
+      val rep = SaveResigner.hakux(from, to).resign(e, e.walkTopDown().filter { it.isFile }.toList()) { null }
+      assertEquals(3, rep.resigned)
+      assertTrue(rep.noKey.isEmpty())
+      assertArrayEquals(d1 + XCrypto.hmac(to, roam(d1)), locked.readBytes())
+      assertArrayEquals(d2 + roam(d2), roaming.readBytes())
+      assertArrayEquals(XCrypto.hmac(XCrypto.hmac(to, tid), cm, 0x14, 0x60 - 0x14), content.readBytes().copyOf(20))
+    } finally {
+      tmp.deleteRecursively()
+    }
+  }
 }

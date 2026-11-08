@@ -14,11 +14,36 @@ import java.util.zip.ZipOutputStream
  *
  * Imports take the same zips and the usual variants: without the UDATA folder, inside another folder,
  * with E:\TDATA's title folders beside. A save in the zip replaces the save of the same folder on the disk.
- * hakuX's zips start with a marker (Backup.MARKER) saying so; from a whole backup (Backup), only E: is read.
+ * hakuX ZIPs start with [Backup.MARKER]. Full backup imports extract E: and read the source EEPROM key.
  */
 object SaveArchive {
   /** A title's folder (E:\UDATA\<title id>) and which of its save folders to write: null, all of them. */
   class Pick(val title: File, val saves: List<File>? = null)
+
+  /** Stage copies of saves that need re-signing with [SaveResigner.LEGACY_HD] for export. */
+  fun portable(picks: List<Pick>, hd: ByteArray, stage: File): List<Pick> {
+    if (hd.contentEquals(SaveResigner.LEGACY_HD)) return picks
+    val e = File(stage, "E")
+    val out = picks.map { p ->
+      val title = File(e, "UDATA/${p.title.name}").apply { mkdirs() }
+      val saves = ArrayList<File>()
+      for (f in p.title.listFiles().orEmpty()) {
+        when {
+          f.isFile -> f.copyTo(File(title, f.name), overwrite = true).setLastModified(f.lastModified())
+          p.saves == null || f in p.saves -> {
+            val to = File(title, f.name)
+            f.copyRecursively(to, overwrite = true)
+            f.walkTopDown().forEach { src -> File(to, src.relativeTo(f).path).setLastModified(src.lastModified()) }
+            saves += to
+          }
+        }
+      }
+      title.setLastModified(p.title.lastModified())
+      Pick(title, if (p.saves == null) null else saves)
+    }
+    SaveResigner.hakux(hd, SaveResigner.LEGACY_HD).resign(e, e.walkTopDown().filter { it.isFile }.toList()) { null }
+    return out
+  }
 
   /** The picks written to out as a zip; the number of files in it. */
   fun write(out: OutputStream, picks: List<Pick>): Int {
@@ -60,6 +85,7 @@ object SaveArchive {
    * What a zip of saves holds: its saves (title id to save folders), every title it has files of, the
    * names its TitleMeta.xbx give, how many of its saves replace one on the disk, its files, entries left out,
    * and its marker's kind: "saves" or "backup" for hakuX's zips, null for others (a console's or xemu's).
+   * Full backups include the source EEPROM so imports can re-sign saves.
    */
   class Plan(
     val kind: String?,
@@ -69,6 +95,7 @@ object SaveArchive {
     val replaced: Int,
     val files: Int,
     val skipped: List<String>,
+    val eeprom: ByteArray? = null,
   ) {
     val saveCount get() = saves.values.sumOf { it.size }
   }
@@ -99,10 +126,11 @@ object SaveArchive {
   }
 
   /**
-   * Each entry of a zip with its place on E: (null: not in a title's folder). A hakuX marker isn't one;
-   * the zip's kind is returned. In a backup, only E:'s entries count.
+   * Visit ZIP entries with their E: paths, or null outside title folders. Return the archive kind.
+   * For full backups, visit only E: entries and pass the EEPROM to [eeprom] separately.
    */
-  private inline fun entries(input: InputStream, each: (ZipInputStream, ZipEntry, Place?) -> Unit): String? {
+  private inline fun entries(input: InputStream, eeprom: (ByteArray) -> Unit,
+                             each: (ZipInputStream, ZipEntry, Place?) -> Unit): String? {
     var kind: String? = null
     ZipInputStream(input.buffered()).use { z ->
       var first = true
@@ -114,7 +142,10 @@ object SaveArchive {
           continue
         }
         first = false
-        if (kind == "backup" && !en.name.startsWith("hdd/Partition1/", ignoreCase = true)) continue
+        if (kind == "backup" && !en.name.startsWith("hdd/Partition1/", ignoreCase = true)) {
+          if (en.name == "hdd/eeprom.bin") eeprom(z.readBytes())
+          continue
+        }
         each(z, en, place(en))
       }
     }
@@ -132,7 +163,8 @@ object SaveArchive {
     val names = HashMap<String, String>()
     val skipped = ArrayList<String>()
     var files = 0
-    val kind = entries(input) { z, en, p ->
+    var eeprom: ByteArray? = null
+    val kind = entries(input, { eeprom = it }) { z, en, p ->
       if (p == null) {
         if (!en.isDirectory) skipped += en.name
         return@entries
@@ -149,7 +181,7 @@ object SaveArchive {
       val title = child(udata, t)
       ss.count { child(title, it).isDirectory }
     }
-    return Plan(kind, saves, titles, names, replaced, files, skipped)
+    return Plan(kind, saves, titles, names, replaced, files, skipped, eeprom.takeIf { kind == "backup" })
   }
 
   /** The zip in input imported into E: (partition 1's folder); each of its saves replaces the disk's. */
@@ -159,7 +191,7 @@ object SaveArchive {
     val dirTimes = HashMap<File, Long>()
     val skipped = ArrayList<String>()
     val written = ArrayList<File>()
-    entries(input) { z, en, p ->
+    entries(input, {}) { z, en, p ->
       if (p == null) {
         if (!en.isDirectory) skipped += en.name
         return@entries

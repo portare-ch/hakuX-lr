@@ -236,7 +236,16 @@ class HddViewModel(app: Application) : AndroidViewModel(app) {
     val app = getApplication<Application>()
     viewModelScope.launch {
       val r = withContext(Dispatchers.IO) {
-        runCatching { app.contentResolver.openOutputStream(uri, "wt")!!.use { SaveArchive.write(it, picks) } }
+        val stage = File(app.cacheDir, "save-export")
+        try {
+          runCatching {
+            stage.deleteRecursively()
+            val out = SaveArchive.portable(picks, SaveResigner.nativeHdKey(store.root), stage)
+            app.contentResolver.openOutputStream(uri, "wt")!!.use { SaveArchive.write(it, out) }
+          }
+        } finally {
+          stage.deleteRecursively()
+        }
       }
       _notice.value = r.fold(
         { app.resources.getQuantityString(R.plurals.hdd_saves_exported, it, it) },
@@ -273,8 +282,13 @@ class HddViewModel(app: Application) : AndroidViewModel(app) {
         runCatching {
           val e = partition1()
           val res = app.contentResolver.openInputStream(s.uri)!!.use { SaveArchive.extract(it, e) }
-          // a console's or xemu's saves: re-signed for hakuX, the files written only
-          val rep = if (!s.foreign) null else console.resigner()?.let { rs ->
+          // Re-sign only extracted files. Save ZIPs use the legacy key.
+          // Full backups and external archives use keys from the source console.
+          val rep = if (!s.foreign) {
+            val from = s.plan.eeprom?.let { SaveResigner.hdKeyOf(it) } ?: SaveResigner.LEGACY_HD
+            val to = SaveResigner.nativeHdKey(store.root)
+            if (from.contentEquals(to)) null else SaveResigner.hakux(from, to).resign(e, res.written) { null }
+          } else console.resigner()?.let { rs ->
             val ids = res.written.mapNotNull { f ->
               f.relativeTo(e).path.replace('\\', '/').split('/').getOrNull(1)?.toLongOrNull(16)
             }.toSet()

@@ -14,6 +14,7 @@
 #include "native/kernel/xc_crypto.h"
 #include "native/net/net.h"
 
+#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -282,9 +283,7 @@ static void eeprom_path(char *p, size_t len)
     snprintf(p, len, "%s/eeprom.bin", nc_io_hdd_root());
 }
 
-/* The HD key every console had before they got identities of their own
- * (the bytes at 0x36 of the image then): the saves locked to the console,
- * and the ones the app re-signs for it before its first boot, use it. */
+/* Older installs and Android imports made before first boot use this key. */
 static const uint8_t k_legacy_hd_key[16] = {'0', '0', '0', '0', '0', '0', '0', '0', '0', '1',
                                             0x00, 0x50, 0xF2, 0x00, 0x00, 0x01};
 
@@ -326,9 +325,35 @@ static void eeprom_reidentify(void)
     eeprom_store();
 }
 
-/* A new console's EEPROM: English, stereo, no parental limits, the region
- * of the first title it runs, an identity of its own but the HD key all
- * have. */
+/* Check E: for saves in UDATA or downloaded content in TDATA. */
+static bool data_on_disk(void)
+{
+    char p[330];
+    snprintf(p, sizeof(p), "%s/Partition1", nc_io_hdd_root());
+    DIR *d = opendir(p);
+    bool found = false;
+    for (struct dirent *e; d && !found && (e = readdir(d));) {
+        if (strcasecmp(e->d_name, "UDATA") == 0 || strcasecmp(e->d_name, "TDATA") == 0) {
+            char u[600];
+            snprintf(u, sizeof(u), "%s/%s", p, e->d_name);
+            DIR *ud = opendir(u);
+            for (struct dirent *t; ud && !found && (t = readdir(ud));) {
+                found = strcmp(t->d_name, ".") && strcmp(t->d_name, "..");
+            }
+            if (ud) {
+                closedir(ud);
+            }
+        }
+    }
+    if (d) {
+        closedir(d);
+    }
+    return found;
+}
+
+/* Create an EEPROM with the first title's region and a random HDD key.
+ * Use the legacy key if E: already contains title data or a damaged EEPROM
+ * prevents the core from persisting a new key. */
 static void eeprom_create(NcKernel *k)
 {
     const bool pal = k->game_region == 4;
@@ -338,7 +363,20 @@ static void eeprom_create(NcKernel *k)
     nc_wr32(g_eeprom + 0x58, pal ? 0x00800300u : 0x00400100u); /* PAL-I / NTSC-M */
     nc_wr32(g_eeprom + 0x90, 1);                                 /* English */
     nc_wr32(g_eeprom + 0xBC, pal ? 2 : 1);                       /* DVD region */
-    eeprom_identity(k_legacy_hd_key);
+    static const uint8_t zero[16];
+    uint8_t hd_key[16];
+    const bool legacy = g_keep_file || data_on_disk();
+    if (legacy) {
+        memcpy(hd_key, k_legacy_hd_key, sizeof(hd_key));
+    } else {
+        do {
+            arc4random_buf(hd_key, sizeof(hd_key));
+        } while (!memcmp(hd_key, zero, sizeof(zero)));
+    }
+    eeprom_identity(hd_key);
+    nc_log("hakuX-native", "ex: the console's HD key: %s",
+           !legacy ? "a random one of its own" : g_keep_file ? "the old shared one (eeprom.bin can't be kept)"
+                                                           : "the old shared one, which the data on E: uses");
 }
 
 /* An image from before kept everyone's identity: serial 000000000001, MAC

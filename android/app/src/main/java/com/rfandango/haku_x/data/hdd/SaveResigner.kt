@@ -11,6 +11,8 @@ import java.io.RandomAccessFile
  * id), its header). hakuX's kernel signs as a console whose title keys are zero and whose HD key is
  * its EEPROM's bytes 0x36-0x45 (nativeHd: native/kernel/ex.c nc_kernel_set_hd_key).
  *
+ * Transfers between hakuX consoles need only the HDD keys because both use zero title keys.
+ *
  * A game puts the signature where it likes. The places XSavSig's resign.ini lists for most games are
  * tried (the signature at the start, at 4, or at the end, the end also before padding, over the bytes
  * around it, or in a .sig file of its own), and a signature is replaced only when it checks with the
@@ -19,7 +21,7 @@ import java.io.RandomAccessFile
  * a .sig file may sign itself too, over the others' signatures (Forza's CarIcons.sig), and its own
  * comes after theirs.
  */
-class SaveResigner(private val certKey: ByteArray, private val hdKey: ByteArray, private val nativeHd: ByteArray) {
+class SaveResigner(private val certKey: ByteArray?, private val hdKey: ByteArray, private val nativeHd: ByteArray) {
   class Report(
     /** Files whose signature was replaced. */
     val resigned: Int,
@@ -29,7 +31,7 @@ class SaveResigner(private val certKey: ByteArray, private val hdKey: ByteArray,
     val noKey: Set<String>,
   )
 
-  fun authKey(titleKey: ByteArray): ByteArray = XCrypto.hmac(certKey, titleKey).copyOf(16)
+  fun authKey(titleKey: ByteArray): ByteArray = XCrypto.hmac(certKey!!, titleKey).copyOf(16)
 
   /** Every file of E:'s titles (UDATA, TDATA) re-signed: a console's whole disk. */
   fun resignAll(e: File, titleKey: (Long) -> ByteArray?): Report =
@@ -41,7 +43,7 @@ class SaveResigner(private val certKey: ByteArray, private val hdKey: ByteArray,
   /**
    * These files of E: (partition 1's folder) re-signed, each with its title's key (UDATA or TDATA
    * \<title id>\...). titleKey: a title id's signature key from its game's certificate
-   * (XboxDisc.saveKeys), null when no game in the library has it.
+   * ([XboxDisc.saveKeys]). Return null for missing keys. hakuX transfers skip this lookup.
    */
   fun resign(e: File, files: List<File>, titleKey: (Long) -> ByteArray?): Report {
     var contents = 0
@@ -60,7 +62,7 @@ class SaveResigner(private val certKey: ByteArray, private val hdKey: ByteArray,
         if (content(f, f.readBytes())) contents++ else unsigned += where
         continue
       }
-      val auth = auths.getOrPut(tid) { titleKey(tid)?.let(::authKey) }
+      val auth = auths.getOrPut(tid) { if (certKey == null) ZERO else titleKey(tid)?.let(::authKey) }
       val siblings = f.parentFile!!.listFiles().orEmpty().filter { it.isFile && it != f }
       val hit = auth?.let { find(f.readBytes(), siblings, it) }
       when {
@@ -171,17 +173,21 @@ class SaveResigner(private val certKey: ByteArray, private val hdKey: ByteArray,
 
     fun isMeta(name: String) = name.lowercase() in META
 
-    /**
-     * The native kernel's HD key (nc_kernel_set_hd_key) for the EEPROM it keeps as <hdd>/eeprom.bin:
-     * the HD key in its encrypted section; for an image from before that kept the section in the
-     * clear, its bytes 0x36-0x45; before its first run, the one it will be made with, which every
-     * console has (that of the identity all shared before: the serial number 000000000001, the MAC
-     * address 00:50:F2:00:00:01).
-     */
+    /** Shared HDD key used by older installs and portable save ZIPs. */
+    val LEGACY_HD: ByteArray = "0000000001".toByteArray() + byteArrayOf(0x00, 0x50, 0xF2.toByte(), 0x00, 0x00, 0x01)
+
+    /** Re-sign saves between hakuX consoles. */
+    fun hakux(from: ByteArray, to: ByteArray) = SaveResigner(null, from, to)
+
+    /** Read the encrypted HDD key, falling back to bytes 0x36–0x45 for older EEPROM images. */
+    fun hdKeyOf(eeprom: ByteArray): ByteArray? =
+      ConsoleKeys.hdKey(eeprom) ?: eeprom.takeIf { it.size >= 0x46 }?.copyOfRange(0x36, 0x46)
+
+    /** Read the console's HDD key. Imports before first boot use the legacy key the core will adopt. */
     fun nativeHdKey(hdd: File): ByteArray {
       val eeprom = runCatching { File(hdd, "eeprom.bin").takeIf { it.length() >= 0x46 }?.readBytes() }.getOrNull()
-        ?: return "0000000001".toByteArray() + byteArrayOf(0x00, 0x50, 0xF2.toByte(), 0x00, 0x00, 0x01)
-      return ConsoleKeys.hdKey(eeprom) ?: eeprom.copyOfRange(0x36, 0x46)
+        ?: return LEGACY_HD.copyOf()
+      return hdKeyOf(eeprom) ?: LEGACY_HD.copyOf()
     }
   }
 }
