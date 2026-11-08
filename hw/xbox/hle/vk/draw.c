@@ -1797,13 +1797,50 @@ void hle_draw_forget_tex(uint32_t id)
 
 static VkSamplerAddressMode addr_mode(uint32_t a)
 {
-    switch (a) {
+    switch (a & 7) {                    /* ADDRESSU's bits 8-11: stage_wrap's */
     case 2:  return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
     case 3:  return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;    /* D3DTADDRESS_CLAMP */
     case 4:  return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
     case 5:  return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;    /* CLAMPTOEDGE */
     default: return VK_SAMPLER_ADDRESS_MODE_REPEAT;
     }
+}
+
+/* Cylindrical wrap's switch (ff.h g_hle_cylwrap: the core option), unless
+ * HAKUX_HLE_CYLWRAP / debug.hakux.cylwrap says either way */
+static bool cylwrap_on(void)
+{
+    static int on = -1;
+    if (on < 0) {
+        char v[NC_PROPERTY_VALUE_MAX] = "";
+#ifdef __ANDROID__
+        hle_prop_get("debug.hakux.cylwrap", v);
+#endif
+        const char *e = v[0] ? v : getenv("HAKUX_HLE_CYLWRAP");
+        on = e ? atoi(e) != 0 : 2;
+    }
+    return on == 2 ? g_hle_cylwrap : on != 0;
+}
+
+/* Stage st's cylindrical wrap axes (pb/kelvin.c: ADDRESSU bits 8-11, s t r
+ * q) for the pixel shader keys (ff.h HLE_CYLW_GLSL): 0 with the switch off
+ * or without barycentrics. The first draws with any are logged either way,
+ * to find the games that use it. */
+static unsigned stage_wrap(const uint32_t *t, unsigned st)
+{
+    const unsigned w = (t[TSS_ADDRESSU] >> 8) & 15;
+    if (!w) {
+        return 0;
+    }
+    const bool on = cylwrap_on() && g_hvk.caps.bary;
+    static unsigned s_logged;
+    if (s_logged < 8) {
+        s_logged++;
+        hle_log("hakuX-hle-pipe", "cylindrical wrap: draw %llu stage %u axes %x (s t r q)%s",
+                (unsigned long long)g_dr.draws, st, w,
+                !cylwrap_on() ? ": off" : !g_hvk.caps.bary ? ": no barycentrics, ignored" : "");
+    }
+    return on ? w : 0;
 }
 
 /* sampler_index, one per stage a draw: the index last found for the key's
@@ -2341,13 +2378,29 @@ static bool dyn_kept(VkDynamicState d)
     }
 }
 
-/* Cached pipeline keys may require features disabled in this session. */
+/* The key's pixel shader wraps a stage's coordinates (stage_wrap). */
+static bool key_cylwrap(const PipeKey *k)
+{
+    if (k->psh) {
+        return (k->pk.compare >> 16) != 0;
+    }
+    for (unsigned s = 0; s < HLE_FF_STAGES; s++) {
+        if (k->ps.st[s].texture >> 4) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Cached pipeline keys may require features disabled in this session
+ * (cylindrical wrap: the switch too). */
 static bool key_supported(const PipeKey *k)
 {
     const HleCaps *c = &g_hvk.caps;
     return ((k->raster & 3) == VK_POLYGON_MODE_FILL || c->fill_modes) &&
            (!(k->raster & 4) || c->smooth_lines) &&
-           (!(k->psh ? k->pk.poly_smooth : k->ps.poly_smooth) || c->bary);
+           (!(k->psh ? k->pk.poly_smooth : k->ps.poly_smooth) || c->bary) &&
+           (!key_cylwrap(k) || (c->bary && cylwrap_on()));
 }
 
 /* key's pipeline: GLSL from the key (and the vertex program's tokens),
@@ -3989,6 +4042,9 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         fs->alpha_kill = fs->texture && t[TSS_ALPHAKILL] != 0;
         pc.tex[ki] = slot | sampler_index(t, stage_lod_down(c, st, rt_id), slot_sw(slot)) << 16;
         k.vs.texcoord[ki] = t[TSS_TEXCOORDINDEX] & 7;
+        if (fs->texture && !points && !s->psh) {    /* cylindrical wrap: ff.h texture bits 4-7 */
+            fs->texture |= (uint8_t)(stage_wrap(t, st) << 4);
+        }
         k.ps.nstages = ki + 1;
         k.vs.ntex = ki + 1;
     }
@@ -4149,6 +4205,13 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         }
         if (rect) {
             k.pk.vol |= HLE_PSH_RECT;           /* the stage fog.w names, kept to its size */
+        }
+        /* cylindrical wrap axes of the stages that read coordinates (not
+         * points: one vertex), compare bits 16 + 4 st (psh.h) */
+        for (unsigned st = 0; st < 4 && !points; st++) {
+            if ((k.pk.tex_modes >> (5 * st)) & 0x1F) {
+                k.pk.compare |= stage_wrap(s->tss[st], st) << (16 + 4 * st);
+            }
         }
         if (k.pk.shadow) {
             uint32_t f = s->rs[RS_SHADOWFUNC];

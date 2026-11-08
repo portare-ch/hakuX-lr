@@ -164,7 +164,15 @@ except Crop Overscan, Rumble and Frame Pacing, which update immediately:
 | `hakux_mic_sensitivity` | `medium`, `low`, `high`, `off` (the Communicator's noise gate: -38, -30 or -46 dBFS, or none) | `medium` |
 | `hakux_audio_resampler` | `sinc` (higher quality, 32-tap filter; NEON on ARM64, AVX2+FMA or SSE2 on x86-64), `linear` (less CPU, softer high frequencies) | `sinc` |
 | `hakux_audio_processing` | `fast` (dry mix), `dsp` (Xbox effects and stereo downmix; experimental) | `dsp` with JIT, otherwise `fast` |
+| `hakux_cylindrical_wrap` | `disabled`, `enabled` (the NV2A's cylindrical texture wrap; experimental, needs fragment shader barycentrics) | `disabled` |
 | `hakux_frame_pace` | `disabled`, `2` (after each frame the decoder waits for the GPU to finish the frame two before it), `1` (one before it) | `disabled` |
+
+Cylindrical Texture Wrap (`NV2A_ACCURACY.md`) has a wrapped texture
+coordinate take the short way around between vertices (0.9 to 0.1 through
+1.0). It needs `VK_KHR_fragment_shader_barycentric`; without it the wrap is
+ignored. `HAKUX_HLE_CYLWRAP=1` turns it on and `=0` off whatever the option
+(Android: `debug.hakux.cylwrap`). The first draws that ask for it are logged
+as `cylindrical wrap` (`hakuX-hle-pipe`), also with it off.
 
 Full DSP uses the DSP56300 JIT and is the default when compiled in. `NC_APU_DSP=0|1`
 overrides the audio processing option; `NC_APU_DSP_JIT=0` selects the C

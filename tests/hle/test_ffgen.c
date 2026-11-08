@@ -339,6 +339,99 @@ static void test_poly_smooth(void)
     HT_CHECK(cv != NULL && at != NULL && cv < at);
 }
 
+/* Replaces the first from in s with to (no longer); false without one. */
+static int sub1(char *s, const char *from, const char *to)
+{
+    char *p = strstr(s, from);
+    if (!p) {
+        return 0;
+    }
+    size_t fl = strlen(from), tl = strlen(to);
+    memmove(p + tl, p + fl, strlen(p + fl) + 1);
+    memcpy(p, to, tl);
+    return 1;
+}
+
+static int count(const char *s, const char *what)
+{
+    int n = 0;
+    for (const char *p = strstr(s, what); p; p = strstr(p + 1, what)) {
+        n++;
+    }
+    return n;
+}
+
+/* Cylindrical wrap (ff.h texture bits 4-7): a wrapped stage's coordinates
+ * read per vertex and interpolated at the top of main; the rest of the text
+ * as without it */
+static void test_cylwrap(void)
+{
+    static char plain[sizeof(buf)];
+    HleFfPsKey pk = { .nstages = 2 };
+    for (unsigned s = 0; s < 2; s++) {
+        pk.st[s] = (HleFfStage){ .colorop = 4, .colorarg1 = 2, .colorarg2 = 1, .alphaop = 4,
+                                 .alphaarg1 = 2, .alphaarg2 = 1, .resultarg = 1, .texture = 1 };
+    }
+    HT_CHECK(hle_ff_ps_glsl(&pk, buf, sizeof(buf)) > 0);
+    HT_CHECK(strstr(buf, "pervertexEXT") == NULL && strstr(buf, "cylw") == NULL);
+    HT_CHECK(strstr(buf, "GL_EXT_fragment_shader_barycentric") == NULL);
+    HT_CHECK(strstr(buf, "layout(location = 2) in vec4 vTex0;\n"
+                         "layout(location = 3) in vec4 vTex1;\n") != NULL);
+    strcpy(plain, buf);
+    pk.st[1].texture = 1 | 0x10 | 0x80;             /* stage 1: s and q */
+    size_t n = hle_ff_ps_glsl(&pk, buf, sizeof(buf));
+    HT_CHECK(n > 0 && n == strlen(buf));
+    dump("cylwrap", "frag");
+    HT_CHECK(strstr(buf, HLE_BARY_EXT_GLSL) != NULL);
+    HT_CHECK(strstr(buf, "layout(location = 2) in vec4 vTex0;\n") != NULL);
+    HT_CHECK(strstr(buf, "layout(location = 3) pervertexEXT in vec4 vTex1pv[3];\n"
+                         "vec4 vTex1;\n") != NULL);
+    HT_CHECK(strstr(buf, HLE_CYLW_GLSL) != NULL);
+    /* a wrapped axis moves vertices 1 and 2 by 1.0 where more than 0.5 from
+     * vertex 0, then the perspective-correct barycentrics interpolate */
+    HT_CHECK(strstr(buf, "p1 -= m * (vec4(greaterThan(d1, vec4(0.5))) - "
+                         "vec4(lessThan(d1, vec4(-0.5))));") != NULL);
+    HT_CHECK(strstr(buf, "p2 -= m * (vec4(greaterThan(d2, vec4(0.5))) - "
+                         "vec4(lessThan(d2, vec4(-0.5))));") != NULL);
+    HT_CHECK(strstr(buf, "vec3 bc = gl_BaryCoordEXT;") != NULL);
+    const char *mn = strstr(buf, "void main() {");
+    const char *set = strstr(buf, "  vTex1 = cylw(vTex1pv[0], vTex1pv[1], vTex1pv[2], "
+                                  "vec4(1.0, 0.0, 0.0, 1.0));\n");
+    const char *use = strstr(buf, "nvproj(vTex1)");
+    HT_CHECK(mn && set && use && mn < set && set < use);
+    HT_CHECK(strstr(buf, "vTex0 = cylw") == NULL);
+    /* without the wrap's lines, the text is the plain shader's */
+    HT_CHECK(sub1(buf, HLE_BARY_EXT_GLSL, ""));
+    HT_CHECK(sub1(buf, "layout(location = 3) pervertexEXT in vec4 vTex1pv[3];\nvec4 vTex1;\n",
+                  "layout(location = 3) in vec4 vTex1;\n"));
+    HT_CHECK(sub1(buf, HLE_CYLW_GLSL, ""));
+    HT_CHECK(sub1(buf, "  vTex1 = cylw(vTex1pv[0], vTex1pv[1], vTex1pv[2], "
+                       "vec4(1.0, 0.0, 0.0, 1.0));\n", ""));
+    HT_EQ_STR(buf, plain);
+    /* t and r on stage 0, with polygon smoothing: the extension once */
+    pk.st[0].texture = 1 | 0x20 | 0x40;
+    pk.st[1].texture = 1;
+    pk.poly_smooth = 1;
+    HT_CHECK(hle_ff_ps_glsl(&pk, buf, sizeof(buf)) > 0);
+    dump("cylwrap_smooth", "frag");
+    HT_EQ_INT(count(buf, "GL_EXT_fragment_shader_barycentric"), 1);
+    HT_CHECK(strstr(buf, "  vTex0 = cylw(vTex0pv[0], vTex0pv[1], vTex0pv[2], "
+                         "vec4(0.0, 1.0, 1.0, 0.0));\n") != NULL);
+    HT_CHECK(strstr(buf, "layout(location = 3) in vec4 vTex1;\n") != NULL);
+    pk.poly_smooth = 0;
+    /* the point sprite's coordinates and the colour target's pixel: none */
+    pk.point_sprite = 1;
+    HT_CHECK(hle_ff_ps_glsl(&pk, buf, sizeof(buf)) > 0);
+    HT_CHECK(strstr(buf, "gl_PointCoord") != NULL);
+    HT_CHECK(strstr(buf, "pervertexEXT") == NULL && strstr(buf, "cylw") == NULL);
+    HT_CHECK(strstr(buf, "GL_EXT_fragment_shader_barycentric") == NULL);
+    pk.point_sprite = 0;
+    pk.fbfetch = 1;
+    HT_CHECK(hle_ff_ps_glsl(&pk, buf, sizeof(buf)) > 0);
+    HT_CHECK(strstr(buf, "subpassLoad(uFb)") != NULL);
+    HT_CHECK(strstr(buf, "pervertexEXT") == NULL && strstr(buf, "cylw") == NULL);
+}
+
 int main(void)
 {
     HT_RUN(test_ui_quad);
@@ -352,6 +445,7 @@ int main(void)
     HT_RUN(test_fog);
     HT_RUN(test_points);
     HT_RUN(test_poly_smooth);
+    HT_RUN(test_cylwrap);
     HT_RUN(test_unset_texture);
     HT_RUN(test_all_ops);
     HT_RUN(test_overflow);

@@ -50,7 +50,10 @@ typedef struct HlePshKey {
     uint32_t tex_modes;                 /* PSTextureModes */
     uint32_t dot_map;                   /* PSDotMapping */
     uint32_t input_tex;                 /* PSInputTexture */
-    uint32_t compare;                   /* PSCompareMode */
+    uint32_t compare;                   /* PSCompareMode (bits 0-15, 4 a stage: s, t, r,
+                                           q); bits 16 + 4 s: stage s's cylindrical
+                                           wrap axes, the same order (ff.h
+                                           HLE_CYLW_GLSL, vk/draw.c) */
     uint8_t alpha_test;                 /* ALPHATESTENABLE */
     uint8_t alpha_func;                 /* D3DCMP_* - 0x200 (0..7) */
     uint8_t flat;

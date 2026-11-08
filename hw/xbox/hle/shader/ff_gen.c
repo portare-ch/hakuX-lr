@@ -39,6 +39,7 @@ bool g_hle_push_ssbo;                   /* ff.h */
 bool g_hle_glsl_zw;                     /* ff.h */
 bool g_hle_glsl_zclamp;                 /* ff.h */
 bool g_hle_glsl_fixed;                  /* ff.h */
+bool g_hle_cylwrap;                     /* ff.h */
 
 size_t hle_glsl_fixed_slots(char *src, size_t cap)
 {
@@ -492,14 +493,27 @@ size_t hle_ff_ps_glsl(const HleFfPsKey *k, char *buf, size_t cap)
 {
     Buf b = { buf, cap, 0, false };
     const char *interp = k->flat ? "flat " : "";
+    /* cylindrical wrap axes per stage (ff.h texture bits 4-7); not on the
+     * point sprite's coordinates or the colour target's pixel */
+    unsigned wrap[HLE_FF_STAGES] = { 0 }, any_wrap = 0;
+    for (unsigned s = 0; s < k->nstages; s++) {
+        if (k->st[s].texture && !(s == 0 && k->point_sprite) && !((k->fbfetch >> s) & 1)) {
+            wrap[s] = (k->st[s].texture >> 4) & 15;
+            any_wrap |= wrap[s];
+        }
+    }
     put(&b, "#version 450\n#extension GL_EXT_nonuniform_qualifier : require\n%s%s",
-        k->poly_smooth ? HLE_BARY_EXT_GLSL : "", hle_push_glsl());
+        k->poly_smooth || any_wrap ? HLE_BARY_EXT_GLSL : "", hle_push_glsl());
     put(&b, "layout(set = 0, binding = 0) uniform texture2D uTex2D[];\n"
             "layout(set = 0, binding = 1) uniform sampler uSmp[];\n");
     put(&b, "layout(location = 0) %sin vec4 vDiffuse;\n", interp);
     put(&b, "layout(location = 1) %sin vec4 vSpecular;\n", interp);
     for (unsigned s = 0; s < k->nstages; s++) {
-        if (k->st[s].texture) {
+        if (wrap[s]) {
+            char n[8];
+            snprintf(n, sizeof(n), "vTex%u", s);
+            put(&b, HLE_CYLW_IN_GLSL, 2 + s, n, n);
+        } else if (k->st[s].texture) {
             put(&b, "layout(location = %u) in vec4 vTex%u;\n", 2 + s, s);
         }
     }
@@ -509,7 +523,8 @@ size_t hle_ff_ps_glsl(const HleFfPsKey *k, char *buf, size_t cap)
     if (k->wbuf) {
         put(&b, HLE_WBUF_IN_GLSL);
     }
-    put(&b, "layout(location = 0) out vec4 oColor;\n" HLE_NVPROJ_GLSL);
+    put(&b, "layout(location = 0) out vec4 oColor;\n" HLE_NVPROJ_GLSL "%s",
+        any_wrap ? HLE_CYLW_GLSL : "");
     if (k->sblend || (k->fbfetch & ~HLE_FB_ZEQ)) {
         put(&b, "layout(input_attachment_index = 0, set = 2, binding = 0) "
                 "uniform subpassInput uFb;\n");
@@ -518,6 +533,14 @@ size_t hle_ff_ps_glsl(const HleFfPsKey *k, char *buf, size_t cap)
         put(&b, HLE_ZEQ_DECL_GLSL);
     }
     put(&b, "void main() {\n  vec4 cur = vDiffuse, tmp = vec4(0.0), r;\n");
+    for (unsigned s = 0; s < k->nstages; s++) {
+        if (wrap[s]) {
+            char n[8];
+            snprintf(n, sizeof(n), "vTex%u", s);
+            put(&b, HLE_CYLW_SET_GLSL, n, n, n, n, wrap[s] & 1, (wrap[s] >> 1) & 1,
+                (wrap[s] >> 2) & 1, wrap[s] >> 3);
+        }
+    }
     if (k->poly_smooth) {
         put(&b, HLE_POLY_COVER_GLSL);
     }

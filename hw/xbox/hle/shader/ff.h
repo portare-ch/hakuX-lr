@@ -120,7 +120,9 @@ typedef struct HleFfStage {
     uint32_t colorop, colorarg0, colorarg1, colorarg2;
     uint32_t alphaop, alphaarg0, alphaarg1, alphaarg2;
     uint32_t resultarg;
-    uint8_t texture;                  /* a texture is bound to this stage */
+    uint8_t texture;                  /* a texture is bound to this stage; bits 4-7:
+                                         its cylindrical wrap axes (s, t, r, q:
+                                         HLE_CYLW_GLSL) */
     uint8_t tex_dim;                  /* 2 = 2D, 3 = cube, 4 = volume */
     uint8_t alpha_kill;               /* D3DTSS_ALPHAKILL: texel alpha 0 discards */
     uint8_t unset;                    /* no texture set (D3D's Textures[stage] NULL): an
@@ -327,6 +329,33 @@ static inline const char *hle_push_glsl(void)
     "             float(max((pc.flags >> 16) & 255u, 1u));\n" \
     "    vec3 cv = clamp(d + 0.5, 0.0, 1.0);\n" \
     "    pcov = cv.x * cv.y * cv.z; }\n"
+
+/* Cylindrical texture wrap (D3DRS_WRAPn, the NV2A's CYLWRAP bits): between
+ * two vertices a wrapped coordinate takes the shorter way around [0, 1)
+ * (0.9 to 0.1 through 1.0). A stage with any axis wrapped reads its
+ * coordinates per vertex (HLE_CYLW_IN_GLSL, as vTexNpv[3]) and vTexN is a
+ * global set at the top of main (HLE_CYLW_SET_GLSL): vertices 1 and 2 move
+ * by 1.0 on a wrapped axis where more than 0.5 from vertex 0, then the
+ * perspective-correct barycentrics interpolate. A line's third vertex is
+ * undefined (weight 0). Needs HLE_BARY_EXT_GLSL. */
+#define HLE_CYLW_GLSL \
+    "vec4 cylw(vec4 p0, vec4 p1, vec4 p2, vec4 m) {\n" \
+    "  vec4 d1 = p1 - p0, d2 = p2 - p0;\n" \
+    "  p1 -= m * (vec4(greaterThan(d1, vec4(0.5))) - vec4(lessThan(d1, vec4(-0.5))));\n" \
+    "  p2 -= m * (vec4(greaterThan(d2, vec4(0.5))) - vec4(lessThan(d2, vec4(-0.5))));\n" \
+    "  vec3 bc = gl_BaryCoordEXT;\n" \
+    "  return bc.x * p0 + (bc.y != 0.0 ? bc.y * p1 : vec4(0.0)) +\n" \
+    "         (bc.z != 0.0 ? bc.z * p2 : vec4(0.0));\n" \
+    "}\n"
+/* printf formats: location, name, name; name x 4, the axes (bits) x 4 */
+#define HLE_CYLW_IN_GLSL "layout(location = %u) pervertexEXT in vec4 %spv[3];\nvec4 %s;\n"
+#define HLE_CYLW_SET_GLSL \
+    "  %s = cylw(%spv[0], %spv[1], %spv[2], vec4(%u.0, %u.0, %u.0, %u.0));\n"
+
+/* Cylindrical wrap's switch (off by default): vk/draw.c leaves the wrap bits
+ * out of the keys without it. The core option sets it before a game starts;
+ * HAKUX_HLE_CYLWRAP (Android: debug.hakux.cylwrap) decides either way. */
+extern bool g_hle_cylwrap;
 
 /* NV2A's projective texture division: coordinates times 1/q, with 1/0 the
  * largest float and 0 times it 0, so q = 0 projects (0, 0, 0) to 0, never

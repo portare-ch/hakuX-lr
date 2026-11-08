@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### What's new
+
+- **Cylindrical texture wrap (experimental, off by default)** — The NV2A's
+  cylindrical wrap (D3D's `D3DRS_WRAP0`–`3`): a wrapped texture coordinate
+  takes the short way around between vertices, which closes seams on
+  cylinder- and sphere-mapped geometry. Turn it on with the
+  `hakux_cylindrical_wrap` core option or `HAKUX_HLE_CYLWRAP=1`; Android
+  uses `debug.hakux.cylwrap`. It needs fragment shader barycentrics and is
+  not yet compared with an Xbox. The first draws that ask for it are logged.
+
 ## linux-v0.20.0 (Linux, aarch64 and x86-64, and Android)
 
 ### What's new

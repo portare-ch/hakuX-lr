@@ -505,8 +505,28 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
     for (unsigned s = 0; s < 3; s++) {
         hilo1 |= ((k->dot_map >> (4 * s)) & 7) == 4;
     }
+    /* The texture coordinates. A stage with cylindrical wrap axes (compare
+     * bits 16 + 4 s: s, t, r, q) reads them per vertex (ff.h HLE_CYLW_GLSL);
+     * not the point sprite's. */
+    char tin[512], tset[512] = "";
+    size_t ni = 0, ns = 0;
+    unsigned any_wrap = 0;
+    for (unsigned s = 0; s < 4; s++) {
+        static const char *const k_tn[4] = { "vTex0", "vTex1", "vTex2", "vTex3i" };
+        const char *n = k_tn[s];
+        const unsigned w = s == 3 && k->point_sprite ? 0 : (k->compare >> (16 + 4 * s)) & 15;
+        any_wrap |= w;
+        if (w) {
+            ni += (size_t)snprintf(tin + ni, sizeof(tin) - ni, HLE_CYLW_IN_GLSL, 2 + s, n, n);
+            ns += (size_t)snprintf(tset + ns, sizeof(tset) - ns, HLE_CYLW_SET_GLSL, n, n, n, n,
+                                   w & 1, (w >> 1) & 1, (w >> 2) & 1, w >> 3);
+        } else {
+            ni += (size_t)snprintf(tin + ni, sizeof(tin) - ni,
+                                   "layout(location = %u) in vec4 %s;\n", 2 + s, n);
+        }
+    }
     put(&b, "#version 450\n#extension GL_EXT_nonuniform_qualifier : require\n%s%s",
-        k->poly_smooth ? HLE_BARY_EXT_GLSL : "",
+        k->poly_smooth || any_wrap ? HLE_BARY_EXT_GLSL : "",
         hle_push_glsl());
     if (k->precise) {
         put(&b, "float q9(float x) { return floor(x * 255.0 + 0.500244140625) / 255.0; }\n"
@@ -518,10 +538,7 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "layout(set = 0, binding = 3) uniform texture3D uTex3D[];\n"
             "layout(location = 0) %sin vec4 vDiffuse;\n"
             "layout(location = 1) %sin vec4 vSpecular;\n"
-            "layout(location = 2) in vec4 vTex0;\n"
-            "layout(location = 3) in vec4 vTex1;\n"
-            "layout(location = 4) in vec4 vTex2;\n"
-            "layout(location = 5) in vec4 vTex3i;\n"
+            "%s"
             "layout(location = 6) in float vFog;\n"
             "%s%s%s%s"
             "layout(location = 0) out vec4 oColor;\n"
@@ -562,10 +579,10 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "  vec2 v = floor(c * 255.0 + 0.5);\n"
             "  return mix(v, v - 256.0, greaterThanEqual(v, vec2(128.0))) / 127.0;\n"
             "}\n"
-            "%s%s%s"
+            "%s%s%s%s"
             "void main() {\n"
-            "%s"
-            "  vec4 vTex3 = %s;\n", interp, interp, back, k->wbuf ? HLE_WBUF_IN_GLSL : "",
+            "%s%s"
+            "  vec4 vTex3 = %s;\n", interp, interp, tin, back, k->wbuf ? HLE_WBUF_IN_GLSL : "",
         (k->fbfetch & ~HLE_FB_ZEQ) || k->sblend || k->fblend ?
             "layout(input_attachment_index = 0, set = 2, binding = 0) "
             "uniform subpassInput uFb;\n" : "",
@@ -594,6 +611,7 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
         k->ckey ? "bool ckeq(vec4 t, vec4 c, vec4 n) {\n"
                   "  return all(equal(floor(t * n + 0.5), floor(c * n + 0.5)));\n"
                   "}\n" : "",
+        any_wrap ? HLE_CYLW_GLSL : "", tset,
         k->two_side ? "  vec4 v0 = gl_FrontFacing ? vDiffuse : vBack0;\n"
                       "  vec4 v1 = gl_FrontFacing ? vSpecular : vBack1;\n"
                     : "  vec4 v0 = vDiffuse, v1 = vSpecular;\n",
