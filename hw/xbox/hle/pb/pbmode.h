@@ -70,6 +70,9 @@ void hle_pb_subroutine_written(uint32_t v);
 void hle_pb_gamma(const uint8_t rgb[3][256]);
 /* PGRAPH waits in FLIP_STALL for a flip (any thread). */
 bool hle_pb_flip_waiting(void);
+/* The base of the DMA object a context method names (its handle), 0 for
+ * none: Kelvin's surface, texture and vertex offsets add it. */
+uint32_t hle_pb_dma_base(uint32_t handle);
 /* Once a second: kicks, words, the method histogram's top, errors. */
 void hle_pb_diag(void);
 /* debug (the decode thread): the decoder's GET and the guest's PUT */

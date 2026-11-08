@@ -4,6 +4,7 @@
 #include "hw/xbox/hle/base.h"
 #include "hw/xbox/hle/hle.h"
 #include "hw/xbox/hle/pb/kelvin.h"
+#include "hw/xbox/hle/pb/kdma.h"
 #include "hw/xbox/hle/front/cmd.h"
 #include "hw/xbox/hle/front/fe.h"
 #include "hw/xbox/hle/pb/pbdraw.h"
@@ -37,6 +38,12 @@
 /* Kelvin methods read here */
 #define NV097_SET_SURFACE_CLIP_HORIZONTAL 0x0200u   /* x 15:0, width 31:16 */
 #define NV097_SET_SURFACE_CLIP_VERTICAL   0x0204u
+#define NV097_SET_CONTEXT_DMA_A           0x0184u   /* textures, palettes */
+#define NV097_SET_CONTEXT_DMA_B           0x0188u
+#define NV097_SET_CONTEXT_DMA_COLOR       0x0194u
+#define NV097_SET_CONTEXT_DMA_ZETA        0x0198u
+#define NV097_SET_CONTEXT_DMA_VERTEX_A    0x019Cu
+#define NV097_SET_CONTEXT_DMA_VERTEX_B    0x01A0u
 #define NV097_SET_SURFACE_FORMAT          0x0208u   /* colour 3:0, zeta 7:4, type 11:8, log2 w/h */
 #define NV097_SET_SURFACE_PITCH           0x020Cu   /* colour 15:0, zeta 31:16 */
 #define NV097_SET_SURFACE_COLOR_OFFSET    0x0210u
@@ -170,6 +177,8 @@ static struct {
     bool on, device;
     uint32_t disp_w, disp_h;            /* the device's display (guest pixels) */
     uint32_t r[0x2000 / 4];             /* the methods read here, as last written */
+    uint32_t dma[HLE_KDMA_N];           /* the context DMA objects' bases (dma_base) */
+    uint8_t dma_known;                  /* which of them are read */
     bool rt_dirty;
     uint32_t rt, ds;                    /* the bound targets' object ids */
     uint32_t rt_w, rt_h;                /* the targets' physical size */
@@ -284,6 +293,35 @@ static struct {
 } g_pd;
 
 #define R(m) (g_pd.r[(m) >> 2])
+
+/* A context DMA object's base (kdma.h), read again after its context
+ * method. */
+static uint32_t dma_base(unsigned c)
+{
+    static const uint16_t method[HLE_KDMA_N] = {
+        NV097_SET_CONTEXT_DMA_A, NV097_SET_CONTEXT_DMA_B, NV097_SET_CONTEXT_DMA_COLOR,
+        NV097_SET_CONTEXT_DMA_ZETA, NV097_SET_CONTEXT_DMA_VERTEX_A, NV097_SET_CONTEXT_DMA_VERTEX_B };
+    if (!(g_pd.dma_known & 1u << c)) {
+        static const char *const name[HLE_KDMA_N] = { "A", "B", "colour", "zeta", "vertex A", "vertex B" };
+        static unsigned logged;
+        const uint32_t base = hle_pb_dma_base(R(method[c]));
+        if (base && base != g_pd.dma[c] && logged < 16) {
+            logged++;
+            hle_log("hakuX-hle-pb", "context DMA %s (object %08x) starts at %08x", name[c], R(method[c]), base);
+        }
+        g_pd.dma[c] = base;
+        g_pd.dma_known |= (uint8_t)(1u << c);
+    }
+    return g_pd.dma[c];
+}
+
+/* vertex array a's address */
+static uint32_t array_pa(unsigned a)
+{
+    const uint32_t off = R(NV097_SET_VERTEX_DATA_ARRAY_OFFSET + 4 * a);
+    return hle_kdma_array_at(off, dma_base(hle_kdma_array(off)));
+}
+
 static bool coh_managed(const PbObj *o, uint32_t *len);
 static void coh_synced(PbObj *o, uint32_t len);
 static void coh_forget(const PbObj *o);
@@ -1224,8 +1262,8 @@ static void sync_rt(void)
     g_pd.aa_x = swz ? 1 : sx;
     g_pd.aa_y = swz ? 1 : sy;
     uint32_t cpitch = R(NV097_SET_SURFACE_PITCH) & 0xFFFF, zpitch = R(NV097_SET_SURFACE_PITCH) >> 16;
-    uint32_t cpa = R(NV097_SET_SURFACE_COLOR_OFFSET) & 0x0FFFFFFFu;
-    uint32_t zpa = R(NV097_SET_SURFACE_ZETA_OFFSET) & 0x0FFFFFFFu;
+    uint32_t cpa = (dma_base(HLE_KDMA_COLOR) + R(NV097_SET_SURFACE_COLOR_OFFSET)) & 0x0FFFFFFFu;
+    uint32_t zpa = (dma_base(HLE_KDMA_ZETA) + R(NV097_SET_SURFACE_ZETA_OFFSET)) & 0x0FFFFFFFu;
     uint32_t cx_fmt = hle_kelvin_color_xfmt(cf, swz);
     uint32_t zx_fmt = (zf == 1 || zf == 2) ? hle_kelvin_depth_xfmt(zf == 2, zfloat, swz) : 0;
     /* no surface where D3D left none: offset 0, or (linear) a pitch short of
@@ -2856,7 +2894,8 @@ static uint32_t texture(unsigned s, bool *unset, bool *lin)
         *unset = true;
         return 0;
     }
-    uint32_t off = R(NV097_SET_TEXTURE_OFFSET + b), fmt = R(NV097_SET_TEXTURE_FORMAT + b);
+    uint32_t fmt = R(NV097_SET_TEXTURE_FORMAT + b);
+    uint32_t off = dma_base(hle_kdma_texture(fmt)) + R(NV097_SET_TEXTURE_OFFSET + b);
     uint32_t code = HLE_FMT_CODE(fmt), size = 0, pa = off & 0x0FFFFFFFu;
     const HleFmtInfo *fi = hle_fmt_info(code);
     *lin = fi && (fi->flags & HLE_FI_LIN);
@@ -2927,6 +2966,9 @@ static uint32_t texture(unsigned s, bool *unset, bool *lin)
         return best->id;
     }
     uint32_t pal_reg = code == HLE_XFMT_P8 ? R(NV097_SET_TEXTURE_PALETTE + b) : 0;
+    if (pal_reg) {
+        pal_reg = hle_kdma_palette_at(pal_reg, dma_base(hle_kdma_palette(pal_reg)));
+    }
     /* colour sign: the signed 8-bit channels uploaded offset binary, an
      * object apart from the texture read unsigned */
     const uint32_t sign = R(NV097_SET_TEXTURE_FILTER + b) >> 28;
@@ -3781,9 +3823,9 @@ static void draw_arrays(void)
     uint32_t order[HLE_DRAW_ATTRS], nord = 0;
     for (unsigned a = 0; a < HLE_DRAW_ATTRS; a++) {
         if ((R(NV097_SET_VERTEX_DATA_ARRAY_FORMAT + 4 * a) >> 4) & 0xF) {
-            uint32_t pa = R(NV097_SET_VERTEX_DATA_ARRAY_OFFSET + 4 * a) & 0x7FFFFFFFu;
+            uint32_t pa = array_pa(a);
             unsigned k = nord++;
-            while (k && (R(NV097_SET_VERTEX_DATA_ARRAY_OFFSET + 4 * order[k - 1]) & 0x7FFFFFFFu) > pa) {
+            while (k && array_pa(order[k - 1]) > pa) {
                 order[k] = order[k - 1];
                 k--;
             }
@@ -3793,7 +3835,7 @@ static void draw_arrays(void)
     for (unsigned j = 0; j < nord; j++) {
         unsigned a = order[j];
         uint32_t fmt = R(NV097_SET_VERTEX_DATA_ARRAY_FORMAT + 4 * a), stride = fmt >> 8;
-        uint32_t pa = R(NV097_SET_VERTEX_DATA_ARRAY_OFFSET + 4 * a) & 0x7FFFFFFFu;
+        uint32_t pa = array_pa(a);
         unsigned b = 0;
         while (b < d.nbind && !(stride && d.bind_stride[b] == stride && pa - base[b] < stride)) {
             b++;
@@ -4165,6 +4207,7 @@ static const bool k_pbd_acts[2048] = {
     [NV097_DRAW_ARRAYS / 4] = true,
     [NV097_INLINE_ARRAY / 4] = true,
     [NV097_SET_WINDOW_CLIP_HORIZONTAL / 4 ... (NV097_SET_WINDOW_CLIP_HORIZONTAL + 0x3C) / 4] = true,
+    [NV097_SET_CONTEXT_DMA_A / 4 ... NV097_SET_CONTEXT_DMA_VERTEX_B / 4] = true,
     [NV097_SET_SURFACE_CLIP_HORIZONTAL / 4 ... NV097_SET_SURFACE_ZETA_OFFSET / 4] = true,
     [NV097_SET_CONTROL0 / 4] = true,
     [NV097_SET_WINDOW_CLIP_TYPE / 4] = true,
@@ -4287,6 +4330,17 @@ void hle_pbd_method(uint32_t m, uint32_t v)
         g_pd.rt_dirty = true;               /* the window clip's rectangles */
     }
     switch (m) {
+    case NV097_SET_CONTEXT_DMA_A:
+    case NV097_SET_CONTEXT_DMA_B:
+    case NV097_SET_CONTEXT_DMA_VERTEX_A:
+    case NV097_SET_CONTEXT_DMA_VERTEX_B:
+        g_pd.dma_known = 0;
+        break;
+    case NV097_SET_CONTEXT_DMA_COLOR:
+    case NV097_SET_CONTEXT_DMA_ZETA:
+        g_pd.dma_known = 0;
+        g_pd.rt_dirty = true;
+        break;
     case NV097_SET_SURFACE_CLIP_HORIZONTAL:
     case NV097_SET_SURFACE_CLIP_VERTICAL:
     case NV097_SET_SURFACE_FORMAT:
@@ -5300,6 +5354,7 @@ bool hle_pbd_state_set(const HlePbdState *s, const float *imm, const uint32_t *i
         vis_begin();
     }
     g_pd.rt_dirty = true;                   /* the targets bound again from the methods */
+    g_pd.dma_known = 0;
     g_pd.cgen++;
     g_pd.ffgen++;
     g_pd.st_sent = false;
