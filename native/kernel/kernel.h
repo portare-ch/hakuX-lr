@@ -753,15 +753,17 @@ bool nc_kernel_page_fault(NcKernel *k, NcFrame *f, uint32_t va, bool write);
  * buffer [va, va+len) with host I/O, which fails rather than faults on a
  * page the guest doesn't have: such a page is paged in as for the kernel's
  * own access on the Xbox. The title's tables are walked; failing that, #PF
- * goes to the title's handler with the call's trampoline as the faulting
- * instruction, so the call runs again once the page is in. False then: the
- * call returns at once, before any effect. */
+ * goes to the title's handler (else STATUS_ACCESS_VIOLATION to the thread's
+ * SEH handlers) with the call's trampoline as the faulting instruction, so
+ * the call runs again once the page is in. False then: the call returns at
+ * once, before any effect. */
 bool nc_kernel_resident(NcKernel *k, uint32_t va, uint32_t len, bool write);
 /* A kernel call can touch a page the title pages in itself, as the code it
  * stands for would have, faulting into the title's handler. When the title
- * has a page-fault handler of its own, the call runs in a fault scope: on
- * that fault, nc_kernel_call_fault (from the host fault handler) jumps out
- * of the call, which raises #PF at the guest instruction that entered it,
+ * has a page-fault handler of its own, or the thread SEH handlers, the call
+ * runs in a fault scope: on that fault, nc_kernel_call_fault (from the host
+ * fault handler) jumps out of the call, which raises #PF (else the access
+ * violation, to the SEH handlers) at the guest instruction that entered it,
  * so it runs again once the page is in, as QEMU restarts a helper's guest
  * instruction. Otherwise nc_kernel_call_fault returns. */
 void nc_kernel_call_fault(NcKernel *k, uint32_t va, bool write);

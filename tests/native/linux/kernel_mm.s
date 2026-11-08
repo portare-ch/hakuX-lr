@@ -3,6 +3,8 @@
 /* Failed-commit regression test, run by kernel_mm.py.
  * Repeat ten times: reject 256 MiB, then commit, write, and release 16 MiB.
  * Leaked pages block the smaller commit; leaked reservations exhaust VA space.
+ * Then a kernel call on a reserved page: its fault goes to the thread's SEH
+ * handler, which commits the page, and the call runs again.
  * Code is at 0x11000; thunks at 0x10f00 follow kernel_mm.py's IMPORTS order.
  * Print the result and halt. */
 .intel_syntax noprefix
@@ -10,8 +12,10 @@
 .set DbgPrint,                THUNK + 4*0
 .set NtAllocateVirtualMemory, THUNK + 4*1
 .set NtFreeVirtualMemory,     THUNK + 4*2
+.set RtlInitializeCriticalSection, THUNK + 4*3
 
 .set MEM_COMMIT,     0x1000
+.set MEM_RESERVE,    0x2000
 .set MEM_RELEASE,    0x8000
 .set PAGE_READWRITE, 0x04
 
@@ -82,6 +86,39 @@ again:
     cmp dword ptr [round], 10
     jb again
 
+    /* 5. RtlInitializeCriticalSection on a reserved page: the fault goes
+     * to the SEH handler, which commits the page and continues, and the
+     * call runs again (Rainbow Six: Lockdown commits its heap so) */
+    STEP 5
+    mov dword ptr [base], 0
+    mov dword ptr [size], 0x10000
+    push PAGE_READWRITE
+    push MEM_RESERVE
+    PUSHI size
+    push 0
+    PUSHI base
+    call dword ptr [NtAllocateVirtualMemory]
+    test eax, eax
+    jnz fail
+    STEP 6
+    PUSHI seh_commit
+    push dword ptr fs:[0]
+    mov dword ptr fs:[0], esp
+    mov eax, dword ptr [base]
+    add eax, 0x3000
+    mov dword ptr [cs_va], eax
+    push eax
+    call dword ptr [RtlInitializeCriticalSection]
+    pop eax
+    mov dword ptr fs:[0], eax
+    add esp, 4
+    STEP 7
+    cmp dword ptr [seh_count], 1
+    jne fail
+    mov eax, dword ptr [cs_va]
+    cmp dword ptr [eax + 0x10], 0xFFFFFFFF  /* LockCount */
+    jne fail
+
     PUSHI passed
     call dword ptr [DbgPrint]
     add esp, 4
@@ -93,7 +130,34 @@ fail:
     add esp, 8
     hlt
 
+/* The SEH handler (cdecl: record, frame, context, dispatcher context):
+ * an access violation commits the page and continues execution. */
+seh_commit:
+    mov eax, dword ptr [esp + 4]
+    cmp dword ptr [eax], 0xC0000005
+    jne 1f
+    inc dword ptr [seh_count]
+    mov ecx, dword ptr [eax + 0x18]     /* ExceptionInformation[1]: the address */
+    and ecx, 0xFFFFF000
+    mov dword ptr [cbase], ecx
+    mov dword ptr [csize], 0x1000
+    push PAGE_READWRITE
+    push MEM_COMMIT
+    PUSHI csize
+    push 0
+    PUSHI cbase
+    call dword ptr [NtAllocateVirtualMemory]
+    xor eax, eax                        /* ExceptionContinueExecution */
+    ret
+1:
+    mov eax, 1                          /* ExceptionContinueSearch */
+    ret
+
 .align 4
+seh_count: .long 0
+cs_va: .long 0
+cbase: .long 0
+csize: .long 0
 step: .long 0
 round: .long 0
 base: .long 0

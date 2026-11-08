@@ -17,7 +17,7 @@ import tempfile
 
 HERE = Path(__file__).resolve().parent
 # Thunk order: DbgPrint, NtAllocateVirtualMemory, NtFreeVirtualMemory.
-IMPORTS = [8, 184, 199]
+IMPORTS = [8, 184, 199, 291]
 
 
 def tool(*names):
