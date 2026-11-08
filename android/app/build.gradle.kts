@@ -107,15 +107,23 @@ android {
     buildConfig = true    // BuildConfig.DEBUG: what only debug builds show (the hitch line)
   }
 
-  // The repository's mods/ folder as assets/mods (syncModAssets below).
+  // Ship the patches submodule's mods in the APK.
   sourceSets.getByName("main").assets.srcDir(layout.buildDirectory.dir("generated/modAssets").get().asFile)
 }
 
-// The repository's mods/ folder (mods and cheats per game: mods/README.md),
-// packed as the APK's assets/mods for the library's Mods & cheats; its
-// README stays out.
+// Bundle patches/mods as assets/mods, excluding its README.
+val modSources = rootProject.file("../patches/mods")
+// Fail if the submodule is missing; an empty Sync task would be skipped.
+val checkModSources = tasks.register("checkModSources") {
+  doLast {
+    if (!modSources.isDirectory) {
+      throw GradleException("patches/mods is missing: run git submodule update --init patches")
+    }
+  }
+}
 val syncModAssets = tasks.register<Sync>("syncModAssets") {
-  from(rootProject.file("../mods")) { exclude("README.md") }
+  dependsOn(checkModSources)
+  from(modSources) { exclude("README.md") }
   into(layout.buildDirectory.dir("generated/modAssets/mods"))
 }
 tasks.named("preBuild") { dependsOn(syncModAssets) }
