@@ -1,8 +1,8 @@
 # Copyright (C) 2026-present PortareOS
 # SPDX-License-Identifier: GPL-2.0-or-later
-# The libretro core for Linux (aarch64 and x86-64): built and checked in the
-# pinned image (tools/native/Dockerfile.linux) on every push and pull
-# request, both packages kept as the run's artifacts. A linux-v<version>
+# The Linux libretro core (aarch64 and x86-64) is built and tested in the
+# pinned image on pushes and PRs. Release tags also build the Android ARM64
+# core with NDK r29 and attach all three packages. A linux-v<version>
 # tag also publishes them as that release, with its
 # CHANGELOG.md section as the notes (tools/native/linux-release-notes.py); a
 # version with a suffix (0.12.0-exp.1) is a pre-release, not the latest.
@@ -113,8 +113,45 @@ jobs:
             build/package/hakux-${{ steps.version.outputs.version }}-x86_64.tar.gz.sha256
           if-no-files-found: error
 
+  # Experimental Android core for RetroArch: build with the pinned NDK r29.
+  # Built on release tags only, not on every push or PR.
+  build-android:
+    if: startsWith(github.ref, 'refs/tags/linux-v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version
+        id: version
+        run: |
+          echo "version=${GITHUB_REF_NAME#linux-v}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        with:
+          path: build/deps
+          key: linux-deps-${{ hashFiles('tools/native/linux-deps.json') }}
+
+      - name: Fetch pinned dependencies
+        run: python3 tools/native/linux-deps.py
+
+      - name: Build Android ARM64 core
+        env:
+          ANDROID_NDK: /usr/local/lib/android/sdk/ndk/29.0.14206865
+        run: |
+          test -f "$ANDROID_NDK/build/cmake/android.toolchain.cmake"
+          JOBS=4 sh tools/native/android-libretro.sh "${{ steps.version.outputs.version }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hakux-${{ steps.version.outputs.version }}-android-arm64
+          path: |
+            build/package/hakux-${{ steps.version.outputs.version }}-android-arm64.zip
+            build/package/hakux-${{ steps.version.outputs.version }}-android-arm64.zip.sha256
+          if-no-files-found: error
+
   release:
-    needs: [build, build-x86_64]
+    needs: [build, build-x86_64, build-android]
     if: startsWith(github.ref, 'refs/tags/linux-v')
     runs-on: ubuntu-latest
     permissions:

@@ -2,12 +2,73 @@
 
 ## Unreleased
 
-### What's new
+## linux-v0.23.0 (Linux, aarch64 and x86-64, and Android)
 
-- **XBE patches via RetroArch cheats** (#167) — Load widescreen and other
-  XBE patches from `.cht` files. Patches apply on restart when the game's
-  CRC-32 and size match. Use `tools/mods/xbe-to-cht.py` to convert IPS,
-  BPS, or patched XBEs.
+A compatibility-focused release with fixes for Xbox audio, rendering,
+memory, file I/O and game loading. It also adds XBE patches through
+RetroArch's Cheats menu.
+
+### Graphics
+
+- **Full-height framebuffers** (#180) — Thrillville and Wallace & Gromit:
+  The Curse of the Were-Rabbit now render their full 640 x 480 images
+  instead of losing the bottom of the frame. Adjacent allocations are
+  treated as one physical run only when they share a caller, preserving
+  the oversized-target guard needed by NBA Inside Drive 2003.
+- **NV2A 2D blits** (#182) — Respect source/destination pitch and GPU tile
+  boundaries, including a partial last row. WWE WrestleMania 21 reaches
+  its main menu with audio instead of corrupting its own push buffer.
+  A separate crash after further menu input remains under investigation.
+
+### Kernel and game compatibility
+
+- **Unbuffered overlapped writes** (#179) — Return `STATUS_PENDING` for
+  asynchronous hard-disk transfers without an explicit event. Sniper
+  Elite now reaches player-name entry; Rogue Trooper reaches its tutorial
+  with sound. Buffered writes retain immediate completion.
+- **More contiguous allocations** (#175) — Raise the limit from 4,096 to
+  32,768 blocks. Wings of War loads its first mission, SNK vs. Capcom:
+  SVC Chaos reaches a fight, and Shrek Super Party reaches its game
+  selection. With the DSP fix below, The Simpsons: Road Rage reaches
+  playable races.
+- **Directory wildcard matching** (#176) — Correct `*.` and `*.*`
+  matching for names without extensions. Trivial Pursuit: Unhinged
+  now finds its language directories and reaches profile selection.
+- **More XBE sections** (#174) — Support up to 1,024 sections instead of
+  256. Spikeout: Battle Street loads and reaches its player-name screen.
+- **Nested exceptions** (#177) — Raise the per-thread exception limit
+  from 8 to 64, fixing XIII's early exception overflow. Older savestates
+  remain supported.
+
+### Audio and stability
+
+- **DSP56300 JIT loop returns** (#178) — Handle subroutine returns at
+  the end of a `DO` loop correctly. Fixes DMA stalls, missing audio and
+  hangs in games including WWE Raw 2, Oddworld: Munch's Oddysee,
+  Project: Snowblind, Genma Onimusha, The Simpsons: Road Rage,
+  RollerCoaster Tycoon and Whiplash. The DSP JIT regression suite
+  passed 1,053 tests on x86-64.
+
+### Patches and tools
+
+- **XBE patches through RetroArch cheats** (#169) — Apply widescreen
+  and other executable patches from `.cht` entries, matched to the
+  original XBE by CRC-32 and size. Use `tools/mods/xbe-to-cht.py`
+  for IPS/BPS or patched-XBE conversion; enable the cheat, apply
+  changes and restart. Ordinary memory cheats remain supported.
+- **Community patch repository** (#173) — Keep Android mods and
+  converted RetroArch patches in
+  [hakux-lr-patches](https://github.com/portare-ch/hakux-lr-patches).
+  The Android app uses the `patches` submodule; initialize it when
+  building the app. Six 60 FPS mods have been converted to `.cht`
+  entries; refresh-rate-dependent 120 FPS mods remain Android-only.
+
+### Testing
+
+The fixes above were tested primarily with RetroArch 1.22.2 on x86-64
+Linux with KVM. Linux CI builds and tests both architectures; the Android
+ARM64 core remains experimental and has not been tested on a device.
+Game progress described above is not a guarantee of full playability.
 
 ## linux-v0.22.0 (Linux, aarch64 and x86-64, and Android)
 
