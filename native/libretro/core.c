@@ -840,14 +840,17 @@ static void xbe_patches_changed(void);
  * one waits for it, and the vblank keeps the Xbox's rate. A frontend that
  * spaces the calls itself (Sync to Exact Content Framerate, audio sync,
  * presents that wait) never makes one wait, and fast-forward, frame steps
- * and rewinding are left alone. */
+ * and rewinding are left alone. Unblocked (no audio, a refresh at or above
+ * the core's rate) and vsync are what this is for; a frontend without the
+ * throttle state is treated the same. */
 static uint64_t paced(uint64_t now)
 {
     const uint64_t due = g_last_run_at + NC_LR_FRAME_NS;
     struct retro_throttle_state t = {RETRO_THROTTLE_NONE, 0.0f};
     if (!g_last_run_at || now + 2000000ull >= due ||
-        (g_env(RETRO_ENVIRONMENT_GET_THROTTLE_STATE, &t) && t.mode != RETRO_THROTTLE_NONE &&
-         t.mode != RETRO_THROTTLE_VSYNC)) {
+        (g_env(RETRO_ENVIRONMENT_GET_THROTTLE_STATE, &t) &&
+         (t.mode == RETRO_THROTTLE_FAST_FORWARD || t.mode == RETRO_THROTTLE_FRAME_STEPPING ||
+          t.mode == RETRO_THROTTLE_REWINDING))) {
         g_last_run_at = now;
         return now;
     }

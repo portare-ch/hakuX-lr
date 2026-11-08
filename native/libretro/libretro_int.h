@@ -63,6 +63,8 @@ void nc_lr_input_set_device(unsigned port, unsigned device);
  * front frame looked at, now (vulkan.c, and the read-back here): the
  * NV2A's vblank keeps clear of the moment. */
 bool nc_lr_video_run(retro_video_refresh_t video);
+/* Repeat Frames: a video_cb every retro_run, the last frame again if need be. */
+void nc_lr_video_set_repeat(bool on);
 void nc_lr_video_pickup(void);
 void nc_lr_video_geometry(struct retro_game_geometry *g);
 void nc_lr_overscan(uint32_t w, uint32_t h, uint32_t *cx, uint32_t *cy);
@@ -88,10 +90,10 @@ void nc_lr_net_run(void);
 
 /* vulkan.c — the renderer on RetroArch's Vulkan device, the guest booted in
  * its context_reset (load: false when the frontend has none, the frames then
- * read back); a new frame handed over as an image, *shown (false: not with
- * Vulkan). */
+ * read back); a new frame handed over as an image, or with repeat the front
+ * one again, *shown (false: not with Vulkan). */
 bool nc_lr_vk_negotiate(void);
-bool nc_lr_vk_run(retro_video_refresh_t video, bool *shown);
+bool nc_lr_vk_run(retro_video_refresh_t video, bool repeat, bool *shown);
 /* The game unloaded (after context_destroy): the negotiation forgotten. */
 void nc_lr_vk_reset(void);
 

@@ -7,8 +7,10 @@
  * RetroArch gets a frame only when the game has drawn a new one, so its FPS
  * counter, and overlays such as MangoHud, count the game's frames; without
  * one it keeps showing the last, and retro_run waits out the display's
- * period itself (core.c). The renderer applies gamma; RetroArch handles
- * letterboxing using the reported aspect.
+ * period itself (core.c). Repeat Frames hands it the last frame again
+ * instead, for its recording and black frame insertion, which need one each
+ * period (RetroArch doesn't tell a core it uses them). The renderer applies
+ * gamma; RetroArch handles letterboxing using the reported aspect.
  *
  * Crop Overscan removes 3/80 of each edge from standard-definition frames.
  * This gives whole-pixel crops at 640x480 and 720x480 at every render scale
@@ -33,6 +35,8 @@ static struct {
     uint32_t *buf;           /* the read-back frame */
     size_t cap;              /* pixels */
     uint32_t gen, swap;      /* the read-back frame's display generation and swap */
+    bool dupe_checked, can_dupe;
+    bool repeat;             /* Repeat Frames: a video_cb every retro_run */
     bool widescreen;         /* the console is set to widescreen */
     bool full;               /* the overscan shown, not cropped */
 } g_v;
@@ -56,6 +60,11 @@ void nc_lr_video_reset(void)
 void nc_lr_video_set_widescreen(bool on)
 {
     g_v.widescreen = on;
+}
+
+void nc_lr_video_set_repeat(bool on)
+{
+    g_v.repeat = on;
 }
 
 void nc_lr_video_geometry(struct retro_game_geometry *g)
@@ -153,13 +162,27 @@ static bool take_new(void)
 
 bool nc_lr_video_run(retro_video_refresh_t video)
 {
+    static uint32_t black[640 * 480];
     bool shown;
-    if (nc_lr_vk_run(video, &shown)) {
+    if (nc_lr_vk_run(video, g_v.repeat, &shown)) {
         return shown;
     }
-    if (!take_new()) {
+    if (take_new()) {
+        video(g_v.buf, g_v.w, g_v.h, g_v.w * sizeof(uint32_t));
+        return true;
+    }
+    if (!g_v.repeat) {
         return false;
     }
-    video(g_v.buf, g_v.w, g_v.h, g_v.w * sizeof(uint32_t));
+    if (!g_v.dupe_checked) {
+        g_v.dupe_checked = true;
+        g_v.can_dupe = false;
+        nc_lr_env(RETRO_ENVIRONMENT_GET_CAN_DUPE, &g_v.can_dupe);
+    }
+    if (g_v.buf) {
+        video(g_v.can_dupe ? NULL : g_v.buf, g_v.w, g_v.h, g_v.w * sizeof(uint32_t));
+    } else {
+        video(black, 640, 480, 640 * sizeof(uint32_t));
+    }
     return true;
 }

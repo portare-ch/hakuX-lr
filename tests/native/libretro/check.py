@@ -327,16 +327,34 @@ def main():
         # A frontend that paces by its presents (vsync, no audio sync) calls
         # again at once when there is no present to wait in; the core waits
         # out the period, so 30 calls still take 29 of them (the first
-        # doesn't wait).
-        unpaced = subprocess.run([str(x) for x in (args.harness, args.core, root / 'spin.iso', 30, root / 'saves')],
-                                 env=dict(os.environ, HARNESS_UNPACED='1'), capture_output=True, text=True,
-                                 timeout=60)
-        took = re.search(r'ran 30 frames: .* without a frame, \d+ audio frames in ([\d.]+) s', unpaced.stdout)
-        if unpaced.returncode or not took or float(took.group(1)) < 29 * 1001 / 60000 * 0.95:
-            print(unpaced.stdout[-4000:], unpaced.stderr[-4000:])
-            raise SystemExit(f'FAIL: retro_run without frames, called back to back: exit {unpaced.returncode}, '
-                             f'{took.group(1) if took else "?"} s for 30 calls')
-        print(f'PASS: 30 retro_run calls without frames, back to back, took {took.group(1)} s')
+        # doesn't wait). So does RetroArch unblocked (no audio, a fast
+        # display); fast-forward isn't held.
+        def unpaced(throttle=None):
+            env = dict(os.environ, HARNESS_UNPACED='1')
+            if throttle is not None:
+                env['HARNESS_THROTTLE'] = str(throttle)
+            r = subprocess.run([str(x) for x in (args.harness, args.core, root / 'spin.iso', 30, root / 'saves')],
+                               env=env, capture_output=True, text=True, timeout=60)
+            took = re.search(r'ran 30 frames: .* without a frame, \d+ audio frames in ([\d.]+) s', r.stdout)
+            if r.returncode or not took:
+                print(r.stdout[-4000:], r.stderr[-4000:])
+                raise SystemExit(f'FAIL: retro_run called back to back (throttle {throttle}): exit {r.returncode}')
+            return float(took.group(1))
+        period = 1001 / 60000
+        for name, throttle in (('no throttle state', None), ('unblocked', 6), ('vsync', 5)):
+            took = unpaced(throttle)
+            if took < 29 * period * 0.95:
+                raise SystemExit(f'FAIL: 30 retro_run calls without frames, back to back ({name}): {took} s')
+            print(f'PASS: 30 retro_run calls without frames, back to back ({name}), took {took} s')
+        took = unpaced(2)
+        if took > 10 * period:
+            raise SystemExit(f'FAIL: fast-forward held to the period: 30 calls took {took} s')
+        print(f'PASS: fast-forward not held: 30 calls took {took} s')
+        # Repeat Frames: the last frame again each call, for RetroArch's
+        # recording and black frame insertion.
+        run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
+            ('ran 30 frames: 30 video calls', ' 0 without a frame'),
+            dict(os.environ, HARNESS_OPTIONS=f'{OFF};hakux_repeat_frames=enabled'))
         env = dict(os.environ, HARNESS_OPTIONS_LATER=f'{OFF};hakux_render_scale=3;hakux_video_region=pal;'
                    'hakux_crop_overscan=disabled;hakux_rumble=enabled;hakux_frame_pace=2')
         run([args.harness, args.core, root / 'spin.iso', 60, root / 'saves'], 0,

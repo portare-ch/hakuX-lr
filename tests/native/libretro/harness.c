@@ -30,6 +30,8 @@
  * frontend (vk.c) negotiates with it, as RetroArch does, without a window.
  * HARNESS_UNPACED=1: each retro_run right after the last, as RetroArch calls
  * it when no present waits for the vsync (the core then keeps the period).
+ * HARNESS_THROTTLE=N: RetroArch's throttle state (RETRO_THROTTLE_*), as it
+ * reports it to the core; without it the harness has none.
  * HARNESS_RESET_AT=N: retro_reset before the Nth retro_run.
  * HARNESS_REINIT_AT=N (with HARNESS_VULKAN): before the Nth, the video
  * driver rebuilt as RetroArch does it uncached: context_destroy, another
@@ -173,6 +175,14 @@ static bool environment(unsigned cmd, void *data)
     case RETRO_ENVIRONMENT_GET_CAN_DUPE:
         *(bool *)data = true;
         return true;
+    case RETRO_ENVIRONMENT_GET_THROTTLE_STATE: {
+        const char *mode = getenv("HARNESS_THROTTLE");
+        if (!mode) {
+            return false;
+        }
+        *(struct retro_throttle_state *)data = (struct retro_throttle_state){(unsigned)atoi(mode), 0.0f};
+        return true;
+    }
     case RETRO_ENVIRONMENT_SET_CONTROLLER_INFO: {   /* the ports, and port 1's types if all have them */
         const struct retro_controller_info *info = data;
         char types[256] = "";

@@ -131,7 +131,9 @@ video_cb once if the game drew a new frame (exported); none otherwise
   a frame. RetroArch gets only the frames the game draws (owner's
   requirement: its FPS counter, and overlays such as MangoHud, must show the
   game's frame rate), and keeps showing the last one of a 30 fps title or a
-  static screen.
+  static screen. The Repeat Frames option hands the last frame again each
+  call instead, for RetroArch's recording and black frame insertion, which
+  need one per period; RetroArch doesn't tell a core it uses them.
 - Without repeats, RetroArch's presents no longer wait for the vsync: there
   is none in a call without a frame, and a free swapchain image lets one
   return at once. When RetroArch paces by its presents alone, its next call
@@ -139,7 +141,8 @@ video_cb once if the game drew a new frame (exported); none otherwise
   (1001/60000 s) has passed since the last one, so the vblank keeps the
   Xbox's rate. A frontend that spaces the calls itself (Sync to Exact
   Content Framerate, audio sync, presents that wait) never makes one wait,
-  so there is no second clock there; fast-forward, frame steps and
+  so there is no second clock there. Unblocked (no audio, a refresh at or
+  above the core's rate) waits like vsync; fast-forward, frame steps and
   rewinding are not held.
 - A gap (the menu, a long stall): when no `retro_run` comes for two periods,
   `nc_pause_set(true)`; the next `retro_run` resumes. The guest's time leaves

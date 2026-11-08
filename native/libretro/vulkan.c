@@ -15,6 +15,8 @@
  * until video_cb has submitted the copy so the renderer cannot overwrite it.
  * The slot handed last (and its crop) gets no video_cb: RetroArch keeps
  * showing it, and its FPS counter counts the game's frames, not repeats.
+ * With Repeat Frames it is copied and handed again, as is a dupe before
+ * the first frame.
  *
  * A swapchain rebuild with an unchanged sync mask remains undetected:
  * wait_sync_index may miss an in-flight command buffer before it is reset.
@@ -302,14 +304,18 @@ static bool export_image(unsigned idx, uint32_t w, uint32_t h)
     return true;
 }
 
-bool nc_lr_vk_run(retro_video_refresh_t video, bool *shown)
+bool nc_lr_vk_run(retro_video_refresh_t video, bool repeat, bool *shown)
 {
     *shown = false;
     if (!g_hw) {
         return false;
     }
-    if (!g_vk) {
-        return true;                /* the device isn't up: RetroArch shows what it has */
+    if (!g_vk) {                    /* the device isn't up: RetroArch shows what it has */
+        if (repeat) {
+            video(NULL, 640, 480, 0);
+            *shown = true;
+        }
+        return true;
     }
     const unsigned mask = g_vk->get_sync_index_mask(g_vk->handle);
     if (mask != g_mask) {
@@ -325,11 +331,15 @@ bool nc_lr_vk_run(retro_video_refresh_t video, bool *shown)
     nc_lr_video_pickup();
     if (idx >= MAX_SYNC || !hle_disp_acquire(&f)) {
         hle_disp_use_end();
-        return true;                /* no frame yet (the boot) */
+        if (repeat) {               /* no frame yet (the boot) */
+            video(NULL, 640, 480, 0);
+            *shown = true;
+        }
+        return true;
     }
     uint32_t cx, cy;
     nc_lr_overscan(f.w, f.h, &cx, &cy);
-    if (g_handed.valid && f.gen == g_handed.gen && f.swap_id == g_handed.swap_id && f.w == g_handed.w &&
+    if (!repeat && g_handed.valid && f.gen == g_handed.gen && f.swap_id == g_handed.swap_id && f.w == g_handed.w &&
         f.h == g_handed.h && cx == g_handed.cx && cy == g_handed.cy) {
         hle_disp_release(f.slot);   /* the game drew nothing new */
         hle_disp_use_end();
