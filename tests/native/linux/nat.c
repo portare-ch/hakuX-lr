@@ -353,6 +353,8 @@ static bool has(const char *s, const char *what)
 
 static const uint8_t GUEST_MAC[6] = { 0x00, 0x50, 0xf2, 0x12, 0x34, 0x56 };
 static const uint8_t SLIRP_MAC[6] = { 0x52, 0x55, 0x0a, 0x00, 0x02, 0x02 };
+/* net=nat leases the console 10.0.2.15, the UDP 3074 forward's target (net=all
+ * one from its MAC, 10.0.2.16-215: nc_net_nat_shared) */
 static const uint8_t GUEST_IP[4] = { 10, 0, 2, 15 };
 static const uint8_t GATEWAY_IP[4] = { 10, 0, 2, 2 };
 
@@ -494,6 +496,25 @@ static bool port_free(uint16_t port)
     return ok;
 }
 
+/* NAT, port forwarding and UPnP start on the first console frame. */
+static void boot(void)
+{
+    nc_net_start();
+    console_arp();
+}
+
+static bool port_held(uint16_t port, int ms)
+{
+    const int64_t end = now_ms() + ms;
+    while (port_free(port)) {
+        if (now_ms() >= end) {
+            return false;
+        }
+        sleep_ms(10);
+    }
+    return true;
+}
+
 static void option(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 static void option(const char *fmt, ...)
 {
@@ -526,8 +547,10 @@ int main(void)
     option("upnp=127.0.0.1:%u", g_igd.ssdp_port);
     nc_net_start();
     CHECK(nc_net_link(), "nat: started");
-    CHECK(!port_free(NATPORT), "UDP %u held for the console", NATPORT);
+    sleep_ms(100);
+    CHECK(port_free(NATPORT), "UDP %u free until the console's first frame", NATPORT);
     console_arp();
+    CHECK(port_held(NATPORT, 2000), "UDP %u held for the console", NATPORT);
     if (ip) {
         const uint16_t from = console_source_port(ip, "from 3074");
         CHECK(from == NATPORT, "the console's UDP 3074 leaves from %u (got %u)", NATPORT, from);
@@ -562,7 +585,7 @@ int main(void)
 
     /* Retry error 725 with a permanent lease. */
     igd_reset(true);
-    nc_net_start();
+    boot();
     CHECK(igd_wait(&g_igd.adds, 2, 5000) && has(g_igd.last_add, "<NewLeaseDuration>0</NewLeaseDuration>"),
           "UPnP: asked again for a permanent forward after error 725");
     nc_net_stop();
@@ -572,7 +595,7 @@ int main(void)
     for (int layout = 1; layout <= 3; layout++) {
         igd_reset(false);
         g_igd.layout = layout;
-        nc_net_start();
+        boot();
         CHECK(igd_wait(&g_igd.adds, 1, 5000), "UPnP: AddPortMapping asked at %s", LAYOUTS[layout].resolved);
         nc_net_stop();
         CHECK(igd_count(&g_igd.deletes) == 1, "UPnP: removed at %s", LAYOUTS[layout].resolved);
@@ -581,7 +604,7 @@ int main(void)
     /* Stop before AddPortMapping replies, after the router applies it. */
     igd_reset(false);
     g_igd.add_delay_ms = 600;
-    nc_net_start();
+    boot();
     CHECK(igd_wait(&g_igd.adds, 1, 5000), "UPnP: AddPortMapping asked (answer delayed)");
     nc_net_stop();
     CHECK(igd_wait(&g_igd.deletes, 1, 2000) && igd_count(&g_igd.queries) == 1,
@@ -591,7 +614,7 @@ int main(void)
     igd_reset(false);
     snprintf(g_igd.owner, sizeof(g_igd.owner), "192.168.1.99");
     g_igd.add_delay_ms = 600;
-    nc_net_start();
+    boot();
     CHECK(igd_wait(&g_igd.adds, 1, 5000), "UPnP: AddPortMapping asked (conflict answer delayed)");
     nc_net_stop();
     CHECK(igd_wait(&g_igd.queries, 1, 2000), "UPnP: the router asked whose forward it is");
@@ -602,7 +625,7 @@ int main(void)
     /* A failed ownership query still allows cleanup of a confirmed mapping. */
     igd_reset(false);
     g_igd.fail_queries = true;
-    nc_net_start();
+    boot();
     CHECK(igd_wait(&g_igd.adds, 1, 5000), "UPnP: AddPortMapping asked (ownership query to fail)");
     sleep_ms(100);
     nc_net_stop();
@@ -613,7 +636,7 @@ int main(void)
     igd_reset(false);
     g_igd.fail_from = 2, g_igd.fail_to = 4;
     option("upnplease=2");
-    nc_net_start();
+    boot();
     CHECK(igd_wait(&g_igd.adds, 4, 6000), "UPnP: renewal asked again after %u failures", 2u);
     CHECK(igd_count(&g_igd.deletes) == 0 && has(g_igd.last_add, "<NewLeaseDuration>2</NewLeaseDuration>"),
           "UPnP: the forward kept through failed renewals");
@@ -627,9 +650,8 @@ int main(void)
     struct sockaddr_in b = { .sin_family = AF_INET, .sin_port = htons(BUSYPORT) };
     bind(busy, (struct sockaddr *)&b, sizeof(b));
     option("natport=%u", BUSYPORT);
-    nc_net_start();
+    boot();
     CHECK(nc_net_link(), "nat: started with UDP %u taken", BUSYPORT);
-    console_arp();
     if (ip) {
         const uint16_t from = console_source_port(ip, "from 3074 again");
         CHECK(from && from != BUSYPORT, "the console's UDP 3074 leaves from another port (%u)", from);
@@ -642,8 +664,8 @@ int main(void)
     /* upnp=off */
     option("natport=%u", NATPORT);
     option("upnp=off");
-    nc_net_start();
-    CHECK(!port_free(NATPORT), "UDP %u held with UPnP off", NATPORT);
+    boot();
+    CHECK(port_held(NATPORT, 2000), "UDP %u held with UPnP off", NATPORT);
     sleep_ms(300);
     CHECK(igd_count(&g_igd.searches) == 0, "UPnP off: no M-SEARCH");
     nc_net_stop();
@@ -652,7 +674,7 @@ int main(void)
     option("upnp=127.0.0.1:%u", g_igd.ssdp_port);
     t = now_ms();
     for (int i = 0; i < 5; i++) {
-        nc_net_start();
+        boot();
         sleep_ms(i * 3);
         nc_net_stop();
     }

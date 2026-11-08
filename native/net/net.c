@@ -46,10 +46,11 @@ static struct {
     char pcap_path[128];                /* pcap=: "" none */
     FILE *pcap;                         /* under lock */
     uint32_t twin;                      /* a console with our MAC, not told yet; 0: none */
+    uint32_t conflict;                  /* another console at our leased address, not told yet; 0: none */
 } g_net = {
     .lock = PTHREAD_MUTEX_INITIALIZER,
     .wake_fd = -1,
-    .cfg = { .nat_port = 3074, .upnp = true, .upnp_lease = 3600, .lan_port = 3075, .kai_port = 34523 },
+    .cfg = { .nat_port = 3074, .upnp = true, .upnp_lease = 3600, .lan_port = 3075 },
 };
 
 static bool ring_init(Ring *r, unsigned n)
@@ -109,8 +110,8 @@ bool nc_net_option(const char *arg)
 {
     if (!strncmp(arg, "net=", 4)) {
         const char *v = arg + 4;
-        g_net.mode = !strcmp(v, "nat") ? NC_NET_NAT : !strcmp(v, "lan") ? NC_NET_LAN
-                     : !strcmp(v, "kai") ? NC_NET_KAI : NC_NET_OFF;
+        g_net.mode = !strcmp(v, "on") ? NC_NET_ON : !strcmp(v, "nat") ? NC_NET_NAT
+                     : !strcmp(v, "lan") ? NC_NET_LAN : NC_NET_OFF;
     } else if (!strncmp(arg, "dns=", 4)) {
         char buf[64];
         snprintf(buf, sizeof(buf), "%s", arg + 4);
@@ -158,31 +159,27 @@ bool nc_net_option(const char *arg)
             g_net.cfg.lan_port = (uint16_t)p;
         }
     } else if (!strncmp(arg, "lanbcast=", 9)) {
-        char buf[32];
-        snprintf(buf, sizeof(buf), "%s", arg + 9);
-        char *slash = strchr(buf, '/');
-        if (slash) {
-            *slash = 0;
-            const int bits = atoi(slash + 1);
-            if (bits > 0 && bits <= 32) {
-                g_net.cfg.lan_mask = htonl(bits == 32 ? 0xFFFFFFFFu : ~(0xFFFFFFFFu >> bits));
+        char list[128];
+        snprintf(list, sizeof(list), "%s", arg + 9);
+        g_net.cfg.nbcast = 0;
+        for (char *save = NULL, *t = strtok_r(list, ",", &save); t && g_net.cfg.nbcast < NC_NET_BCASTS;
+             t = strtok_r(NULL, ",", &save)) {
+            const unsigned i = g_net.cfg.nbcast;
+            g_net.cfg.lan_mask[i] = 0;
+            char *slash = strchr(t, '/');
+            if (slash) {
+                *slash = 0;
+                const int bits = atoi(slash + 1);
+                if (bits > 0 && bits <= 32) {
+                    g_net.cfg.lan_mask[i] = htonl(bits == 32 ? 0xFFFFFFFFu : ~(0xFFFFFFFFu >> bits));
+                }
+            }
+            if (parse_ip(t, &g_net.cfg.lan_bcast[i])) {
+                g_net.cfg.nbcast++;
             }
         }
-        parse_ip(buf, &g_net.cfg.lan_bcast);
     } else if (!strncmp(arg, "lanpeers=", 9)) {
         parse_peers(arg + 9);
-    } else if (!strncmp(arg, "kai=", 4)) {
-        char buf[64];
-        snprintf(buf, sizeof(buf), "%s", arg + 4);
-        char *colon = strchr(buf, ':');
-        if (colon) {
-            *colon = 0;
-            const int p = atoi(colon + 1);
-            g_net.cfg.kai_port = p > 0 && p < 65536 ? (uint16_t)p : g_net.cfg.kai_port;
-        }
-        snprintf(g_net.cfg.kai_host, sizeof(g_net.cfg.kai_host), "%s", buf);
-        g_net.cfg.kai_ip = 0;
-        parse_ip(buf, &g_net.cfg.kai_ip);       /* else a name, looked up as it connects */
     } else if (!strncmp(arg, "pcap=", 5)) {
         snprintf(g_net.pcap_path, sizeof(g_net.pcap_path), "%s", arg + 5);
     } else {
@@ -276,6 +273,22 @@ void nc_net_twin(uint32_t ip)
     pthread_mutex_lock(&g_net.lock);
     g_net.twin = ip;
     pthread_mutex_unlock(&g_net.lock);
+}
+
+void nc_net_conflict(uint32_t ip)
+{
+    pthread_mutex_lock(&g_net.lock);
+    g_net.conflict = ip;
+    pthread_mutex_unlock(&g_net.lock);
+}
+
+bool nc_net_take_conflict(char *addr, size_t len)
+{
+    pthread_mutex_lock(&g_net.lock);
+    const struct in_addr a = { .s_addr = g_net.conflict };
+    g_net.conflict = 0;
+    pthread_mutex_unlock(&g_net.lock);
+    return a.s_addr && inet_ntop(AF_INET, &a, addr, (socklen_t)len);
 }
 
 bool nc_net_take_twin(char *addr, size_t len)
@@ -415,9 +428,9 @@ void nc_net_start(void)
             nc_net_option(t);
         }
     }
-    const NcNetBackend *be = g_net.mode == NC_NET_NAT   ? &nc_net_nat
+    const NcNetBackend *be = g_net.mode == NC_NET_ON    ? &nc_net_all
+                             : g_net.mode == NC_NET_NAT ? &nc_net_nat
                              : g_net.mode == NC_NET_LAN ? &nc_net_lan
-                             : g_net.mode == NC_NET_KAI ? &nc_net_kai
                                                         : NULL;
     if (!be) {
         nc_log("hakuX-native-net", "network off: the NIC has no link");

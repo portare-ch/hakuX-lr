@@ -264,25 +264,16 @@ class NativeCoreActivity : SDLActivity(), InputManager.InputDeviceListener {
     /* Reads take a quarter of the console's drives' time, their thread
      * waiting (the game's other threads run meanwhile, as on the console). */
     args += "devtime=${if (settings.consoleTiming) 1 else 0}"
-    /* The console's network (native/net): system link with the consoles on
-     * this network (their broadcasts reach it under the multicast lock), or
-     * through an XLink Kai engine; the Internet through NAT, Insignia's DNS
-     * server given by DHCP (Xbox Live); off, no cable. */
+    /* The console's network cable (native/net): plugged in, the Internet
+     * through NAT (Insignia's DNS server given by DHCP: Xbox Live) and the
+     * consoles on this network (system link: their broadcasts reach it under
+     * the multicast lock; those named, directly) at once; off, no cable. */
     val prefs = AppPrefs(this)
-    when (prefs.networkMode) {
-      AppPrefs.NET_LAN -> {
-        args += "net=lan"
-        Network.broadcastAddress(this)?.let { args += "lanbcast=$it" }
-        prefs.lanPeers.replace(" ", "").takeIf { it.isNotEmpty() }?.let { args += "lanpeers=$it" }
-      }
-      AppPrefs.NET_KAI -> prefs.kaiEngine.trim().takeIf { it.isNotEmpty() }?.let {
-        args += "net=kai"
-        args += "kai=$it"
-      }
-      AppPrefs.NET_INSIGNIA -> {
-        args += "net=nat"
-        args += "dns=${prefs.insigniaDns.trim().ifEmpty { AppPrefs.INSIGNIA_DNS }}"
-      }
+    if (prefs.networkOn) {
+      args += "net=on"
+      args += "dns=${prefs.insigniaDns.trim().ifEmpty { AppPrefs.INSIGNIA_DNS }}"
+      Network.broadcastAddress(this)?.let { args += "lanbcast=$it" }
+      prefs.lanPeers.replace(" ", "").takeIf { it.isNotEmpty() }?.let { args += "lanpeers=$it" }
     }
     /* The game's mods (their files and XBE patches) and cheats (mods/):
      * the manifest the core reads as the disc opens. */
@@ -313,7 +304,7 @@ class NativeCoreActivity : SDLActivity(), InputManager.InputDeviceListener {
       else -> "started"
     })
     super.onCreate(savedInstanceState)
-    if (AppPrefs(this).networkMode == AppPrefs.NET_LAN) {
+    if (AppPrefs(this).networkOn) {
       multicastLock = Network.multicastLock(this)
     }
     setupOnScreenController()
