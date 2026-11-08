@@ -2,24 +2,37 @@
 
 ## Unreleased
 
-- **Network** — One switch enables Xbox Live and system link, on by default.
-  On Android, older LAN, Xbox Live and XLink Kai settings migrate to On.
-- **System link** — Consoles negotiate distinct IP addresses before DHCP
-  leasing. An address conflict discovered afterward is reported.
-- **Console HDD keys** — New consoles store a random HDD key in EEPROM.
-  Existing consoles keep their key. First boots with saves or downloaded
-  content already on E: use the legacy key. Android re-signs saves when
-  transferring them between hakuX consoles.
-- **Launch folders** (#189) — Games launched from a disc subfolder now use
-  that folder as `D:`. This fixes asset loading for the games on the
-  Star Wars - The Clone Wars + Tetris Worlds disc.
-- **Dashboard** — The core replaces existing dashboard XBEs on C: with its
-  bundled dashboard. **Start Core** boots it without a game. Games can open
-  its Xbox Live pages, and the Star Wars - The Clone Wars + Tetris Worlds
-  launcher skips its disc updater (#120).
-- **Insignia** (experimental) — Register the console and create an account
-  from **Xbox Live** in the bundled dashboard. Android's setup wizard opens
-  the dashboard for both steps. On-console account recovery is still pending.
+## linux-v0.24.0 (Linux, aarch64 and x86-64, and Android)
+
+Set up Insignia from the bundled dashboard. In RetroArch, load the core
+and select **Start Core**. On Android, the app's Xbox Live setup wizard
+opens the same dashboard.
+
+- **Insignia** (experimental, #192) — Under **Xbox Live**, select
+  **Register this console**, then **Create an Insignia account** with the
+  subscription code from Insignia. Registration and signup work without
+  Microsoft's dashboard or the separate Setup Assistant. On-console
+  account recovery is still pending.
+- **Dashboard** (#188, #192) — At boot, the core installs the bundled
+  dashboard at `C:\xboxdash.xbe` and `C:\xodash\xonlinedash.xbe`, replacing
+  any dashboard executables at those paths. It keeps other files on C:.
+- **Network** (#84, #192) — One switch enables Xbox Live and system link
+  together and defaults to On. System link consoles negotiate separate
+  IP addresses. Older Android network modes migrate to On, and explicit
+  Off stays off.
+- **Console HDD keys** (#191) — New consoles store a random HDD key in
+  EEPROM. Existing consoles keep their key. First boots with saves or
+  downloadable content already on E: use the legacy key. Android
+  re-signs saves transferred between consoles.
+- **Homebrew and EEPROM** (#186, #187) — Honor NV2A DMA base addresses so
+  nxdk programs such as the dashboard can render. Persist guest EEPROM
+  writes over SMBus, with RetroArch settings taking priority at boot.
+- **Multi-game discs** (#188, #190) — Map `D:` to a game's disc subfolder
+  when it launches from there. The Star Wars - The Clone Wars + Tetris Worlds
+  disc reaches its menu and can launch both games.
+
+Downloads include Linux ARM64 and x86-64 builds and an experimental
+RetroArch core for Android ARM64.
 
 ## linux-v0.23.0 (Linux, aarch64 and x86-64, and Android)
 
