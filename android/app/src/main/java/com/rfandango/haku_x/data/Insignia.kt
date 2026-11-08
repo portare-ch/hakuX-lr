@@ -1,135 +1,85 @@
 package com.rfandango.haku_x.data
 
 import android.content.Context
-import android.net.Uri
-import android.util.Log
-import com.rfandango.haku_x.BuildConfig
 import com.rfandango.haku_x.data.hdd.XboxHdd
 import java.io.File
-import java.io.IOException
-import java.io.RandomAccessFile
-import java.net.HttpURLConnection
-import java.net.URL
 
 /**
- * Insignia, the Xbox Live revival (insignia.live): what its setup wizard (ui/insignia) gets and checks.
- * Insignia's Setup Assistant registers the console; its dashboard 5960 (the user's files, Dashboard)
- * makes or recovers the account, which goes in the hard disk's config area.
+ * Insignia, the Xbox Live revival (insignia.live): what its setup wizard (ui/insignia) checks. hakuX-lr's
+ * dashboard registers the console and makes its accounts; both go in the hard disk's config area, which
+ * the native core keeps as raw-partition0.bin.
  */
 object Insignia {
-  private const val TAG = "hakuX-insignia"
-
-  /** The Setup Assistant's latest release, the ISO made for emulators (insignia-live on GitHub). */
-  const val SETUP_URL =
-    "https://github.com/insignia-live/setup-assistant-release/releases/latest/download/Insignia-Setup.iso"
   const val SITE = "https://insignia.live"
-  const val LOGIN = "https://insignia.live/login"
 
-  /** The Setup Assistant, downloaded. */
-  fun setupFile(context: Context) = File(context.filesDir, "insignia/Insignia-Setup.iso")
-
-  /** The Setup Assistant to boot: the downloaded one, else the ISO the user chose; null: neither. */
-  fun setupUri(context: Context): Uri? {
-    val f = setupFile(context)
-    if (f.isFile) return Uri.fromFile(f)
-    return AppPrefs(context).insigniaSetupUri.takeIf { it.isNotEmpty() }?.let(Uri::parse)
-  }
-
-  /** The release page, for a download in the browser when the app's fails. */
-  const val SETUP_PAGE = "https://github.com/insignia-live/setup-assistant-release/releases/latest"
+  private const val SECTOR = 512
+  private const val MACHINE_SECTOR = 9
+  private const val USER_TABLE_SECTOR = 11
+  private const val FIRST_USER_SECTOR = 12
+  private const val USER_SLOTS = 8
 
   /**
-   * One request of the download: the redirects GitHub answers with (its file host's signed URL)
-   * followed here, a new connection each, closed after its response; each hop logged, with its time.
+   * An earlier version downloaded Insignia's Setup Assistant here; the dashboard registers the console
+   * now, so the ISO only takes space.
    */
-  private fun open(url: String): HttpURLConnection {
-    var at = url
-    repeat(6) { hop ->
-      val t0 = System.nanoTime()
-      val c = (URL(at).openConnection() as HttpURLConnection).apply {
-        connectTimeout = 15_000
-        readTimeout = 30_000
-        instanceFollowRedirects = false
-        setRequestProperty("User-Agent", "hakuX/${BuildConfig.VERSION_NAME} (Android)")
-        setRequestProperty("Accept-Encoding", "identity")
-        setRequestProperty("Connection", "close")
-      }
-      val code = c.responseCode
-      Log.i(TAG, "setup download hop $hop: ${URL(at).host} answered $code in ${(System.nanoTime() - t0) / 1_000_000} ms")
-      val next = c.getHeaderField("Location")
-      if (code !in 300..399 || next == null) return c
-      c.disconnect()
-      at = URL(URL(at), next).toString()
-    }
-    throw IOException("too many redirects")
+  fun forgetSetupAssistant(context: Context) {
+    File(context.filesDir, "insignia").takeIf { it.exists() }?.deleteRecursively()
   }
 
-  /** The Setup Assistant from its release into setupFile; progress: bytes done of total (0: not known). */
-  fun download(context: Context, progress: (Long, Long) -> Unit) {
-    val dest = setupFile(context)
-    val part = File(dest.parentFile, dest.name + ".part")
-    dest.parentFile?.mkdirs()
-    val c = try {
-      open(SETUP_URL)
-    } catch (e: IOException) {
-      Log.w(TAG, "setup download: ${e.javaClass.simpleName}: ${e.message}")
-      throw e
-    }
-    try {
-      if (c.responseCode != HttpURLConnection.HTTP_OK) throw IOException("GitHub answered ${c.responseCode}")
-      val total = c.contentLengthLong.coerceAtLeast(0)
-      var done = 0L
-      c.inputStream.use { input ->
-        part.outputStream().use { out ->
-          val buf = ByteArray(1 shl 16)
-          while (true) {
-            val n = input.read(buf)
-            if (n < 0) break
-            out.write(buf, 0, n)
-            done += n
-            progress(done, total)
-          }
-        }
-      }
-    } finally {
-      c.disconnect()
-    }
-    if (!isXboxDisc(part)) {
-      part.delete()
-      throw IOException("the download isn't an Xbox disc image")
-    }
-    if (!part.renameTo(dest)) throw IOException("can't keep the download")
+  /** The console is registered: the config area holds its machine credential (sector 9). */
+  fun registered(hddRoot: File): Boolean {
+    val d = configArea(hddRoot) ?: return false
+    return validSector(d, MACHINE_SECTOR)
   }
-
-  /** An XISO: the XDVDFS volume descriptor at 64 KiB. */
-  private fun isXboxDisc(f: File): Boolean = runCatching {
-    RandomAccessFile(f, "r").use { r ->
-      val b = ByteArray(20)
-      r.seek(0x10000)
-      r.readFully(b)
-      String(b, Charsets.US_ASCII) == "MICROSOFT*XBOX*MEDIA"
-    }
-  }.getOrDefault(false)
 
   /**
-   * The Insignia accounts on the console: their gamertags, from the config area the native core keeps
-   * (raw-partition0.bin): one account a sector from 8, its gamertag at +0x18 and its domain at +0x30
-   * ("insignia.live").
+   * The Insignia accounts on the console, their gamertags: the user table (sector 11) names the slots in
+   * use, each an account sector from 12 with its gamertag at +0x18 and its domain at +0x30 ("insignia.live").
+   * The machine credential and slots the table doesn't name are not accounts.
    */
   fun accounts(hddRoot: File): List<String> {
-    val f = XboxHdd.rawHead(hddRoot, 0)
-    if (!f.isFile) return emptyList()
-    val d = runCatching { f.readBytes() }.getOrNull() ?: return emptyList()
+    val d = configArea(hddRoot) ?: return emptyList()
+    if (!validSector(d, USER_TABLE_SECTOR)) return emptyList()
     val out = mutableListOf<String>()
-    for (s in 8 until minOf(d.size / 512, 32)) {
-      val name = cString(d, s * 512 + 0x18, 16)
-      val domain = cString(d, s * 512 + 0x30, 20)
+    for (slot in 0 until USER_SLOTS) {
+      // each entry: a DWORD in-use flag, then the slot's eight-byte IV
+      if (le32(d, USER_TABLE_SECTOR * SECTOR + 12 + slot * 12) == 0L) continue
+      val s = FIRST_USER_SECTOR + slot
+      if (!validSector(d, s)) continue
+      val name = cString(d, s * SECTOR + 0x18, 16)
+      val domain = cString(d, s * SECTOR + 0x30, 20)
       if (domain.equals("insignia.live", ignoreCase = true) && name.isNotEmpty() && name.all { it in ' '..'~' }) {
         out += name
       }
     }
     return out
   }
+
+  private fun configArea(hddRoot: File): ByteArray? {
+    val f = XboxHdd.rawHead(hddRoot, 0)
+    if (!f.isFile) return null
+    return runCatching { f.readBytes() }.getOrNull()
+  }
+
+  /**
+   * A config sector the console wrote: its signature, two nonzero header DWORDs, the 0xAA550000 footer and
+   * the checksum at +504 (the complement of the end-around-carry sum of its other DWORDs).
+   */
+  private fun validSector(d: ByteArray, sector: Int): Boolean {
+    val o = sector * SECTOR
+    if (o + SECTOR > d.size) return false
+    if (le32(d, o) != 0x79132568L || le32(d, o + 4) == 0L || le32(d, o + 8) == 0L || le32(d, o + 508) != 0xAA550000L) {
+      return false
+    }
+    var sum = 0L
+    for (i in 0 until SECTOR step 4) if (i != 504) sum += le32(d, o + i)
+    while (sum ushr 32 != 0L) sum = (sum and 0xFFFFFFFFL) + (sum ushr 32)
+    return le32(d, o + 504) == (sum.inv() and 0xFFFFFFFFL)
+  }
+
+  private fun le32(d: ByteArray, off: Int): Long =
+    (d[off].toLong() and 0xFF) or ((d[off + 1].toLong() and 0xFF) shl 8) or
+      ((d[off + 2].toLong() and 0xFF) shl 16) or ((d[off + 3].toLong() and 0xFF) shl 24)
 
   private fun cString(d: ByteArray, off: Int, max: Int): String {
     var n = 0

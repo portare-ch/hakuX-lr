@@ -268,13 +268,13 @@ unplug the cable.
   (`/storage/saves/xbox/` on PortareOS), one `IP` or `IP:PORT` per line.
   Each console gets its own address, so consoles on one network can play
   system link while signed in to Insignia.
-- **Xbox Live (Insignia):** register the console with
-  [Insignia](https://insignia.live) using its Setup Assistant. Creating an
-  account requires your own Xbox dashboard 5960 files. See
+- **Xbox Live (Insignia):** start the core without a game to open the
+  bundled dashboard, then **Xbox Live**: **Register this console** with
+  [Insignia](https://insignia.live), then **Create an Insignia account** with
+  the subscription code Insignia emails you. Recovering an existing account
+  on the console isn't supported yet. See
   [dashboard setup](native/README.linux.md#the-libretro-core) and
   [NAT and port forwarding](native/README.linux.md#insignia-nat).
-  Dashboard navigation and the complete Insignia setup process have not
-  yet been tested on a device.
 
 ## Troubleshooting
 

@@ -1,9 +1,5 @@
 package com.rfandango.haku_x.ui.insignia
 
-import android.net.Uri
-import android.text.format.Formatter
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -42,18 +38,14 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.rfandango.haku_x.R
 import com.rfandango.haku_x.data.AppPrefs
 import com.rfandango.haku_x.data.Insignia
-import com.rfandango.haku_x.ui.common.CheckItem
 import com.rfandango.haku_x.ui.common.OnboardingCard
 import com.rfandango.haku_x.ui.common.OnboardingLead
 import com.rfandango.haku_x.ui.common.OnboardingNote
-import com.rfandango.haku_x.ui.common.ProgressBlock
 import com.rfandango.haku_x.ui.common.SubScreen
-import com.rfandango.haku_x.ui.common.fractionOf
 
 private enum class Step(val title: Int) {
   INTRO(R.string.insignia_step_intro),
   CONNECTION(R.string.insignia_step_connection),
-  DASHBOARD(R.string.insignia_step_dashboard),
   REGISTER(R.string.insignia_step_register),
   ACCOUNT(R.string.insignia_step_account),
   READY(R.string.insignia_step_ready),
@@ -61,7 +53,7 @@ private enum class Step(val title: Int) {
 
 /** The steps done, in order: the first not done is where the wizard opens (the intro when none is). */
 private fun firstStep(s: InsigniaStatus): Step {
-  val done = listOf(s.network, s.dashboard, s.registered, s.accounts.isNotEmpty())
+  val done = listOf(s.network, s.registered, s.accounts.isNotEmpty())
   return when {
     done.none { it } -> Step.INTRO
     done.all { it } -> Step.READY
@@ -71,15 +63,13 @@ private fun firstStep(s: InsigniaStatus): Step {
 
 /**
  * Insignia's setup (Settings): everything Xbox Live through Insignia needs, one step after the other:
- * the connection, the dashboard, the console's registration (Insignia's Setup Assistant) and the account
- * (made or recovered in the dashboard). The Setup Assistant and the dashboard run as games; the app
- * opens the wizard again when they close (AppPrefs.insigniaWizardResume).
+ * the connection, then the console's registration and the account, both in hakuX-lr's dashboard. The
+ * dashboard runs as a game; the app opens the wizard again when it closes (AppPrefs.insigniaWizardResume).
  */
 @Composable
 fun InsigniaWizard(
   onBack: () -> Unit,
   onLaunchDashboard: () -> Unit,
-  onLaunchSetup: (Uri) -> Unit,
   vm: InsigniaViewModel = viewModel(),
 ) {
   val context = LocalContext.current
@@ -90,10 +80,8 @@ fun InsigniaWizard(
     onPauseOrDispose {}
   }
   val current = Step.entries[step]
-  /* the wizard opens again once the game it starts closes */
-  val resume = { AppPrefs(context).insigniaWizardResume = true }
-  val launchDashboard = { resume(); onLaunchDashboard() }
-  val launchSetup = { uri: Uri -> resume(); onLaunchSetup(uri) }
+  /* the wizard opens again once the dashboard closes */
+  val launchDashboard = { AppPrefs(context).insigniaWizardResume = true; onLaunchDashboard() }
 
   SubScreen(
     title = stringResource(R.string.insignia_title),
@@ -111,8 +99,7 @@ fun InsigniaWizard(
           when (current) {
             Step.INTRO -> IntroStep()
             Step.CONNECTION -> ConnectionStep(status, vm)
-            Step.DASHBOARD -> DashboardStep(status, vm)
-            Step.REGISTER -> RegisterStep(status, vm, launchSetup)
+            Step.REGISTER -> RegisterStep(status, launchDashboard)
             Step.ACCOUNT -> AccountStep(status, launchDashboard)
             Step.READY -> ReadyStep(status)
           }
@@ -152,18 +139,6 @@ private fun StepState(done: Boolean, doneText: String, todoText: String) {
 }
 
 @Composable
-private fun JobBlock(job: WizardJob) {
-  val context = LocalContext.current
-  when {
-    job.error != null -> Text(stringResource(R.string.insignia_job_failed, job.error), color = MaterialTheme.colorScheme.error)
-    !job.finished -> ProgressBlock(
-      fractionOf(job.done, job.total),
-      job.what.ifEmpty { Formatter.formatShortFileSize(context, job.done) },
-    )
-  }
-}
-
-@Composable
 private fun ColumnScope.IntroStep() {
   OnboardingLead(stringResource(R.string.insignia_intro))
   OnboardingCard(stringResource(R.string.insignia_intro_needs)) {
@@ -183,61 +158,14 @@ private fun ColumnScope.ConnectionStep(s: InsigniaStatus, vm: InsigniaViewModel)
 }
 
 @Composable
-private fun ColumnScope.DashboardStep(s: InsigniaStatus, vm: InsigniaViewModel) {
-  val job by vm.dashboardJob.collectAsStateWithLifecycle()
-  val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-    if (uri != null) vm.installDashboard(uri)
-  }
-  OnboardingLead(stringResource(R.string.insignia_dashboard))
-  StepState(s.dashboard, stringResource(R.string.insignia_dashboard_done), stringResource(R.string.insignia_dashboard_todo))
-  job?.let { JobBlock(it) }
-  if (job?.finished != false) {
-    val choose = { pick.launch(arrayOf("application/zip", "application/x-zip-compressed")) }
-    if (s.dashboard) {
-      OutlinedButton(onClick = choose) { Text(stringResource(R.string.insignia_dashboard_again)) }
-    } else {
-      Button(onClick = choose) { Text(stringResource(R.string.library_dashboard_choose)) }
-    }
-  }
-}
-
-@Composable
-private fun ColumnScope.RegisterStep(s: InsigniaStatus, vm: InsigniaViewModel, launchSetup: (Uri) -> Unit) {
-  val context = LocalContext.current
-  val uri = LocalUriHandler.current
-  val download by vm.downloadJob.collectAsStateWithLifecycle()
-  val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-    if (uri != null) vm.chooseSetup(uri)
-  }
+private fun ColumnScope.RegisterStep(s: InsigniaStatus, launchDashboard: () -> Unit) {
   OnboardingLead(stringResource(R.string.insignia_register))
-  OnboardingCard(stringResource(R.string.insignia_register_get)) {
-    StepState(s.setup, stringResource(R.string.insignia_register_have), stringResource(R.string.insignia_register_need))
-    download?.let { JobBlock(it) }
-    if (download?.finished != false) {
-      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Button(onClick = vm::downloadSetup) { Text(stringResource(R.string.insignia_register_download)) }
-        OutlinedButton(onClick = { pick.launch(arrayOf("*/*")) }) { Text(stringResource(R.string.insignia_register_choose)) }
-      }
-    }
-    // the app's download failed: the browser's, then the ISO chosen
-    if (download?.error != null) {
-      OnboardingNote(stringResource(R.string.insignia_register_browser_note))
-      OutlinedButton(onClick = { uri.openUri(Insignia.SETUP_PAGE) }) { Text(stringResource(R.string.insignia_register_browser)) }
-    }
-  }
+  StepState(s.registered, stringResource(R.string.insignia_register_done), stringResource(R.string.insignia_register_todo))
   OnboardingCard(stringResource(R.string.insignia_register_run)) {
     Text(stringResource(R.string.insignia_register_how))
-    Button(enabled = s.setup && s.network, onClick = { Insignia.setupUri(context)?.let(launchSetup) }) {
-      Text(stringResource(R.string.insignia_register_start))
-    }
+    Button(enabled = s.network, onClick = launchDashboard) { Text(stringResource(R.string.insignia_dashboard_start)) }
     if (!s.network) OnboardingNote(stringResource(R.string.insignia_needs_connection))
   }
-  CheckItem(
-    label = stringResource(R.string.insignia_register_confirm),
-    note = null,
-    checked = s.registered,
-    onChange = vm::setRegistered,
-  )
 }
 
 @Composable
@@ -249,23 +177,22 @@ private fun ColumnScope.AccountStep(s: InsigniaStatus, launchDashboard: () -> Un
     stringResource(R.string.insignia_account_done, s.accounts.joinToString(", ")),
     stringResource(R.string.insignia_account_todo),
   )
-  OnboardingCard(stringResource(R.string.insignia_account_have)) {
-    Text(stringResource(R.string.insignia_account_have_how))
-    OutlinedButton(onClick = { uri.openUri(Insignia.LOGIN) }) { Text(stringResource(R.string.insignia_account_open_login)) }
-  }
   OnboardingCard(stringResource(R.string.insignia_account_new)) {
     Text(stringResource(R.string.insignia_account_new_how))
     OutlinedButton(onClick = { uri.openUri(Insignia.SITE) }) { Text(stringResource(R.string.insignia_account_open_site)) }
   }
-  Button(enabled = s.dashboard && s.network, onClick = launchDashboard) {
-    Text(stringResource(R.string.insignia_account_start))
+  OnboardingCard(stringResource(R.string.insignia_account_have)) {
+    Text(stringResource(R.string.insignia_account_have_how))
   }
-  if (!s.dashboard || !s.network) OnboardingNote(stringResource(R.string.insignia_account_needs))
+  Button(enabled = s.network && s.registered, onClick = launchDashboard) {
+    Text(stringResource(R.string.insignia_dashboard_start))
+  }
+  if (!s.network || !s.registered) OnboardingNote(stringResource(R.string.insignia_account_needs))
 }
 
 @Composable
 private fun ColumnScope.ReadyStep(s: InsigniaStatus) {
-  val ready = s.network && s.dashboard && s.accounts.isNotEmpty()
+  val ready = s.network && s.registered && s.accounts.isNotEmpty()
   OnboardingLead(stringResource(if (ready) R.string.insignia_ready else R.string.insignia_ready_not))
   OnboardingCard(stringResource(R.string.insignia_ready_tips)) {
     Text(stringResource(R.string.insignia_ready_tips_text))

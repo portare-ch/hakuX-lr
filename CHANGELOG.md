@@ -19,6 +19,11 @@
   needed. **Start Core** boots it without content, and games can open its
   Xbox Live pages. The bundled dashboard also lets the Star Wars - The
   Clone Wars + Tetris Worlds launcher skip its disc updater (#120).
+- **Insignia** (experimental) — The bundled dashboard's Xbox Live page
+  registers the console with Insignia and creates Insignia accounts,
+  without the Setup Assistant or Microsoft's dashboard. Android's Xbox Live
+  setup opens the dashboard for both and no longer downloads the Setup
+  Assistant. Recovering an account on the console isn't supported yet.
 
 ## linux-v0.23.0 (Linux, aarch64 and x86-64, and Android)
 
