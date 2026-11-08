@@ -485,12 +485,16 @@ def main():
             config.unlink()
         else:
             config.write_bytes(before)
-        # Start Core boots the dashboard from C: with no disc. If missing,
-        # refuse to load and show where to install its files.
+        # Start Core can boot the bundle or an existing dashboard without a disc.
         c_drive = root / 'saves' / 'hdd' / 'Partition2'
-        run([args.harness, args.core, '-', 60, root / 'saves'], 3,
-            ("The Xbox dashboard isn't installed: copy its files (xboxdash.xbe and its folders) to", 'load: refused'))
-        (c_drive / 'XBOXDASH.XBE').write_bytes(xbe_of(root / 'halt.iso'))     # case-insensitive lookup
+        shutil.rmtree(c_drive, ignore_errors=True)
+        run([args.harness, args.core, '-', 60, root / 'saves'], 0,
+            ("dash: installed hakuX-lr's dashboard as", 'loaded the dashboard (no content)', 'ran 60 frames'))
+        if not (c_drive / 'xboxdash.xbe').is_file() or not (c_drive / 'xodash' / 'xonlinedash.xbe').is_file():
+            raise SystemExit('FAIL: Start Core left no xboxdash.xbe or xodash\\xonlinedash.xbe on C:')
+        shutil.rmtree(c_drive)
+        c_drive.mkdir()
+        (c_drive / 'XBOXDASH.XBE').write_bytes(xbe_of(root / 'halt.iso'))     # Check case-insensitive lookup.
         run([args.harness, args.core, '-', 600, root / 'saves'], 0,
             ('loaded the dashboard (no content)', 'message: Xbox Live in the dashboard needs Network on',
              'guest executed HLT', 'the core asked to shut down', 'unload: the core stopped in'))

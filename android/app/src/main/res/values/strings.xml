@@ -13,12 +13,7 @@
   <string name="library_search_hint">Search games</string>
   <string name="library_refresh">Refresh</string>
   <string name="library_dashboard">Dashboard</string>
-  <string name="library_dashboard_install_title">Install the dashboard</string>
-  <string name="library_dashboard_install_text">The Xbox dashboard isn\'t installed. Xbox Live accounts, Insignia\'s, are made and recovered in it. Choose a zip of its files (dashboard 5960: xboxdash.xbe and its folders) to install it on the console\'s C: drive.</string>
   <string name="library_dashboard_choose">Choose the zip</string>
-  <string name="library_dashboard_installed">The dashboard is on the console\'s C: drive. This button starts it from now on.</string>
-  <string name="library_dashboard_start">Start it</string>
-  <string name="library_dashboard_later">Later</string>
   <string name="insignia_title">Xbox Live setup</string>
   <string name="insignia_settings_desc">Online play through Insignia: the connection, the dashboard, this console\'s registration and your account, step by step.</string>
   <string name="insignia_step_of">Step %1$d of %2$d: %3$s</string>
@@ -35,7 +30,7 @@
   <string name="insignia_job_failed">It failed: %1$s</string>
   <string name="insignia_intro">Insignia is a free revival of the original Xbox Live: Live games sign in, find matches and play online as they did. This sets up what it needs, one step after the other. A step done shows a check, and you can come back to any of them.</string>
   <string name="insignia_intro_needs">What you need</string>
-  <string name="insignia_intro_needs_list">• The Xbox dashboard 5960, as a zip of its files (xboxdash.xbe and its folders): your own, hakuX has none.\n• An Insignia account, or an invite code to make one, from insignia.live.\n• An Internet connection.</string>
+  <string name="insignia_intro_needs_list">• The Xbox dashboard 5960, as a zip of its files (xboxdash.xbe and its folders), your own. hakuX-lr\'s dashboard can\'t make accounts yet.\n• An Insignia account, or an invite code to make one, from insignia.live.\n• An Internet connection.</string>
   <string name="insignia_intro_note">Insignia isn\'t part of hakuX: its service follows its own terms (insignia.live/terms).</string>
   <string name="insignia_connection">The console reaches the Internet through the phone\'s connection, and Insignia\'s DNS server sends its Xbox Live traffic to Insignia.</string>
   <string name="insignia_connection_done">The console\'s network cable is plugged in</string>
@@ -476,7 +471,7 @@
   <string name="hdd_import_desc">xemu\'s (qcow2) or a raw dump. It replaces this console\'s saves, game data, caches and system files; its saves are re-signed for hakuX.</string>
   <string name="hdd_dashboard">Dashboard</string>
   <string name="hdd_dashboard_install">Install the dashboard</string>
-  <string name="hdd_dashboard_desc">The Xbox dashboard\'s files (5960) from a zip, onto the C: drive. Xbox Live accounts, Insignia\'s, are made in it: the library\'s Dashboard button starts it.</string>
+  <string name="hdd_dashboard_desc">hakuX-lr\'s own dashboard is on the C: drive. Choose a zip of the Xbox dashboard\'s files (5960) to put yours there instead: Xbox Live accounts, Insignia\'s, are made in it. The library\'s Dashboard button starts it.</string>
   <string name="hdd_dashboard_installed">Installed: the library\'s Dashboard button starts it. Choose a zip to install it again.</string>
   <string name="hdd_dashboard_installing">Installing the dashboard</string>
   <string name="hdd_dashboard_done">Dashboard installed</string>
