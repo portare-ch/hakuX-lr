@@ -4,7 +4,8 @@
  * Repeat ten times: reject 256 MiB, then commit, write, and release 16 MiB.
  * Leaked pages block the smaller commit; leaked reservations exhaust VA space.
  * Then a kernel call on a reserved page: its fault goes to the thread's SEH
- * handler, which commits the page, and the call runs again.
+ * handler, which commits the page, and the call runs again; an overlapping
+ * RtlMoveMemory into such a page moves each byte once.
  * Code is at 0x11000; thunks at 0x10f00 follow kernel_mm.py's IMPORTS order.
  * Print the result and halt. */
 .intel_syntax noprefix
@@ -13,6 +14,7 @@
 .set NtAllocateVirtualMemory, THUNK + 4*1
 .set NtFreeVirtualMemory,     THUNK + 4*2
 .set RtlInitializeCriticalSection, THUNK + 4*3
+.set RtlMoveMemory,           THUNK + 4*4
 
 .set MEM_COMMIT,     0x1000
 .set MEM_RESERVE,    0x2000
@@ -119,6 +121,79 @@ again:
     cmp dword ptr [eax + 0x10], 0xFFFFFFFF  /* LockCount */
     jne fail
 
+    /* 8. RtlMoveMemory down by 8 over a reserved page: pages 0 and 2 of
+     * a new region committed, page 1 reserved. The move writes page 0
+     * before it meets page 1 (the copy loads its source's ends first), then
+     * runs again once the handler commits page 1, from the source as it
+     * was: each byte moves once. */
+    STEP 8
+    mov dword ptr [base], 0
+    mov dword ptr [size], 0x3000
+    push PAGE_READWRITE
+    push MEM_RESERVE
+    PUSHI size
+    push 0
+    PUSHI base
+    call dword ptr [NtAllocateVirtualMemory]
+    test eax, eax
+    jnz fail
+    mov eax, dword ptr [base]
+    mov dword ptr [mbase], eax
+    mov dword ptr [size], 0x1000
+    push PAGE_READWRITE
+    push MEM_COMMIT
+    PUSHI size
+    push 0
+    PUSHI base
+    call dword ptr [NtAllocateVirtualMemory]
+    test eax, eax
+    jnz fail
+    mov eax, dword ptr [mbase]
+    add eax, 0x2000
+    mov dword ptr [base], eax
+    mov dword ptr [size], 0x1000
+    push PAGE_READWRITE
+    push MEM_COMMIT
+    PUSHI size
+    push 0
+    PUSHI base
+    call dword ptr [NtAllocateVirtualMemory]
+    test eax, eax
+    jnz fail
+    mov edi, dword ptr [mbase]
+    xor ecx, ecx
+1:
+    mov byte ptr [edi + ecx + 0x800], cl    /* byte 0x800 + i: i & 0xff */
+    inc ecx
+    cmp ecx, 0x800
+    jb 1b
+    STEP 9
+    PUSHI seh_commit
+    push dword ptr fs:[0]
+    mov dword ptr fs:[0], esp
+    push 0x2000
+    mov eax, dword ptr [mbase]
+    lea ecx, [eax + 0x808]
+    push ecx
+    lea ecx, [eax + 0x800]
+    push ecx
+    call dword ptr [RtlMoveMemory]
+    pop eax
+    mov dword ptr fs:[0], eax
+    add esp, 4
+    STEP 10
+    cmp dword ptr [seh_count], 2
+    jne fail
+    mov edi, dword ptr [mbase]
+    cmp byte ptr [edi + 0x800], 8           /* each byte moved once: from 8 on */
+    jne fail
+    cmp byte ptr [edi + 0x900], 8           /* 0x108 & 0xff */
+    jne fail
+    cmp byte ptr [edi + 0xff7], 0xff        /* 0x7ff, the last of the pattern */
+    jne fail
+    cmp byte ptr [edi + 0xff8], 0           /* from page 1: zero */
+    jne fail
+
     PUSHI passed
     call dword ptr [DbgPrint]
     add esp, 4
@@ -156,6 +231,7 @@ seh_commit:
 .align 4
 seh_count: .long 0
 cs_va: .long 0
+mbase: .long 0
 cbase: .long 0
 csize: .long 0
 step: .long 0
