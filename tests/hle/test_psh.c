@@ -807,6 +807,104 @@ static void test_poly_smooth(void)
     HT_CHECK(cv != NULL && at != NULL && cv < at);
 }
 
+/* Replaces the first from in s with to (no longer); false without one. */
+static int sub1(char *s, const char *from, const char *to)
+{
+    char *p = strstr(s, from);
+    if (!p) {
+        return 0;
+    }
+    size_t fl = strlen(from), tl = strlen(to);
+    memmove(p + tl, p + fl, strlen(p + fl) + 1);
+    memcpy(p, to, tl);
+    return 1;
+}
+
+/* Cylindrical wrap (compare bits 16 + 4 s, set by the back end): a wrapped
+ * stage's coordinates read per vertex and interpolated at the top of main;
+ * the rest of the text as without it */
+static void test_cylwrap(void)
+{
+    static char plain[sizeof(buf)];
+    uint32_t rs[HLE_PS_REGS] = { 0 };
+    rs[HLE_PS_RGB_IN] = IN4(R_T0, R_T1, R_ZERO, R_ZERO);
+    rs[HLE_PS_ALPHA_IN] = IN4(R_T0 | CH_A, R_T1 | CH_A, R_ZERO, R_ZERO);
+    rs[HLE_PS_RGB_OUT] = R_R0 << 4;
+    rs[HLE_PS_ALPHA_OUT] = R_R0 << 4;
+    rs[HLE_PS_COUNT] = 1;
+    /* t0, t1 PROJECT2D, t2 CLIPPLANE, t3 CUBEMAP */
+    rs[HLE_PS_TEXMODES] = HLE_PST_PROJECT2D | HLE_PST_PROJECT2D << 5 | HLE_PST_CLIPPLANE << 10 |
+                          HLE_PST_CUBEMAP << 15;
+    rs[HLE_PS_COMPARE] = 0xFFFF0000u;               /* not from the program */
+    HlePshKey k;
+    hle_psh_key(rs, &k);
+    HT_EQ_U32(k.compare, 0);
+    HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), NULL) > 0);
+    HT_CHECK(strstr(buf, "pervertexEXT") == NULL && strstr(buf, "cylw") == NULL);
+    HT_CHECK(strstr(buf, "GL_EXT_fragment_shader_barycentric") == NULL);
+    HT_CHECK(strstr(buf, "layout(location = 1) in vec4 vSpecular;\n"
+                         "layout(location = 2) in vec4 vTex0;\n"
+                         "layout(location = 3) in vec4 vTex1;\n"
+                         "layout(location = 4) in vec4 vTex2;\n"
+                         "layout(location = 5) in vec4 vTex3i;\n"
+                         "layout(location = 6) in float vFog;\n") != NULL);
+    strcpy(plain, buf);
+    k.compare = 0x3u << 16 | 0x8u << 28;            /* t0: s, t; t3: q */
+    size_t n = hle_psh_glsl(&k, buf, sizeof(buf), NULL);
+    HT_CHECK(n > 0 && n == strlen(buf));
+    dump("psh_cylwrap");
+    HT_CHECK(strstr(buf, HLE_BARY_EXT_GLSL) != NULL);
+    HT_CHECK(strstr(buf, "layout(location = 2) pervertexEXT in vec4 vTex0pv[3];\nvec4 vTex0;\n"
+                         "layout(location = 3) in vec4 vTex1;\n"
+                         "layout(location = 4) in vec4 vTex2;\n"
+                         "layout(location = 5) pervertexEXT in vec4 vTex3ipv[3];\n"
+                         "vec4 vTex3i;\n") != NULL);
+    HT_CHECK(strstr(buf, HLE_CYLW_GLSL) != NULL);
+    HT_CHECK(strstr(buf, "p1 -= m * (vec4(greaterThan(d1, vec4(0.5))) - "
+                         "vec4(lessThan(d1, vec4(-0.5))));") != NULL);
+    HT_CHECK(strstr(buf, "p2 -= m * (vec4(greaterThan(d2, vec4(0.5))) - "
+                         "vec4(lessThan(d2, vec4(-0.5))));") != NULL);
+    const char *mn = strstr(buf, "void main() {");
+    const char *s0 = strstr(buf, "  vTex0 = cylw(vTex0pv[0], vTex0pv[1], vTex0pv[2], "
+                                 "vec4(1.0, 1.0, 0.0, 0.0));\n");
+    const char *s3 = strstr(buf, "  vTex3i = cylw(vTex3ipv[0], vTex3ipv[1], vTex3ipv[2], "
+                                 "vec4(0.0, 0.0, 0.0, 1.0));\n");
+    const char *t3 = strstr(buf, "  vec4 vTex3 = vTex3i;\n");
+    const char *use = strstr(buf, "samp(0u, nvproj(vTex0).xy)");
+    HT_CHECK(mn && s0 && s3 && t3 && use && mn < s0 && s0 < s3 && s3 < t3 && t3 < use);
+    /* PSCompareMode keeps its own bits: t2's clip plane tests are "<" */
+    HT_CHECK(strstr(buf, "if (vTex2.x < 0.0) discard;") != NULL);
+    /* without the wrap's lines, the text is the plain shader's */
+    HT_CHECK(sub1(buf, HLE_BARY_EXT_GLSL, ""));
+    HT_CHECK(sub1(buf, "layout(location = 2) pervertexEXT in vec4 vTex0pv[3];\nvec4 vTex0;\n",
+                  "layout(location = 2) in vec4 vTex0;\n"));
+    HT_CHECK(sub1(buf, "layout(location = 5) pervertexEXT in vec4 vTex3ipv[3];\nvec4 vTex3i;\n",
+                  "layout(location = 5) in vec4 vTex3i;\n"));
+    HT_CHECK(sub1(buf, HLE_CYLW_GLSL, ""));
+    HT_CHECK(sub1(buf, "  vTex0 = cylw(vTex0pv[0], vTex0pv[1], vTex0pv[2], "
+                       "vec4(1.0, 1.0, 0.0, 0.0));\n", ""));
+    HT_CHECK(sub1(buf, "  vTex3i = cylw(vTex3ipv[0], vTex3ipv[1], vTex3ipv[2], "
+                       "vec4(0.0, 0.0, 0.0, 1.0));\n", ""));
+    HT_EQ_STR(buf, plain);
+    /* every axis of every stage, with polygon smoothing */
+    k.compare = 0xFFFF0000u;
+    k.poly_smooth = 1;
+    HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), NULL) > 0);
+    dump("psh_cylwrap_all");
+    HT_CHECK(strstr(buf, "  vTex2 = cylw(vTex2pv[0], vTex2pv[1], vTex2pv[2], "
+                         "vec4(1.0, 1.0, 1.0, 1.0));\n") != NULL);
+    const char *ext = strstr(buf, "GL_EXT_fragment_shader_barycentric");
+    HT_CHECK(ext && !strstr(ext + 1, "GL_EXT_fragment_shader_barycentric"));
+    k.poly_smooth = 0;
+    /* a point sprite's coordinates (t3) aren't wrapped */
+    k.compare = 0x8u << 28 | 0x1u << 16;
+    k.point_sprite = 1;
+    HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), NULL) > 0);
+    dump("psh_cylwrap_sprite");
+    HT_CHECK(strstr(buf, "vTex3ipv") == NULL && strstr(buf, "vTex0pv[3]") != NULL);
+    HT_CHECK(strstr(buf, "  vec4 vTex3 = vec4(gl_PointCoord, 1.0, 1.0);\n") != NULL);
+}
+
 static void test_overflow(void)
 {
     uint32_t rs[HLE_PS_REGS] = { 0 };
@@ -1019,6 +1117,7 @@ int main(void)
     HT_RUN(test_dither);
     HT_RUN(test_aa_control);
     HT_RUN(test_poly_smooth);
+    HT_RUN(test_cylwrap);
     HT_RUN(test_overflow);
     HT_RUN(test_precision_mode);
     HT_RUN(test_precision);

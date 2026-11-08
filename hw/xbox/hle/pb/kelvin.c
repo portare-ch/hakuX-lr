@@ -175,7 +175,10 @@ static void tss(uint32_t *t, unsigned s)
 {
     uint32_t b = 0x1B00 + 64 * s;
     uint32_t addr = R(b + 0x08), ctl0 = R(b + 0x0C), filt = R(b + 0x14);
-    t[TSS_ADDRESSU] = addr & 0xF;
+    /* the cylindrical wrap bits (4 u, 12 v, 20 p, 24 q) in ADDRESSU's
+     * bits 8-11 (s, t, r, q: vk/draw.c stage_wrap) */
+    t[TSS_ADDRESSU] = (addr & 0xF) | ((addr >> 4) & 1) << 8 | ((addr >> 12) & 1) << 9 |
+                      ((addr >> 20) & 1) << 10 | ((addr >> 24) & 1) << 11;
     t[TSS_ADDRESSV] = (addr >> 8) & 0xF;
     t[TSS_ADDRESSW] = (addr >> 16) & 0xF;
     /* MIN: 1 nearest, 2 linear, 3-6 {nearest, linear} x mip {nearest, linear},
