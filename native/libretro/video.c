@@ -4,13 +4,9 @@
  * hakuX libretro video output.
  *
  * Frames use Vulkan when available, otherwise CPU readback as XRGB8888.
- * RetroArch gets a frame only when the game has drawn a new one, so its FPS
- * counter, and overlays such as MangoHud, count the game's frames; without
- * one it keeps showing the last, and retro_run waits out the display's
- * period itself (core.c). Repeat Frames hands it the last frame again
- * instead, for its recording and black frame insertion, which need one each
- * period (RetroArch doesn't tell a core it uses them). The renderer applies
- * gamma; RetroArch handles letterboxing using the reported aspect.
+ * By default, RetroArch keeps the previous image between submissions.
+ * Repeat Frames restores a callback each tick for capture and black-frame
+ * insertion. The renderer applies gamma and RetroArch handles letterboxing.
  *
  * Crop Overscan removes 3/80 of each edge from standard-definition frames.
  * This gives whole-pixel crops at 640x480 and 720x480 at every render scale

@@ -2,12 +2,9 @@
 
 ## Unreleased
 
-- **Frame rate** — RetroArch's FPS counter, and overlays such as MangoHud,
-  show the game's own frame rate. The core hands RetroArch only the frames
-  the game draws; it used to repeat the last one at the display's rate, so
-  the counter stayed near 60 while a game ran slowly. **Repeat Frames**
-  brings the repeats back for RetroArch's video recording and black frame
-  insertion, which need a frame every refresh.
+- **Frame rate** — The core skips unchanged frames by default so FPS
+  counters show the game's frame rate. Enable **Repeat Frames** for
+  RetroArch recording, streaming or black-frame insertion.
 - **Insignia account recovery** (#185) — Under **Xbox Live**, select
   **Recover an Insignia account** and enter your gamertag and the 16-digit
   recovery number revealed on Insignia's website. Recovery refreshes the

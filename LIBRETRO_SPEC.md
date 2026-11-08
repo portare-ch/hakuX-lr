@@ -116,7 +116,7 @@ nc_dev_nv2a_display_vsync(now): RetroArch's frame tick is the vsync
 resume if the emulation was paused for a gap
 drain the APU's ring into audio_batch_cb
 take the newest front frame: nc_dev_nv2a_display_pickup(now)
-video_cb once if the game drew a new frame (exported); none otherwise
+call video_cb for a new frame, a Vulkan output change or Repeat Frames
 ```
 
 - The rate is the real Xbox's, exactly (owner's requirement): 60000/1001 Hz
@@ -126,24 +126,14 @@ video_cb once if the game drew a new frame (exported); none otherwise
   exact accumulator. RetroArch calls `retro_run` at the reported rate; with
   one tick per frame the vblank thread locks to it (k = 1) and places
   vblanks half a period from the pickups, as it does with Choreographer.
-- The guest keeps its pipelining: the CPU, the render thread and the export
-  overlap as they do today. `retro_run` never waits for the guest to finish
-  a frame. RetroArch gets only the frames the game draws (owner's
-  requirement: its FPS counter, and overlays such as MangoHud, must show the
-  game's frame rate), and keeps showing the last one of a 30 fps title or a
-  static screen. The Repeat Frames option hands the last frame again each
-  call instead, for RetroArch's recording and black frame insertion, which
-  need one per period; RetroArch doesn't tell a core it uses them.
-- Without repeats, RetroArch's presents no longer wait for the vsync: there
-  is none in a call without a frame, and a free swapchain image lets one
-  return at once. When RetroArch paces by its presents alone, its next call
-  comes early; a call over 2 ms early waits until the Xbox's period
-  (1001/60000 s) has passed since the last one, so the vblank keeps the
-  Xbox's rate. A frontend that spaces the calls itself (Sync to Exact
-  Content Framerate, audio sync, presents that wait) never makes one wait,
-  so there is no second clock there. Unblocked (no audio, a refresh at or
-  above the core's rate) waits like vsync; fast-forward, frame steps and
-  rewinding are not held.
+- The CPU, renderer and frame export overlap. `retro_run` uses the
+  newest available frame. Skipping unchanged frames lets the FPS counter
+  show the game's rate. **Repeat Frames** is off by default. Enable it for
+  RetroArch recording, streaming or black-frame insertion.
+- Skipping a present can remove the frontend's vsync wait. Early calls
+  wait for their slot, spaced one Xbox period (1001/60000 s) apart. Late
+  calls start a new schedule to avoid a catch-up burst. Fast-forward,
+  frame stepping and rewind bypass the wait.
 - A gap (the menu, a long stall): when no `retro_run` comes for two periods,
   `nc_pause_set(true)`; the next `retro_run` resumes. The guest's time leaves
   the pause out, as on Android. A pause that leaves the vCPU running is a bug.
@@ -152,9 +142,8 @@ video_cb once if the game drew a new frame (exported); none otherwise
   stay off in the core until AV info renegotiation is done for them.
 - A mode change (50/60 Hz) updates `retro_system_av_info` through
   `RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO` before frames come at the new rate.
-- A stalled guest is not hidden: no synthetic frames, not even repeats, and
-  no extra vblanks. A 5 s watchdog without a new frame logs the
-  CPU, renderer and vblank state; it does not kill anything.
+- After 5 s without a new frame, the watchdog logs CPU, renderer and
+  vblank state.
 
 ## 6. Stop, unload and living in RetroArch's process
 
@@ -344,7 +333,7 @@ Home + Start stays PortareOS's; the core adds no exit chord.
 | `retro_get_system_info` | name, version; `need_fullpath = true`, `block_extract = true`; extensions `iso` and `chd` |
 | `retro_load_game` | check the image, resolve paths, negotiate Vulkan, boot; false with full cleanup on failure |
 | `retro_get_system_av_info` | 60000/1001 (the Xbox's, exactly), 48000 Hz, the source size and aspect |
-| `retro_run` | section 5: at most one `video_cb` (a new frame), at least one input poll |
+| `retro_run` | section 5: at most one `video_cb`, at least one input poll |
 | `retro_reset` | stop and boot again in process |
 | `retro_unload_game` | stop, join, destroy; a later load works |
 | `retro_deinit` | release the rest; `dlclose` is safe |
@@ -428,13 +417,10 @@ folder. Run-ahead stays off (section 10).
 | Burnout 3 for minutes without a beat | 10 minutes through the launcher, with step, image, present and flip traces. |
 | `vrr=0` | Fixed refresh, and no `VRR_ENABLED` left behind. |
 
-0021 notes that the display offers FIFO only and keeps presents blocking
-under Sync to Exact Content Framerate: the goal is no independent pacing
-clock and no fixed-refresh beat, not a ban on FIFO. A 30 fps title gives one
-`retro_run` per 59.94 Hz period and a frame every other one; RetroArch's
-pacing spaces the calls, and the kernel repeats each submission until the
-next; that is expected. The standalone's `start_hakux.sh`
-part of #8 is superseded by this route, as the issue records.
+Patch 0021 keeps FIFO presentation and uses Sync to Exact Content
+Framerate to pace the core. At 30 fps, the guest produces a frame about
+every other core tick. PortareOS's display driver handles LFC repeats.
+This replaces the standalone `start_hakux.sh` path from #8.
 
 Measured on the Nova on 2026-10-25 with 0.2.1, through `runemu.sh`, with
 flip traces (PORTAREOS_HANDOFF.md, "Issue #8"):

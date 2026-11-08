@@ -776,8 +776,7 @@ void nc_lr_end(const char *why)
     _exit(0);
 }
 
-/* When the last retro_run started, or was due (paced); 0: none since the
- * load. */
+/* Last pacing slot, or the start time of a late call. Zero after unload. */
 static uint64_t g_last_run_at;
 
 RETRO_API void retro_unload_game(void)
@@ -797,10 +796,8 @@ RETRO_API void retro_unload_game(void)
     g_armed = false;
 }
 
-/* HAKUX_LR_STATS=1: every 10 s, how long retro_run takes RetroArch's thread
- * (avg, max), its video part, and the frames it handed RetroArch (what
- * RetroArch's FPS counter shows), from after the wait for the period
- * (paced). */
+/* HAKUX_LR_STATS=1 logs call and frame rates plus run and video timings.
+ * The timings exclude the pacing wait. */
 static void run_stat(uint64_t t0, uint64_t tv, uint64_t t1, bool shown)
 {
     static int on = -1;
@@ -831,23 +828,14 @@ static void run_stat(uint64_t t0, uint64_t tv, uint64_t t1, bool shown)
 
 static void xbe_patches_changed(void);
 
-/* RetroArch gets a frame only when the game draws one, so a frontend that
- * paces by its presents alone (vsync, no audio sync) no longer waits in
- * them: with a free swapchain image the present returns at once, and
- * without one there is no present. Its next call comes early, and the
- * vblank, locked to these calls, would run fast. So a call that comes over
- * 2 ms before the Xbox's period (1001/60000 s) has passed since the last
- * one waits for it, and the vblank keeps the Xbox's rate. A frontend that
- * spaces the calls itself (Sync to Exact Content Framerate, audio sync,
- * presents that wait) never makes one wait, and fast-forward, frame steps
- * and rewinding are left alone. Unblocked (no audio, a refresh at or above
- * the core's rate) and vsync are what this is for; a frontend without the
- * throttle state is treated the same. */
+/* Skipping a present can remove the frontend's vsync wait. Pace early
+ * calls at the Xbox rate and restart the schedule after a late call.
+ * Fast-forward, frame stepping and rewind bypass the wait. */
 static uint64_t paced(uint64_t now)
 {
     const uint64_t due = g_last_run_at + NC_LR_FRAME_NS;
     struct retro_throttle_state t = {RETRO_THROTTLE_NONE, 0.0f};
-    if (!g_last_run_at || now + 2000000ull >= due ||
+    if (!g_last_run_at || now >= due ||
         (g_env(RETRO_ENVIRONMENT_GET_THROTTLE_STATE, &t) &&
          (t.mode == RETRO_THROTTLE_FAST_FORWARD || t.mode == RETRO_THROTTLE_FRAME_STEPPING ||
           t.mode == RETRO_THROTTLE_REWINDING))) {
@@ -857,7 +845,7 @@ static uint64_t paced(uint64_t now)
     const struct timespec ts = {(time_t)(due / 1000000000ull), (long)(due % 1000000000ull)};
     while (clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, NULL) == EINTR) {
     }
-    g_last_run_at = due;            /* the schedule, without the wake-up's lateness */
+    g_last_run_at = due;            /* Keep the deadline across sleep jitter. */
     return now_ns();
 }
 

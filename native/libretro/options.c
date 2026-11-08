@@ -2,11 +2,8 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Libretro core options (LIBRETRO_SPEC.md section 10).
- * RetroArch handles display filters and aspect ratio. Crop (video.c),
- * rumble (input.c), frame pacing (the decoder reads it at each swap) and
- * frame repeats (video.c) update immediately; other options apply at the
- * next boot (the
- * Communicator is plugged into player 1's controller as it boots).
+ * RetroArch handles display filters and aspect ratio. Crop, rumble,
+ * frame pacing and frame repeats update live. Other options apply at boot.
  */
 #include "native/libretro/libretro_int.h"
 #include "native/hle/hle_native.h"
@@ -146,14 +143,10 @@ static struct retro_core_option_v2_definition g_defs[OPT_COUNT + 1] = {
         NULL, NULL,
         {{"disabled", "Off"}, {"2", "On"}, {"1", "Lowest Latency"}, {NULL, NULL}},
         "disabled"},
-    /* Off, RetroArch gets only the game's new frames, so its FPS counter
-     * shows the game's frame rate (video.c). */
     [OPT_REPEAT] = {
         "hakux_repeat_frames", "Repeat Frames", NULL,
-        "Hands RetroArch the last frame again at each display refresh when the game hasn't drawn a "
-        "new one. Turn it on for RetroArch's video recording or black frame insertion, which need a "
-        "frame every refresh. RetroArch's FPS counter and overlays such as MangoHud then show about "
-        "60 instead of the game's frame rate.",
+        "Send the previous frame again when the game has no new one. Enable for RetroArch "
+        "recording, streaming or black-frame insertion. FPS counters include repeats.",
         NULL, NULL,
         {{"disabled", "Off"}, {"enabled", "On"}, {NULL, NULL}},
         "disabled"},

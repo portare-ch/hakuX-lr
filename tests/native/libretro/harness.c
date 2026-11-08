@@ -7,11 +7,10 @@
  *
  * Loads the core as RetroArch does (dlopen, every retro_* symbol), reports
  * its system and AV info, loads a disc ("-" for Start Core without content)
- * and calls retro_run at
- * the core's rate, checking that each call hands over one video frame at
- * most (none: the game drew no new one). Core options are the core's defaults, or HARNESS_OPTIONS's
- * ("key=value;..."), and from the 30th call HARNESS_OPTIONS_LATER's, as
- * if changed in RetroArch's menu; RetroArch's language is HARNESS_LANGUAGE's
+ * and calls retro_run at the core's rate. Each call can make at most one
+ * video callback. HARNESS_OPTIONS ("key=value;...") overrides core defaults.
+ * HARNESS_OPTIONS_LATER simulates changing options on the 30th call.
+ * HARNESS_LANGUAGE sets RetroArch's language
  * (RETRO_LANGUAGE_*, English without it). It stops after <frames>, or when
  * the core asks to shut down; the summary is printed before
  * retro_unload_game (which with HAKUX_LR_STOP=0 in PortareOS's build ends
@@ -28,10 +27,9 @@
  *
  * HARNESS_VULKAN=1: the core renders on a Vulkan device the harness's
  * frontend (vk.c) negotiates with it, as RetroArch does, without a window.
- * HARNESS_UNPACED=1: each retro_run right after the last, as RetroArch calls
- * it when no present waits for the vsync (the core then keeps the period).
- * HARNESS_THROTTLE=N: RetroArch's throttle state (RETRO_THROTTLE_*), as it
- * reports it to the core; without it the harness has none.
+ * HARNESS_UNPACED=1: call retro_run back to back.
+ * HARNESS_INTERVAL_US=N: schedule calls N microseconds apart.
+ * HARNESS_THROTTLE=N: report a RETRO_THROTTLE_* mode to the core.
  * HARNESS_RESET_AT=N: retro_reset before the Nth retro_run.
  * HARNESS_REINIT_AT=N (with HARNESS_VULKAN): before the Nth, the video
  * driver rebuilt as RetroArch does it uncached: context_destroy, another
@@ -665,7 +663,8 @@ static int play(const struct retro_game_info *game, long frames)
         }
         g_frameless += g_video_calls == before;
         /* at the core's rate exactly: the next call's time from the first's */
-        const double t = t0 + (double)(ran + 1) * 1e9 / av.timing.fps;
+        const char *interval = getenv("HARNESS_INTERVAL_US");
+        const double t = t0 + (double)(ran + 1) * (interval ? atof(interval) * 1e3 : 1e9 / av.timing.fps);
         const struct timespec next = {(time_t)(t / 1e9), (long)(t - (double)(time_t)(t / 1e9) * 1e9)};
         if (!getenv("HARNESS_UNPACED")) {
             clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &next, NULL);

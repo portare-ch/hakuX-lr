@@ -9,14 +9,9 @@
  * context_reset starts the guest; context_destroy stops it before RetroArch
  * destroys the device.
  *
- * A retro_run with a new front display slot copies it, cropped, into an
- * image for the current sync index. set_command_buffers gives RetroArch the
- * copy, and set_image gives it the output image. Keep the slot acquired
- * until video_cb has submitted the copy so the renderer cannot overwrite it.
- * The slot handed last (and its crop) gets no video_cb: RetroArch keeps
- * showing it, and its FPS counter counts the game's frames, not repeats.
- * With Repeat Frames it is copied and handed again, as is a dupe before
- * the first frame.
+ * Copy the cropped front slot to the current sync image. Keep the slot
+ * acquired until video_cb submits the copy. An unchanged frame and crop
+ * reuse the previous submission unless Repeat Frames is enabled.
  *
  * A swapchain rebuild with an unchanged sync mask remains undetected:
  * wait_sync_index may miss an in-flight command buffer before it is reset.
@@ -122,8 +117,7 @@ static void retire(void)
     hle_vk_check(r, "vkQueueWaitIdle (libretro images)");
 }
 
-/* The front slot RetroArch was handed last, as cropped then; valid false:
- * none since its images were made. */
+/* Identity and crop of the last frame submitted to RetroArch. */
 static struct {
     bool valid;
     uint32_t gen, swap_id, w, h, cx, cy;

@@ -250,12 +250,10 @@ shaders for filters such as FXAA and **Core provided** for the core's 4:3 or
 
 The remaining design targets are in [LIBRETRO_SPEC.md](../LIBRETRO_SPEC.md).
 
-RetroArch's FPS counter, and overlays such as MangoHud, show the game's frame
-rate: the core hands RetroArch a frame only when the game draws a new one.
-When RetroArch paces only by its presents, the core waits out the Xbox's
-period itself between frames. RetroArch's video recording and black frame
-insertion need a frame every refresh: turn on **Repeat Frames** for them
-(the FPS counter then shows about 60).
+The core skips unchanged frames by default so RetroArch and MangoHud
+show the game's frame rate. Early calls wait for the next Xbox frame
+period. Enable **Repeat Frames** for RetroArch recording, streaming or
+black-frame insertion. FPS counters then include repeats.
 
 `HAKUX_LR_STATS=1` logs time spent in `retro_run` and the frames handed to
 RetroArch each second. `HAKUX_DISP_STATS=1` logs new frames per second, frame
