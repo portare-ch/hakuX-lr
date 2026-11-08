@@ -1,5 +1,5 @@
 The hakuX-lr dashboard (native/dash/hakux-dash.xbe), built from
-https://github.com/portare-ch/hakux-lr-dash at df9fdb4231061bbc2f8731a24a58df4e63ed5678.
+https://github.com/portare-ch/hakux-lr-dash at be925b386f220fef35fb215029887fe14e4620d7.
 
 MIT License
 

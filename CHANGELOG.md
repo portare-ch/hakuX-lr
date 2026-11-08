@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Insignia account recovery** (#185) — Under **Xbox Live**, select
+  **Recover an Insignia account** and enter your gamertag and the 16-digit
+  recovery number revealed on Insignia's website. Recovery refreshes the
+  matching account slot or uses a free slot, preserves other accounts, and
+  resumes a failed local save without repeating the recovery request.
+  Recovery and persistence after restart were verified on Linux x86-64.
+
 ## linux-v0.24.0 (Linux, aarch64 and x86-64, and Android)
 
 Set up Insignia from the bundled dashboard. In RetroArch, load the core
