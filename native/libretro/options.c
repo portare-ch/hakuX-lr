@@ -85,14 +85,15 @@ static struct retro_core_option_v2_definition g_defs[OPT_COUNT + 1] = {
     [OPT_NETWORK] = {
         "hakux_network", "Network", NULL,
         "Plugs in the console's network cable, as on a home network: Xbox Live through Insignia, the Xbox Live "
-        "revival, and system link with the consoles on this network, at once. Register the console with "
-        "Insignia's Setup Assistant before Xbox Live. System link: turn the network on on each device; "
+        "revival, and system link with the consoles on this network, at once. For Xbox Live, start the core "
+        "without a game, open Xbox Live in the dashboard, register the console, then create an account there. "
+        "System link: turn the network on on each device; "
         "discovery uses UDP port 3075. For consoles on another subnet or a VPN, add their addresses to "
         "lan-peers.txt in the save directory. If your provider blocks Insignia's DNS server, put the address of "
         "an insigniaDNS server in insignia-dns.txt in the save directory." NEXT,
         NULL, NULL,
         {{"disabled", "Off (no cable)"}, {"enabled", "On"}, {NULL, NULL}},
-        "disabled"},
+        "enabled"},
     [OPT_COMMUNICATOR] = {
         "hakux_communicator", "Xbox Live Communicator", NULL,
         "Plugs a Communicator headset into player 1's controller, for voice chat over Xbox Live (Insignia) or "

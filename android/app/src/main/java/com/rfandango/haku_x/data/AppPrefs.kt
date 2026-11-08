@@ -137,12 +137,11 @@ class AppPrefs(context: Context) {
     set(value) = sp.edit { putString(KEY_AV_PACK, value) }
 
   /**
-   * The console's network cable: plugged in (the Internet, for Xbox Live through Insignia, and system link with
-   * the consoles on this network, at once) or not. Stored as "on" or "off"; a connection an earlier version chose
-   * (lan, kai, insignia) reads as plugged in.
+   * Enables Xbox Live and system link. Defaults to on and treats the legacy
+   * LAN, Kai and Insignia modes as on.
    */
   var networkOn: Boolean
-    get() = (sp.getString(KEY_NETWORK, NET_OFF) ?: NET_OFF) != NET_OFF
+    get() = (sp.getString(KEY_NETWORK, NET_ON) ?: NET_ON) != NET_OFF
     set(value) = sp.edit { putString(KEY_NETWORK, if (value) NET_ON else NET_OFF) }
 
   /** LAN: consoles reached directly as well (another subnet, a VPN): "ip[:port], ...". */
@@ -155,17 +154,7 @@ class AppPrefs(context: Context) {
     get() = sp.getString(KEY_INSIGNIA_DNS, "") ?: ""
     set(value) = sp.edit { putString(KEY_INSIGNIA_DNS, value) }
 
-  /** Insignia's setup wizard: the user said the Setup Assistant registered this console. */
-  var insigniaRegistered: Boolean
-    get() = sp.getBoolean(KEY_INSIGNIA_REGISTERED, false)
-    set(value) = sp.edit { putBoolean(KEY_INSIGNIA_REGISTERED, value) }
-
-  /** Insignia's setup wizard: the Setup Assistant ISO the user chose (a document URI), "" none. */
-  var insigniaSetupUri: String
-    get() = sp.getString(KEY_INSIGNIA_SETUP_URI, "") ?: ""
-    set(value) = sp.edit { putString(KEY_INSIGNIA_SETUP_URI, value) }
-
-  /** Insignia's setup wizard started the Setup Assistant or the dashboard: the app opens it again after. */
+  /** Reopen the Insignia wizard when the dashboard exits. */
   var insigniaWizardResume: Boolean
     get() = sp.getBoolean(KEY_INSIGNIA_RESUME, false)
     set(value) = sp.edit { putBoolean(KEY_INSIGNIA_RESUME, value) }
@@ -254,8 +243,6 @@ class AppPrefs(context: Context) {
     private const val KEY_NETWORK = "console_network"
     private const val KEY_LAN_PEERS = "network_lan_peers"
     private const val KEY_INSIGNIA_DNS = "network_insignia_dns"
-    private const val KEY_INSIGNIA_REGISTERED = "insignia_registered"
-    private const val KEY_INSIGNIA_SETUP_URI = "insignia_setup_uri"
     private const val KEY_INSIGNIA_RESUME = "insignia_wizard_resume"
     private const val NET_OFF = "off"
     private const val NET_ON = "on"

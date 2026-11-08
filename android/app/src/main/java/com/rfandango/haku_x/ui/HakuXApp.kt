@@ -78,9 +78,7 @@ fun HakuXApp(
   onLaunchState: (Game, SaveStateStore, Int) -> Unit,
   /** Start the dashboard (installed on C:), with no disc. */
   onLaunchDashboard: () -> Unit,
-  /** Start a disc image that isn't a library game (Insignia's Setup Assistant). */
-  onLaunchSetup: (Uri) -> Unit,
-  /** Insignia's setup started a game that has closed: the setup opens again, over the library. */
+  /** Insignia's setup started the dashboard, which has closed: the setup opens again, over the library. */
   openInsignia: Boolean = false,
 ) {
   val nav = rememberNavController()
@@ -177,7 +175,6 @@ fun HakuXApp(
       InsigniaWizard(
         onBack = { nav.popBackStack() },
         onLaunchDashboard = onLaunchDashboard,
-        onLaunchSetup = onLaunchSetup,
       )
     }
     composable(Routes.GPU_DRIVER) {

@@ -233,19 +233,16 @@ network keeps (`native/net/lan.c`), and Insignia's DNS server,
 server's address in `insignia-dns.txt` in the save directory, using the same
 format as `lan-peers.txt`. Only the first address is used.
 
-**Load Core → Microsoft - Xbox (hakuX) → Start Core** boots the dashboard
-without loading a game. The core bundles
-[hakux-lr-dash](https://github.com/portare-ch/hakux-lr-dash) and installs it
-on C: as `xboxdash.xbe` and `xodash/xonlinedash.xbe` when needed.
-Games can open its Xbox Live pages. Enable **Network** for Xbox Live.
+**Load Core → Microsoft - Xbox (hakuX) → Start Core** opens
+[hakux-lr-dash](https://github.com/portare-ch/hakux-lr-dash) without a game.
+At boot the core installs it at `C:\xboxdash.xbe` and
+`C:\xodash\xonlinedash.xbe`, replacing any dashboard executables at those
+paths. It keeps the other files on C:.
 
-To create an Insignia account, register the console with Insignia's Setup
-Assistant and use your own Xbox dashboard 5960 files. Replace the bundled
-files in `hdd/Partition2/` under RetroArch's save directory with your
-dashboard files. Keep one copy of each filename regardless of case.
-Automatic updates apply to XBEs with the `hakux-dash` certificate title.
-Dashboard navigation in real RetroArch and end-to-end Insignia account
-setup and sign-in still need device validation.
+Under **Xbox Live**, select **Register this console**, then
+**Create an Insignia account** with the subscription code Insignia emails
+you. **Network** is on by default. Account recovery from this dashboard is
+still pending.
 
 PAL60 is always enabled; 480p, 720p and 1080i are disabled. Use RetroArch's
 shaders for filters such as FXAA and **Core provided** for the core's 4:3 or

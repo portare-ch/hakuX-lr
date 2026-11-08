@@ -89,6 +89,8 @@ def chd(path, image, hunk=4096, cd=False, lead=0):
 # Use a test NAT port and an unanswered loopback SSDP endpoint so tests
 # never change the real router's mappings.
 NAT_TEST = 'natport=43080 upnp=127.0.0.1:9'
+# Disable networking for tests that do not exercise it.
+OFF = 'hakux_network=disabled'
 
 
 def cycles(command, env, n, expect=None):
@@ -208,6 +210,7 @@ def main():
     # PortareOS's mode (HAKUX_LR_END_PROCESS) for the runs, whatever the build:
     # the stop's watchdog, and the way before M2 (HAKUX_LR_STOP=0).
     os.environ['HAKUX_LR_END_PROCESS'] = '1'
+    os.environ['HARNESS_OPTIONS'] = OFF
     old = dict(os.environ, HAKUX_LR_STOP='0')
     exports = dynamic_exports(args.core)
     stray = [n for n in exports if not n.startswith('retro_')]
@@ -300,7 +303,7 @@ def main():
             ('options: render scale 2x, overscan cropped, screen normal, language 3 (auto), video region auto',
              'aspect 1.333',
              'ex: video flags 00400000, AV pack 0, AV region 00400100, language 3', 'guest executed HLT'), env)
-        env['HARNESS_OPTIONS'] = ('hakux_render_scale=1;hakux_screen_format=widescreen;hakux_language=french;'
+        env['HARNESS_OPTIONS'] = (f'{OFF};hakux_render_scale=1;hakux_screen_format=widescreen;hakux_language=french;'
                                   'hakux_video_region=ntsc-j')
         run([args.harness, args.core, root / 'settings.iso', 600, root / 'saves'], 0,
             ('options: render scale 1x, overscan cropped, screen widescreen, language 4 (french), video region ntsc-j, '
@@ -308,7 +311,7 @@ def main():
              'aspect 1.778', 'ex: video flags 00410000, AV pack 0, AV region 00400200, language 4',
              'guest executed HLT'), env)
         # A value the core doesn't know is its default.
-        env['HARNESS_OPTIONS'] = 'hakux_render_scale=9;hakux_video_region=pal;hakux_crop_overscan=disabled'
+        env['HARNESS_OPTIONS'] = f'{OFF};hakux_render_scale=9;hakux_video_region=pal;hakux_crop_overscan=disabled'
         run([args.harness, args.core, root / 'settings.iso', 600, root / 'saves'], 0,
             ('options: render scale 2x, overscan shown, screen normal, language 3 (auto), video region pal',
              'ex: video flags 00400000, AV pack 0, AV region 00800300, language 3'), env)
@@ -316,7 +319,7 @@ def main():
         # the crop, rumble and frame pacing don't. Rumble on asks RetroArch
         # for its interface, which the harness doesn't have.
         disc(root / 'spin.iso', b'\xeb\xfe')
-        env = dict(os.environ, HARNESS_OPTIONS_LATER='hakux_render_scale=3;hakux_video_region=pal;'
+        env = dict(os.environ, HARNESS_OPTIONS_LATER=f'{OFF};hakux_render_scale=3;hakux_video_region=pal;'
                    'hakux_crop_overscan=disabled;hakux_rumble=enabled;hakux_frame_pace=2')
         run([args.harness, args.core, root / 'spin.iso', 60, root / 'saves'], 0,
             ('options: render scale 2x', 'frame pacing off', 'message: Render Scale, Video Region: restart the game to apply',
@@ -337,7 +340,7 @@ def main():
         # freed with the console at each stop.
         run_without([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'],
                     ('communicator off', 'ran 30 frames'), ('has a Communicator',))
-        voice = dict(os.environ, HARNESS_OPTIONS='hakux_communicator=enabled;hakux_mic_sensitivity=high')
+        voice = dict(os.environ, HARNESS_OPTIONS=f'{OFF};hakux_communicator=enabled;hakux_mic_sensitivity=high')
         run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
             ('communicator on (noise gate -46)', "ohci: player 1's controller has a Communicator",
              'communicator 1: noise gate -46', 'ran 30 frames'), voice)
@@ -435,7 +438,7 @@ def main():
         cycles([args.harness, args.core, root / 'halt.iso', 60, root / 'saves'],
                dict(os.environ, NC_NET='net=lan lanport=43075 lanbcast=127.0.0.1', NC_BOOT_FAIL_AT='disc'),
                5, 'boot: failing after disc')
-        # The Network option, the console's cable: off by default. On, the
+        # The Network option, the console's cable: on by default. On, the
         # NAT and the LAN behind one switch (native/net/all.c): Insignia's
         # DNS server, or the first address insignia-dns.txt in the save
         # directory names (an insigniaDNS server; NAT gives the console
@@ -443,6 +446,9 @@ def main():
         # broadcast, with the consoles lan-peers.txt names (comments, commas,
         # spaces and lines). The NAT's stack and port forward start with the
         # console's first frame, which spin.iso never sends (nat-smoke does).
+        run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
+            ('network on', 'network: on (Xbox Live through Insignia and system link)', 'ran 30 frames'),
+            dict(os.environ, HARNESS_OPTIONS='', NC_NET=NAT_TEST))
         run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
             ('network off', 'network off: the NIC has no link', 'console timing on', 'ran 30 frames'))
         insignia = dict(os.environ, HARNESS_OPTIONS='hakux_network=enabled', NC_NET=NAT_TEST)
@@ -467,10 +473,10 @@ def main():
             insignia)
         dns.unlink()
         # Log only Insignia accounts from the config area, as the app does.
-        # If none exist, tell game users where to create one.
-        run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
-            ('network: no Insignia account on this console', 'message: No Insignia account on this console yet',
-             'ran 30 frames'), insignia)
+        # None is only logged: with the cable in by default, games don't nag.
+        run_without([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'],
+                    ('network: no Insignia account on this console', 'ran 30 frames'),
+                    ('message: No Insignia account',), insignia)
         config = root / 'saves' / 'hdd' / 'raw-partition0.bin'
         before = config.read_bytes() if config.exists() else None
         area = bytearray((before or b'').ljust(16 * 512, b'\0'))
@@ -485,7 +491,9 @@ def main():
             config.unlink()
         else:
             config.write_bytes(before)
-        # Start Core can boot the bundle or an existing dashboard without a disc.
+        # Start Core boots the bundle without a disc. Another dashboard is
+        # replaced under its own name; NC_DASH_KEEP=1, for checks that bring
+        # their own XBEs, leaves C: as it is.
         c_drive = root / 'saves' / 'hdd' / 'Partition2'
         shutil.rmtree(c_drive, ignore_errors=True)
         run([args.harness, args.core, '-', 60, root / 'saves'], 0,
@@ -495,12 +503,18 @@ def main():
         shutil.rmtree(c_drive)
         c_drive.mkdir()
         (c_drive / 'XBOXDASH.XBE').write_bytes(xbe_of(root / 'halt.iso'))     # Check case-insensitive lookup.
+        keep = dict(os.environ, NC_DASH_KEEP='1')
         run([args.harness, args.core, '-', 600, root / 'saves'], 0,
             ('loaded the dashboard (no content)', 'message: Xbox Live in the dashboard needs Network on',
-             'guest executed HLT', 'the core asked to shut down', 'unload: the core stopped in'))
-        (c_drive / 'XBOXDASH.XBE').unlink()
+             'guest executed HLT', 'the core asked to shut down', 'unload: the core stopped in'), keep)
+        run([args.harness, args.core, '-', 60, root / 'saves'], 0,
+            ("dash: replaced another dashboard with hakuX-lr's at", 'Partition2/XBOXDASH.XBE',
+             'loaded the dashboard (no content)', 'ran 60 frames'))
+        if (c_drive / 'xboxdash.xbe').exists() or \
+                (c_drive / 'XBOXDASH.XBE').read_bytes() != (c_drive / 'xodash' / 'xonlinedash.xbe').read_bytes():
+            raise SystemExit("FAIL: another XBOXDASH.XBE wasn't replaced by the bundle under its own name")
+        shutil.rmtree(c_drive)
         # Dashboard users need no prompt to create an Insignia account.
-        (c_drive / 'xboxdash.xbe').write_bytes(xbe_of(root / 'spin.iso'))
         run_without([args.harness, args.core, '-', 30, root / 'saves'],
                     ('network: on (Xbox Live through Insignia', 'network: no Insignia account on this console',
                      'ran 30 frames'), ('No Insignia account', 'needs Network on'), insignia)
@@ -514,7 +528,7 @@ def main():
              'again', 'ran 60 frames'), dict(vk, HARNESS_REINIT_AT='20'))
         cycles([args.harness, args.core, '-', 30, root / 'saves'], vk, 5, 'loaded the dashboard (no content)')
         # Switching between a game and the dashboard boots the correct XBE.
-        # The game halts; the dashboard spins.
+        # The game halts; the dashboard runs.
         run([args.harness, args.core, '-', 300, root / 'saves'], 0,
             ('loaded the dashboard (no content)', 'then: ', 'guest executed HLT', 'the core asked to shut down'),
             dict(os.environ, HARNESS_THEN=str(root / 'halt.iso')))
@@ -534,10 +548,10 @@ def main():
                 'relaunch into \\Device\\Harddisk0\\Partition2\\xboxdash.xbe',
                 'relaunch: \\Device\\Harddisk0\\Partition2\\xboxdash.xbe', 'guest executed HLT')
         run([args.harness, args.core, '-', 600, root / 'saves'], 0,
-            hops + ("relaunch: the dashboard boots again in RetroArch's process", 'unload: the core stopped in'))
+            hops + ("relaunch: the dashboard boots again in RetroArch's process", 'unload: the core stopped in'), keep)
         # Restart on -L <core>, using environment variables for harness frames
         # and saves.
-        restart = dict(old, HARNESS_FRAMES='600', HARNESS_SAVES=str(root / 'saves'))
+        restart = dict(old, HARNESS_FRAMES='600', HARNESS_SAVES=str(root / 'saves'), NC_DASH_KEEP='1')
         run([args.harness, args.core, '-', 600, root / 'saves'], 0,
             hops + ('relaunch: starting RetroArch again for the dashboard', 'ending the process'), restart)
         # Both menu-loaded and -L/--menu starts must restart on -L <core>,
@@ -578,30 +592,30 @@ def main():
         sinc = 'resampler: sinc (32-tap Kaiser-windowed, ' + ('NEON)' if os.uname().machine == 'aarch64' else '')
         run_without([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'],
                     ('resampler sinc', sinc, 'ran 30 frames'), ('not in this build',),
-                    dict(os.environ, HARNESS_OPTIONS='hakux_audio_resampler=sinc'))
+                    dict(os.environ, HARNESS_OPTIONS=f'{OFF};hakux_audio_resampler=sinc'))
         run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
             ('resampler linear', 'resampler: linear', 'ran 30 frames'),
-            dict(os.environ, HARNESS_OPTIONS='hakux_audio_resampler=linear'))
+            dict(os.environ, HARNESS_OPTIONS=f'{OFF};hakux_audio_resampler=linear'))
         run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
             (f'audio processing {args.audio_default}',
              full_processing if args.audio_default == 'dsp' else fast_processing, 'ran 30 frames'))
         run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
             ('audio processing fast', fast_processing, 'ran 30 frames'),
-            dict(os.environ, HARNESS_OPTIONS='hakux_audio_processing=fast'))
+            dict(os.environ, HARNESS_OPTIONS=f'{OFF};hakux_audio_processing=fast'))
         run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
             ('audio processing dsp', 'processing: full DSP (GP interpreter, EP interpreter)', 'ran 30 frames'),
-            dict(os.environ, HARNESS_OPTIONS='hakux_audio_processing=dsp', NC_APU_DSP_JIT='0'))
+            dict(os.environ, HARNESS_OPTIONS=f'{OFF};hakux_audio_processing=dsp', NC_APU_DSP_JIT='0'))
         run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
             ('audio processing fast', full_processing, 'ran 30 frames'),
-            dict(os.environ, HARNESS_OPTIONS='hakux_audio_processing=fast', NC_APU_DSP='1'))
+            dict(os.environ, HARNESS_OPTIONS=f'{OFF};hakux_audio_processing=fast', NC_APU_DSP='1'))
         run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
             (f'audio processing {args.audio_default}', fast_processing, 'ran 30 frames'),
             dict(os.environ, NC_APU_DSP='0'))
         run([args.harness, args.core, root / 'spin.iso', 60, root / 'saves'], 0,
             (full_processing, fast_processing,
              'reset at frame 40', 'ran 60 frames'),
-            dict(os.environ, HARNESS_OPTIONS='hakux_audio_processing=dsp',
-                 HARNESS_OPTIONS_LATER='hakux_audio_processing=fast', HARNESS_RESET_AT='40'))
+            dict(os.environ, HARNESS_OPTIONS=f'{OFF};hakux_audio_processing=dsp',
+                 HARNESS_OPTIONS_LATER=f'{OFF};hakux_audio_processing=fast', HARNESS_RESET_AT='40'))
         run([args.harness, args.core, root / 'spin.iso', 60, root / 'saves'], 0,
             ('reset at frame 20', 'reset: the core stopped in', 'ran 60 frames',
              'RetroArch destroyed the context: the core stopped in', 'stop: the front end stopped the console',

@@ -13,8 +13,8 @@ const uint8_t *nc_dash_xbe(size_t *size);
 /* Check whether the certificate title is hakux-dash. */
 bool nc_dash_is_ours(const char *path);
 
-/* Install or update the bundled dashboard on C: (Partition2).
- * Return whether the main dashboard is present. */
+/* Install the bundled dashboard on C: and report whether the main XBE is present.
+ * Tests can set NC_DASH_KEEP=1 to skip installation. */
 bool nc_dash_install(const char *hdd);
 
 #endif

@@ -195,13 +195,6 @@ static void insignia_status(void)
         return;
     }
     nc_log("hakuX-libretro", "network: no Insignia account on this console");
-    if (nc_lr_dashboard()) {
-        return;
-    }
-    static const struct retro_message msg = {
-        "No Insignia account on this console yet: after registering it with Insignia's Setup Assistant, "
-        "start the core without a game to open the dashboard, then Xbox Live", 600};
-    nc_lr_env(RETRO_ENVIRONMENT_SET_MESSAGE, (void *)&msg);
 }
 
 /* Configure LAN broadcast and explicit peers. */
@@ -239,7 +232,7 @@ void nc_lr_net_apply(const char *mode)
     }
     nc_net_option("net=off");
     if (nc_lr_dashboard()) {
-        /* Dashboard account sign-up and recovery need the network. */
+        /* Insignia setup in the dashboard requires networking. */
         static const struct retro_message msg = {"Xbox Live in the dashboard needs Network on in the core options",
                                                  480};
         nc_lr_env(RETRO_ENVIRONMENT_SET_MESSAGE, (void *)&msg);

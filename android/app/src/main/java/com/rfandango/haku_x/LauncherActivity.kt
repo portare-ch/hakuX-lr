@@ -51,7 +51,7 @@ class LauncherActivity : ComponentActivity() {
       return
     }
 
-    // Insignia's setup started the Setup Assistant or the dashboard, now closed: it opens again
+    // Reopen the Insignia wizard after the dashboard exits.
     val openInsignia = prefs.insigniaWizardResume.also { if (it) prefs.insigniaWizardResume = false }
 
     AppTheme.load(this)
@@ -88,13 +88,6 @@ class LauncherActivity : ComponentActivity() {
             /* not remembered as the last game: no disc */
             startActivity(Intent(this, NativeCoreActivity::class.java)
               .putExtra(NativeCoreActivity.EXTRA_DVD_URI, Dashboard.URI))
-            finish()
-          },
-          onLaunchSetup = { uri: Uri ->
-            Log.i(TAG, "launch: $uri (Insignia's setup)")
-            /* not a library game: not remembered as the last one */
-            startActivity(Intent(this, NativeCoreActivity::class.java)
-              .putExtra(NativeCoreActivity.EXTRA_DVD_URI, uri.toString()))
             finish()
           },
           openInsignia = openInsignia,
