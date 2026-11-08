@@ -20,8 +20,8 @@ bool hle_pb_blit_clip(uint32_t w, uint32_t h, uint32_t bpp, uint32_t sp, uint32_
     uint32_t n = h, t = 0;
     const uint64_t end = dst + (uint64_t)(h - 1) * dp + (uint64_t)rw * bpp;
     for (unsigned i = 0; i < 8; i++) {
-        const uint32_t limit = tiles[2 * i + 1];
-        if ((tiles[2 * i] & 1) && dst < limit && end > limit) {
+        const uint32_t base = tiles[2 * i] & ~0x3FFFu, limit = tiles[2 * i + 1];
+        if ((tiles[2 * i] & 1) && base <= dst && dst < limit && end > limit) {
             const uint32_t keep = limit + 1 - dst;
             n = dp ? keep / dp : 0;
             t = keep - n * dp;

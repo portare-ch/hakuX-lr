@@ -67,6 +67,22 @@ static void test_other_tiles(void)
     HT_EQ_U32(rows, 64);
 }
 
+/* a tile above the destination's start doesn't cut it */
+static void test_tile_above(void)
+{
+    for (unsigned i = 0; i < 16; i++) {
+        g_tiles[i] = 0;
+    }
+    tile(4, 0x4000, 0x7fff);                 /* bases are in 16 KiB steps */
+    uint32_t rw, rows, tail;
+    HT_CHECK(hle_pb_blit_clip(64, 128, 4, 256, 256, 0x1000, g_tiles, &rw, &rows, &tail));
+    HT_EQ_U32(rows, 128);                    /* through it, to 0x9000 */
+    HT_EQ_U32(tail, 0);
+    /* started in it: cut at its limit */
+    HT_CHECK(hle_pb_blit_clip(64, 128, 4, 256, 256, 0x4000, g_tiles, &rw, &rows, &tail));
+    HT_EQ_U32(rows, 64);
+}
+
 /* one row with no pitch copies; nothing to copy is false */
 static void test_edges(void)
 {
@@ -85,6 +101,7 @@ int main(void)
     HT_RUN(test_wrestlemania);
     HT_RUN(test_tail);
     HT_RUN(test_other_tiles);
+    HT_RUN(test_tile_above);
     HT_RUN(test_edges);
     HT_DONE();
 }
