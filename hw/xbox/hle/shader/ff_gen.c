@@ -544,6 +544,13 @@ size_t hle_ff_ps_glsl(const HleFfPsKey *k, char *buf, size_t cap)
                         "      ((pc.flags & %uu) != 0u ? float(pc.flags >> 24) : 1.0);\n",
                     s, s, 1u << s, s, s, 256u << s);
             }
+            /* Clamp the selected axes before sampling with a border color. */
+            if (st->texture & 2) {
+                put(&b, "  uv%u.x = clamp(uv%u.x, 0.0, 1.0);\n", s, s);
+            }
+            if (st->texture & 4) {
+                put(&b, "  uv%u.y = clamp(uv%u.y, 0.0, 1.0);\n", s, s);
+            }
             put(&b, "  vec4 t%u = texture(sampler2D(uTex2D[nonuniformEXT(pc.tex[%u] & 0xFFFFu)], "
                     "uSmp[nonuniformEXT(pc.tex[%u] >> 16)]), uv%u);\n",
                 s, s, s, s);

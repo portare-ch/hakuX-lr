@@ -360,7 +360,7 @@ static void test_brdf(void)
     HT_CHECK(n > 0 && n == strlen(buf));
     dump("psh_brdf_2d");
     HT_EQ_U32(un, 0);
-    HT_CHECK(strstr(buf, "uSmp[nonuniformEXT(si)]), vec2(t0.g, t1.g)); }") != NULL);
+    HT_CHECK(strstr(buf, "uSmp[nonuniformEXT(si)]), GLC2(2u, vec2(t0.g, t1.g))); }") != NULL);
     HT_CHECK(strstr(buf, "samp3(2u") == NULL);
     /* stage 3: stages 1 and 2 */
     rs[HLE_PS_TEXMODES] = 1 | 3u << 5 | 3u << 10 | (unsigned)HLE_PST_BRDF << 15;
@@ -562,7 +562,7 @@ static void test_sign(void)
     dump("psh_sign_dot");
     HT_CHECK(strstr(buf, "dot1 = dot(vTex1.xyz, dmap(0u, tsh(t0, bvec4(true, true, true, false))));")
              != NULL);
-    HT_CHECK(strstr(buf, "uSmp[nonuniformEXT(si)]), tsh(t0, bvec4(true, true, true, false)).gb); }")
+    HT_CHECK(strstr(buf, "uSmp[nonuniformEXT(si)]), GLC2(2u, tsh(t0, bvec4(true, true, true, false)).gb)); }")
              != NULL);
     k.sgn_ob = 0;                                       /* unsigned: as before */
     HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), NULL) > 0);
@@ -971,9 +971,34 @@ static void test_precision_mode(void)
 #endif
 }
 
+/* Check shader output with GL-style clamp disabled and enabled. */
+static void test_gl_clamp(void)
+{
+    uint32_t rs[HLE_PS_REGS] = { 0 };
+    rs[HLE_PS_RGB_IN] = IN4(R_T0, R_T1, R_ZERO, R_ZERO);
+    rs[HLE_PS_ALPHA_IN] = IN4(R_T0 | CH_A, R_T1 | CH_A, R_ZERO, R_ZERO);
+    rs[HLE_PS_RGB_OUT] = R_R0 << 4;
+    rs[HLE_PS_ALPHA_OUT] = R_R0 << 4;
+    rs[HLE_PS_COUNT] = 1;
+    rs[HLE_PS_TEXMODES] = HLE_PST_PROJECT2D | HLE_PST_PROJECT2D << 5;
+    HlePshKey k;
+    hle_psh_key(rs, &k);
+    HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), NULL) > 0);
+    HT_CHECK(strstr(buf, "#define GLC2(s, v) (v)") != NULL);
+    HT_CHECK(strstr(buf, "GLCLAMP") == NULL);
+    HT_CHECK(strstr(buf, "GLC2(s, uv)") != NULL);
+    k.tex_modes |= 3u << 20 | 4u << 23;                 /* t0 u and v, t1 w */
+    HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), NULL) > 0);
+    dump("psh_gl_clamp");
+    HT_CHECK(strstr(buf, "const uint GLCLAMP = 0x023u;") != NULL);
+    HT_CHECK(strstr(buf, "#define GLC2(s, v) glc2(s, v)") != NULL);
+    HT_CHECK(strstr(buf, "GLC3(s, uvw)") != NULL);
+}
+
 int main(void)
 {
     HT_RUN(test_modulate);
+    HT_RUN(test_gl_clamp);
     HT_RUN(test_final_fog);
     HT_RUN(test_dot_mux);
     HT_RUN(test_mux_bias);

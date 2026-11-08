@@ -73,7 +73,7 @@ void hle_psh_key(const uint32_t *rs, HlePshKey *k)
     k->final_abcd = rs[HLE_PS_FINAL_ABCD];
     k->final_efg = rs[HLE_PS_FINAL_EFG];
     k->count = rs[HLE_PS_COUNT] & 0x111FF;
-    k->tex_modes = rs[HLE_PS_TEXMODES] & 0xFFFFF;
+    k->tex_modes = rs[HLE_PS_TEXMODES] & 0xFFFFF;     /* Clamp axes are added by draw.c. */
     k->dot_map = rs[HLE_PS_DOTMAP] & 0xFFF;
     k->input_tex = rs[HLE_PS_INPUTTEX] & 0x310000;
     k->compare = rs[HLE_PS_COMPARE] & 0xFFFF;
@@ -512,6 +512,24 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
         put(&b, "float q9(float x) { return floor(x * 255.0 + 0.500244140625) / 255.0; }\n"
                 "vec3 q9(vec3 x) { return floor(x * 255.0 + 0.500244140625) / 255.0; }\n");
     }
+    /* Clamp selected axes before sampling. The default macros pass coordinates through. */
+    char glc[720];
+    if (k->tex_modes >> 20) {
+        snprintf(glc, sizeof(glc),
+                 "const uint GLCLAMP = 0x%03xu;\n"
+                 "vec2 glc2(uint s, vec2 v) {\n"
+                 "  uint m = GLCLAMP >> (3u * s);\n"
+                 "  return vec2((m & 1u) != 0u ? clamp(v.x, 0.0, 1.0) : v.x,\n"
+                 "              (m & 2u) != 0u ? clamp(v.y, 0.0, 1.0) : v.y);\n"
+                 "}\n"
+                 "vec3 glc3(uint s, vec3 v) {\n"
+                 "  return vec3(glc2(s, v.xy), ((GLCLAMP >> (3u * s)) & 4u) != 0u ? clamp(v.z, 0.0, 1.0) : v.z);\n"
+                 "}\n"
+                 "#define GLC2(s, v) glc2(s, v)\n"
+                 "#define GLC3(s, v) glc3(s, v)\n", k->tex_modes >> 20);
+    } else {
+        snprintf(glc, sizeof(glc), "#define GLC2(s, v) (v)\n#define GLC3(s, v) (v)\n");
+    }
     put(&b, "layout(set = 0, binding = 0) uniform texture2D uTex2D[];\n"
             "layout(set = 0, binding = 1) uniform sampler uSmp[];\n"
             "layout(set = 0, binding = 2) uniform textureCube uTexCube[];\n"
@@ -527,7 +545,7 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "layout(location = 0) out vec4 oColor;\n"
             "vec4 col(uint c) { return unpackUnorm4x8(c).zyxw; }\n"
             HLE_NVPROJ_GLSL
-            "%s"
+            "%s%s"
             /* Xbox linear (non-swizzled) textures use texel coordinates */
             "vec4 samp(uint s, vec2 uv) {\n"
             "  uint ti = pc.tex[s] & 0xFFFFu, si = (pc.tex[s] >> 16) & 0xFFu;\n"
@@ -535,12 +553,12 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "  if ((pc.flags & (1u << s)) != 0u)\n"
             "    uv /= vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[0]), 0)) /\n"
             "          ((pc.flags & (256u << s)) != 0u ? float(pc.flags >> 24) : 1.0);\n"
-            "  return texture(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), uv);\n"
+            "  return texture(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), GLC2(s, uv));\n"
             "}\n"
             "vec4 samp3(uint s, vec3 uvw) {\n"
             "  uint ti = pc.tex[s] & 0xFFFFu, si = (pc.tex[s] >> 16) & 0xFFu;\n"
             "  return texture(sampler3D(uTex3D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), "
-            "uvw);\n"
+            "GLC3(s, uvw));\n"
             "}\n"
             "vec4 sampc(uint s, vec3 dir) {\n"
             "  uint ti = pc.tex[s] & 0xFFFFu, si = (pc.tex[s] >> 16) & 0xFFu;\n"
@@ -571,7 +589,7 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "uniform subpassInput uFb;\n" : "",
         k->fbfetch & HLE_FB_ZEQ ? HLE_ZEQ_DECL_GLSL : "",
         /* a linear texture kept to its own size (ff.h HLE_NVRECT_GLSL): the stage fog.w names */
-        k->vol & HLE_PSH_RECT ? HLE_NVRECT_GLSL : "",
+        k->vol & HLE_PSH_RECT ? HLE_NVRECT_GLSL : "", glc,
         k->vol & HLE_PSH_RECT ?
             "  { uint r = floatBitsToUint(pc.fog.w);\n"
             "    if (r != 0u && s == ((r >> 28 & 1u) | (r >> 30 & 2u)))\n"
@@ -769,8 +787,8 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             put(&b, "  vec4 t%u;\n"
                     "  { uint ti = pc.tex[%u] & 0xFFFFu, si = (pc.tex[%u] >> 16) & 0xFFu;\n"
                     "    t%u = texture(sampler2D(uTex2D[nonuniformEXT(ti)], "
-                    "uSmp[nonuniformEXT(si)]), %s.%s); }\n",
-                s, s, s, s, tex_read(ts, sizeof(ts), k, in), m == HLE_PST_DPNDNT_AR ? "ar" : "gb");
+                    "uSmp[nonuniformEXT(si)]), GLC2(%uu, %s.%s)); }\n",
+                s, s, s, s, s, tex_read(ts, sizeof(ts), k, in), m == HLE_PST_DPNDNT_AR ? "ar" : "gb");
             break;
         }
         case HLE_PST_DOT_STR_3D:                    /* stage 3: (dot1, dot2, dot3) */
@@ -838,8 +856,8 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
                 put(&b, "  vec4 t%u;\n"
                         "  { uint ti = pc.tex[%u] & 0xFFFFu, si = (pc.tex[%u] >> 16) & 0xFFu;\n"
                         "    t%u = texture(sampler2D(uTex2D[nonuniformEXT(ti)], "
-                        "uSmp[nonuniformEXT(si)]), vec2(%s.g, %s.g)); }\n",
-                    s, s, s, s, ts, ts2);
+                        "uSmp[nonuniformEXT(si)]), GLC2(%uu, vec2(%s.g, %s.g))); }\n",
+                    s, s, s, s, s, ts, ts2);
             }
             break;
         default:                        /* unknown modes */
