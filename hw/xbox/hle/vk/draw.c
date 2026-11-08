@@ -2361,7 +2361,8 @@ static bool key_supported(const PipeKey *k)
     const HleCaps *c = &g_hvk.caps;
     return ((k->raster & 3) == VK_POLYGON_MODE_FILL || c->fill_modes) &&
            (!(k->raster & 4) || c->smooth_lines) &&
-           (!(k->psh ? k->pk.poly_smooth : k->ps.poly_smooth) || c->bary);
+           (!(k->psh ? k->pk.poly_smooth : k->ps.poly_smooth) || c->bary) &&
+           (!k->logic || c->logic_op);
 }
 
 /* key's pipeline: GLSL from the key (and the vertex program's tokens),
