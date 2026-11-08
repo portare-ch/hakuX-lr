@@ -92,7 +92,7 @@ static struct retro_core_option_v2_definition g_defs[OPT_COUNT + 1] = {
         "an insigniaDNS server in insignia-dns.txt in the save directory." NEXT,
         NULL, NULL,
         {{"disabled", "Off (no cable)"}, {"enabled", "On"}, {NULL, NULL}},
-        "disabled"},
+        "enabled"},
     [OPT_COMMUNICATOR] = {
         "hakux_communicator", "Xbox Live Communicator", NULL,
         "Plugs a Communicator headset into player 1's controller, for voice chat over Xbox Live (Insignia) or "

@@ -138,11 +138,11 @@ class AppPrefs(context: Context) {
 
   /**
    * The console's network cable: plugged in (the Internet, for Xbox Live through Insignia, and system link with
-   * the consoles on this network, at once) or not. Stored as "on" or "off"; a connection an earlier version chose
-   * (lan, kai, insignia) reads as plugged in.
+   * the consoles on this network, at once) or not; plugged in until the user unplugs it. Stored as "on" or "off";
+   * a connection an earlier version chose (lan, kai, insignia) reads as plugged in.
    */
   var networkOn: Boolean
-    get() = (sp.getString(KEY_NETWORK, NET_OFF) ?: NET_OFF) != NET_OFF
+    get() = (sp.getString(KEY_NETWORK, NET_ON) ?: NET_ON) != NET_OFF
     set(value) = sp.edit { putString(KEY_NETWORK, if (value) NET_ON else NET_OFF) }
 
   /** LAN: consoles reached directly as well (another subnet, a VPN): "ip[:port], ...". */

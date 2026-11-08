@@ -3,8 +3,9 @@
 ## Unreleased
 
 - **Network** — A single Off/On option controls Xbox Live (Insignia) and
-  system link together. The separate LAN, Xbox Live and XLink Kai settings
-  are removed; older Android network choices migrate to On.
+  system link together, on by default. The separate LAN, Xbox Live and
+  XLink Kai settings are removed; older Android network choices migrate to
+  On.
 - **System link** — Consoles negotiate distinct IP addresses before DHCP
   leasing. An address conflict discovered afterward is reported.
 - **Console HDD keys** — New consoles store a random HDD key in EEPROM.

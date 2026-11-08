@@ -257,9 +257,10 @@ another device. RetroArch save states are not supported.
 
 ## Multiplayer
 
-Turn on **Quick Menu → Core Options → Network**, then close and reopen the
-game. It plugs in the console's network cable, as on a home network: Xbox Live
-and system link work at once, as on a real console.
+**Quick Menu → Core Options → Network** is on by default. It plugs in the
+console's network cable, as on a home network: Xbox Live and system link work
+at once, as on a real console. Turn it off, then close and reopen the game, to
+unplug the cable.
 
 - **System link:** turn the network on on every device, then use the game's
   system link mode. Discovery uses UDP port 3075. For another subnet or a VPN,
