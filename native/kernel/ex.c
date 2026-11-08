@@ -874,6 +874,30 @@ bool nc_kernel_launch_xbe(const uint8_t page[NC_LAUNCH_PAGE], char *out, size_t 
     return m > dev + 1;
 }
 
+bool nc_kernel_launch_dir(const uint8_t page[NC_LAUNCH_PAGE], char *out, size_t n)
+{
+    char xbe[LAUNCH_PATH_LEN], p[LAUNCH_PATH_LEN + 1];
+    if (!nc_kernel_launch_xbe(page, xbe, sizeof(xbe))) {
+        return false;
+    }
+    memcpy(p, page + LAUNCH_PATH_OFF, LAUNCH_PATH_LEN);
+    p[LAUNCH_PATH_LEN] = 0;
+    char *semi = strchr(p, ';');
+    if (!semi) {
+        return false;
+    }
+    while (semi > p + 1 && semi[-1] == '\\') {
+        semi--;
+    }
+    *semi = 0;
+    if ((size_t)snprintf(out, n, "%s", p) >= n) {
+        nc_log("hakuX-native", "relaunch: the launch folder is too long for D: (%zu chars): %s", strlen(p), p);
+        out[0] = 0;
+        return false;
+    }
+    return true;
+}
+
 /* LaunchDataType LDT_LAUNCH_DASHBOARD: LaunchData (+0x400) is LD_LAUNCH_DASHBOARD
  * { dwReason, dwContext, dwParameter1, dwParameter2 }; reason 0 is the main menu. */
 #define LDT_LAUNCH_DASHBOARD 1
@@ -1120,19 +1144,22 @@ void nc_kernel_title_loaded(NcKernel *k, const NcDisc *disc, const NcDiscFile *x
     if (s) {
         nc_vm_wr32(k->vm, s, av_pack_smc());
     }
-    /* An XBE on the hard disk: D: is the folder it was launched from, as the
-     * launch path's directory part becomes D: on the Xbox (the dashboard's:
-     * C:'s root). A disc's stays the disc's root, and so does a title
-     * update's (E:\TDATA\<title>\$u, booted for the disc's XBE). */
-    if (xbe_fd >= 0 && !strstr(path, "\\$u\\")) {
-        char dir[sizeof(k->image_path)];
+    /* Set D: before XAPI runs. Use the launch-page folder when supplied,
+     * otherwise the XBE's folder. Title updates keep the disc mapping.
+     * If the target exceeds the link limit, the existing mapping stays. */
+    char dir[sizeof(k->launch_dir)];
+    if (strstr(path, "\\$u\\")) {
+        snprintf(dir, sizeof(dir), "%s", "\\Device\\CdRom0");
+    } else if (k->launch_dir[0]) {
+        snprintf(dir, sizeof(dir), "%s", k->launch_dir);
+    } else {
         snprintf(dir, sizeof(dir), "%s", path);
         char *slash = strrchr(dir, '\\');
         if (slash && slash != dir) {
             *slash = 0;
-            nc_io_set_launch_dir(dir);
         }
     }
+    nc_io_set_launch_dir(dir);
     nc_kernel_set_hd_key(k);
 }
 

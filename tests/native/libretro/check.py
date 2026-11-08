@@ -6,6 +6,7 @@ import argparse
 import os
 from pathlib import Path
 import re
+import shutil
 import socket
 import struct
 import subprocess
@@ -272,6 +273,24 @@ def main():
              'relaunch: \\Device\\CdRom0\\default.xbe', 'guest executed HLT', 'ending the process'), old)
         if (root / 'saves' / 'relaunch.bin').exists():
             raise SystemExit('FAIL: the relaunch left its launch data page')
+        # Check D: after a direct title update and at both sides of the link limit.
+        part1 = root / 'saves' / 'hdd' / 'Partition1'
+        fit = '\\'.join(f'f{i}' + 'x' * 38 for i in range(3))           # 122 characters
+        long = '\\'.join(f'l{i}' + 'x' * 40 for i in range(6))          # 257 characters
+        for name, folder, markers, absent in (
+                ('update', 'TDATA\\ffff0001\\$u', ('relaunch: \\Device\\Harddisk0\\Partition1\\TDATA\\ffff0001\\$u'
+                                                  '\\default.xbe',), ('link \\??\\D: -> \\Device\\Harddisk0',)),
+                ('fit', fit, (f'link \\??\\D: -> \\Device\\Harddisk0\\Partition1\\{fit}\n',), ()),
+                ('long', long, ('link \\??\\D: not made: its target is too long (286 chars)',),
+                 ('link \\??\\D: -> \\Device\\Harddisk0',))):
+            disc(root / f'{name}.iso', RELAUNCH[:0x1000] + struct.pack('<II', 1, 0) +
+                 f'\\Device\\Harddisk0\\Partition1\\{folder};default.xbe'.encode(), imports=(49, 164))
+            host = part1.joinpath(*folder.split('\\'))
+            host.mkdir(parents=True, exist_ok=True)
+            (host / 'default.xbe').write_bytes(xbe_of(root / f'{name}.iso'))
+            run_without([args.harness, args.core, root / f'{name}.iso', 600, root / 'saves'],
+                        markers + ('guest executed HLT',), absent)
+            shutil.rmtree(part1 / folder.split('\\')[0])
         # The core options reach the console before it boots: the defaults,
         # with RetroArch in German (RETRO_LANGUAGE_GERMAN, XC_LANGUAGE 3),
         # then each set.

@@ -288,6 +288,7 @@ struct NcKernel {
     bool relaunch;             /* stopped for a quick reboot into another XBE (relaunch.bin) */
     bool quit;                 /* stopped as the title left: to the dashboard, a reboot, a shutdown */
     char image_path[128];      /* XeImageFileName ("" = \Device\CdRom0\default.xbe) */
+    char launch_dir[520];      /* D: from the launch page ("" = use the XBE folder) */
     uint64_t calls;
     unsigned first_ordinal;    /* first kernel call made (0: none yet) */
 };
@@ -496,6 +497,9 @@ void nc_kernel_relaunch_file(char *out, size_t n);
  * or a hard disk partition ("\Device\Harddisk0\Partition2\xboxdash.xbe"); false
  * when it names neither. */
 bool nc_kernel_launch_xbe(const uint8_t page[NC_LAUNCH_PAGE], char *out, size_t n);
+/* Read the folder before ';' in the XBE launch path.
+ * Return false if the folder is missing or does not fit in out. */
+bool nc_kernel_launch_dir(const uint8_t page[NC_LAUNCH_PAGE], char *out, size_t n);
 /* The dashboard, booted when a title asks for one of its pages (Xbox Live's
  * account sign-up, its network settings) or by itself (the app's Dashboard). */
 #define NC_DASHBOARD_PATH "\\Device\\Harddisk0\\Partition2\\xboxdash.xbe"
@@ -674,7 +678,7 @@ const char *nc_io_hdd_root(void);
  * names matched as FATX does): its host path in out; false when the path
  * isn't on a partition or names no file. */
 bool nc_io_host_file(const char *xbox_path, char *out, size_t n);
-/* \??\D:, the directory the title was launched from (its XBE's). */
+/* Set the kernel's \??\D: link before the title runs. */
 void nc_io_set_launch_dir(const char *dir);
 /* Console timing: reads take the console's drives' time, their thread waiting (io.c). */
 void nc_io_set_device_time(bool on);

@@ -4,7 +4,7 @@
  * Devices: \Device\CdRom0 is the title's disc (XDVDFS, read-only);
  * \Device\Harddisk0\PartitionN are host directories (hdd root/PartitionN),
  * matched case-insensitively as FATX does. \??\X: names are symbolic links
- * (IoCreateSymbolicLink); D: starts out at the disc.
+ * (IoCreateSymbolicLink). D: points to the title's launch folder by default.
  *
  * Xbox names are ANSI: OBJECT_ATTRIBUTES { RootDirectory, ObjectName
  * (ANSI_STRING*), Attributes }; FILE_DIRECTORY_INFORMATION carries ANSI
@@ -231,6 +231,11 @@ static int link_find(const char *name)
 
 static bool link_set(const char *name, const char *target)
 {
+    if (strlen(target) >= sizeof(g_links[0].target)) {
+        nc_log("hakuX-native-io", "link %s not made: its target is too long (%zu chars): %s", name, strlen(target),
+               target);
+        return false;
+    }
     int i = link_find(name);
     for (int j = 0; i < 0 && j < MAX_LINKS; j++) {
         if (!g_links[j].name[0]) {
@@ -2594,6 +2599,9 @@ static uint64_t IoCreateSymbolicLink(NcKernel *k, NcFrame *f, const uint32_t *a)
     char name[64], target[256], canon_target[256];
     ansi(k, a[0], name, sizeof(name));
     ansi(k, a[1], target, sizeof(target));
+    if (link_find(name) >= 0) {
+        return STATUS_OBJECT_NAME_COLLISION;
+    }
     if (!canon(target, canon_target, sizeof(canon_target))) {
         return STATUS_OBJECT_PATH_NOT_FOUND;
     }
