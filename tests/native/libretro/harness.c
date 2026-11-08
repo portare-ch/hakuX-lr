@@ -38,10 +38,13 @@
  * again before the Nth (Mth) retro_run, as RetroArch's menu does.
  * HARNESS_PRESS="port:id:from:to,...": the RetroPad button id (0-based port,
  * RETRO_DEVICE_ID_JOYPAD_*) held from the from'th retro_run until the to'th.
- * HARNESS_CHEATS="code|code|...": a game's cheats, applied as RetroArch
- * applies them (retro_cheat_reset, then each one on) after retro_load_game,
- * before the video driver starts; HARNESS_CHEATS_AT=N again before the Nth
- * retro_run, as a cheat toggled in RetroArch's menu does.
+ * HARNESS_CHEATS="code|code|...": cheats applied after loading content.
+ * HARNESS_CHEATS_LATE=1: defer them until HARNESS_CHEATS_AT.
+ * HARNESS_CHEATS_AT: frame or comma-separated frames to apply cheats.
+ * HARNESS_CHEATS_OFF_AT: reset all cheats at a selected frame.
+ * HARNESS_CHEATS2 and HARNESS_CHEATS2_AT: apply a replacement cheat set.
+ * These and HARNESS_RESET_AT accept absolute frame N, rN frames after
+ * HARNESS_READY appears in the core log, or mN after the first message.
  * HARNESS_CYCLES=N: the game loaded, run and unloaded N times, the core
  * closed and opened again between, as RetroArch does between games; after
  * each, the core closed, the threads, descriptors, memory and signal
@@ -64,6 +67,8 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+
+static int g_ready, g_messaged;         /* HARNESS_READY's text seen, a message shown (ready_watch) */
 
 #define SYMS(X)                                                                                              \
     X(retro_api_version, unsigned (*)(void))                                                                 \
@@ -152,6 +157,7 @@ static bool environment(unsigned cmd, void *data)
         return true;
     case RETRO_ENVIRONMENT_SET_MESSAGE:
         printf("message: %s\n", ((const struct retro_message *)data)->msg);
+        __atomic_store_n(&g_messaged, 1, __ATOMIC_RELEASE);
         return true;
     case RETRO_ENVIRONMENT_GET_LANGUAGE:   /* HARNESS_LANGUAGE: RetroArch's (RETRO_LANGUAGE_*) */
         *(unsigned *)data = getenv("HARNESS_LANGUAGE") ? (unsigned)atoi(getenv("HARNESS_LANGUAGE")) : 0;
@@ -281,10 +287,70 @@ static void set_ports(const char *spec)
     fflush(stdout);
 }
 
-/* HARNESS_CHEATS's, as RetroArch applies a game's cheats. */
-static void apply_cheats(void)
+/* Monitor stderr for HARNESS_READY and record the first on-screen message. */
+
+static int g_stderr = -1;              /* the original stderr, the watch writes to */
+
+static void *ready_watch(void *arg)
 {
-    const char *all = getenv("HARNESS_CHEATS");
+    const int in = (int)(intptr_t)arg;
+    const char *mark = getenv("HARNESS_READY");
+    const size_t ml = strlen(mark);
+    char buf[8192];
+    size_t have = 0;
+    for (;;) {
+        const ssize_t n = read(in, buf + have, sizeof(buf) - 1 - have);
+        if (n <= 0) {
+            return NULL;
+        }
+        if (write(g_stderr, buf + have, (size_t)n) < 0) {
+            /* the output is gone: keep watching */
+        }
+        have += (size_t)n;
+        buf[have] = 0;
+        if (strstr(buf, mark)) {
+            __atomic_store_n(&g_ready, 1, __ATOMIC_RELEASE);
+        }
+        if (have > ml) {                /* keep a tail the mark may straddle */
+            memmove(buf, buf + have - ml, ml);
+            have = ml;
+        }
+    }
+}
+
+static void ready_start(void)
+{
+    int p[2];
+    pthread_t th;
+    if (!getenv("HARNESS_READY") || pipe(p) != 0) {
+        return;
+    }
+    fflush(stderr);
+    g_stderr = dup(2);
+    dup2(p[1], 2);
+    close(p[1]);
+    if (pthread_create(&th, NULL, ready_watch, (void *)(intptr_t)p[0]) == 0) {
+        pthread_detach(th);
+    }
+}
+
+/* Resolve absolute or readiness-relative frame offsets; -1 until ready. */
+static long at_frame(const char *tok, long ready_at, long msg_at)
+{
+    if (!tok || !*tok) {
+        return -1;
+    }
+    if (*tok == 'r' || *tok == 'm') {
+        const long base = *tok == 'r' ? ready_at : msg_at;
+        return base < 0 ? -1 : base + atol(tok + 1);
+    }
+    return atol(tok);
+}
+
+/* Apply a named cheat set using RetroArch's reset/set calls. */
+static void apply_cheats_of(const char *var)
+{
+    const char *all = getenv(var);
     if (!all) {
         return;
     }
@@ -302,6 +368,11 @@ static void apply_cheats(void)
     }
     printf("cheats: %u applied\n", n + 1);
     fflush(stdout);
+}
+
+static void apply_cheats(void)
+{
+    apply_cheats_of("HARNESS_CHEATS");
 }
 
 static const char *g_core_path;
@@ -507,7 +578,9 @@ static int play(const struct retro_game_info *game, long frames)
     p_retro_get_system_av_info(&av);
     printf("loaded: %ux%u, aspect %.3f\n", av.geometry.base_width, av.geometry.base_height,
            av.geometry.aspect_ratio);
-    apply_cheats();                         /* RetroArch: as the content loads, before its drivers */
+    if (!getenv("HARNESS_CHEATS_LATE")) {
+        apply_cheats();                     /* RetroArch: as the content loads, before its drivers */
+    }
     if (g_hw.context_reset) {               /* as RetroArch's video driver starts */
         if (!hv_load() || !hv_create(g_neg)) {
             fprintf(stderr, "FAIL: no Vulkan device for the core\n");
@@ -522,13 +595,29 @@ static int play(const struct retro_game_info *game, long frames)
     clock_gettime(CLOCK_MONOTONIC, &start);
     const double t0 = (double)start.tv_sec * 1e9 + (double)start.tv_nsec;
     long ran = 0;
-    const long reset_at = getenv("HARNESS_RESET_AT") ? atol(getenv("HARNESS_RESET_AT")) : -1;
+    long ready_at = -1, msg_at = -1;
     const long reinit_at = getenv("HARNESS_REINIT_AT") ? atol(getenv("HARNESS_REINIT_AT")) : -1;
-    const long cheats_at = getenv("HARNESS_CHEATS_AT") ? atol(getenv("HARNESS_CHEATS_AT")) : -1;
     for (; ran < frames && !g_shutdown; ran++) {
-        if (ran == cheats_at) {
-            printf("frame %ld: ", ran);
-            apply_cheats();
+        if (ready_at < 0 && __atomic_load_n(&g_ready, __ATOMIC_ACQUIRE)) {
+            ready_at = ran;
+        }
+        if (msg_at < 0 && __atomic_load_n(&g_messaged, __ATOMIC_ACQUIRE)) {
+            msg_at = ran;
+        }
+        const long reset_at = at_frame(getenv("HARNESS_RESET_AT"), ready_at, msg_at);
+        for (const char *p = getenv("HARNESS_CHEATS_AT"); p && *p; p = strchr(p, ',') ? strchr(p, ',') + 1 : "") {
+            if (at_frame(p, ready_at, msg_at) == ran) {
+                printf("frame %ld: ", ran);
+                apply_cheats();
+            }
+        }
+        if (ran == at_frame(getenv("HARNESS_CHEATS2_AT"), ready_at, msg_at)) {
+            printf("frame %ld: ", ran);                /* HARNESS_CHEATS2: another set */
+            apply_cheats_of("HARNESS_CHEATS2");
+        }
+        if (ran == at_frame(getenv("HARNESS_CHEATS_OFF_AT"), ready_at, msg_at)) {
+            printf("frame %ld: cheats off\n", ran);
+            p_retro_cheat_reset();
         }
         for (const char *p = getenv("HARNESS_PORTS_AT"); p && *p; p = strchr(p, ';') ? strchr(p, ';') + 1 : "") {
             char *end;
@@ -582,6 +671,7 @@ static int play(const struct retro_game_info *game, long frames)
 
 int main(int argc, char **argv)
 {
+    ready_start();
     /* Accept RetroArch options so the core can restart this harness.
      * Without content arguments, use HARNESS_FRAMES and -s or HARNESS_SAVES
      * to simulate Start Core. */

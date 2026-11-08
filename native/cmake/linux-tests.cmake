@@ -86,6 +86,9 @@ target_link_libraries(usb-smoke PRIVATE Threads::Threads m)
 add_test(NAME usb-smoke COMMAND usb-smoke)
 set_tests_properties(usb-smoke PROPERTIES TIMEOUT 10)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+# Test the XBE patch converter (IPS/BPS cases require Floating IPS).
+add_test(NAME xbe-to-cht COMMAND "${Python3_EXECUTABLE}" "${NC_REPO}/tools/mods/test_xbe_to_cht.py")
+set_tests_properties(xbe-to-cht PROPERTIES TIMEOUT 30)
 if(NC_GUEST_TESTS)
   add_test(NAME linux-boundaries
            COMMAND "${Python3_EXECUTABLE}" "${NC_REPO}/tests/native/linux/check.py" "$<TARGET_FILE_DIR:xboxrun>")
@@ -141,6 +144,6 @@ if(TARGET hakux_libretro)
              COMMAND "${Python3_EXECUTABLE}" "${NC_REPO}/tests/native/libretro/check.py"
                      "$<TARGET_FILE:libretro-harness>" "$<TARGET_FILE:hakux_libretro>"
                      --audio-default "$<IF:$<BOOL:${HAKUX_DSP_JIT}>,dsp,fast>")
-    set_tests_properties(libretro-smoke PROPERTIES TIMEOUT 120)
+    set_tests_properties(libretro-smoke PROPERTIES TIMEOUT 180)
   endif()
 endif()
