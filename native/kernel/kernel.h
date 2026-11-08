@@ -127,7 +127,9 @@ typedef struct NcSeh {
     uint32_t nested;         /* dispatch: the frame a nested raise came from */
     uint32_t target;         /* unwind: TargetFrame */
 } NcSeh;
-#define NC_MAX_SEH 8
+/* Allow nested exception handling without the previous eight-level limit. */
+#define NC_MAX_SEH 64
+#define NC_SEH_V1  8               /* levels stored in THRD v1-v3 */
 
 typedef struct NcThread {
     enum NcThreadState state;
@@ -154,7 +156,14 @@ typedef struct NcThread {
     NcApcChain apc;          /* the chain running (apc.in_apc) */
     NcApcChain apc_outer[NC_MAX_APC_NEST]; /* chains an alertable wait in an APC interrupted */
     unsigned apc_nest;
-    NcSeh seh[NC_MAX_SEH];
+    /* Keep the first eight levels separate for older savestates. */
+    union {
+        NcSeh seh_levels[NC_MAX_SEH];
+        struct {
+            NcSeh seh[NC_SEH_V1];
+            NcSeh seh_more[NC_MAX_SEH - NC_SEH_V1];
+        };
+    };
     unsigned nseh;
     bool fresh;              /* ctx was just set up (an ISR or DPC entry): the
                                 running frame must not be saved over it */
