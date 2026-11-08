@@ -10,6 +10,7 @@
 #include "hw/xbox/hle/pb/kelvin.h"
 #include "hw/xbox/hle/pb/pbdraw.h"
 #include "hw/xbox/hle/pb/pbmode.h"
+#include "hw/xbox/hle/pb/blitclip.h"
 #include "hw/xbox/hle/pb/pbres.h"
 #include "hw/xbox/hle/pb/pbstate.h"
 #include "hw/xbox/hle/pb/pusher.h"
@@ -38,6 +39,8 @@
 #define NV_PGRAPH_COLORCLEARVALUE    0x40186Cu
 #define NV_PGRAPH_ZSTENCILCLEARVALUE 0x401A88u
 #define NV_PGRAPH_PATT_COLOR0        0x400B10u  /* NV044 SET_MONOCHROME_COLOR0 */
+#define NV_PFB_TILE_BASE(i)          (0x100240u + 16u * (i))  /* bit 0: valid */
+#define NV_PFB_TILE_LIMIT(i)         (0x100244u + 16u * (i))  /* the tile's last byte */
 
 /* the 2D classes */
 #define NV_CLASS_M2MF       0x39u
@@ -515,12 +518,27 @@ static void blit(const uint32_t *r)
     const uint32_t *s = g_pb.s2d;
     const uint32_t bpp = k_bpp[s[0x300 >> 2] & 0xF];
     const uint32_t pin = r[0x300 >> 2], pout = r[0x304 >> 2], size = r[0x308 >> 2];
-    const uint32_t w = size & 0xFFFF, h = size >> 16, sp = s[0x304 >> 2] & 0xFFFF, dp = s[0x304 >> 2] >> 16;
+    uint32_t w = size & 0xFFFF, h = size >> 16;
+    const uint32_t sp = s[0x304 >> 2] & 0xFFFF, dp = s[0x304 >> 2] >> 16;
     const uint32_t sbase = (ctx_base(s[0x184 >> 2]) + s[0x308 >> 2]) & 0x07FFFFFFu;
     const uint32_t dbase = (ctx_base(s[0x188 >> 2]) + s[0x30C >> 2]) & 0x07FFFFFFu;
     const uint32_t ix = pin & 0xFFFF, iy = pin >> 16, ox = pout & 0xFFFF, oy = pout >> 16;
+    /* As the NV2A copies (blitclip.c): rows no longer than the narrower
+     * pitch, the destination cut at its GPU tile's limit. WWE WrestleMania
+     * 21 blits 1023 x 511 at pitch 4096 to its 640 x 480 front buffer (pitch
+     * 2560), whose tile ends where its push buffer begins. */
+    uint32_t tiles[16];
+    for (unsigned i = 0; i < 8; i++) {
+        tiles[2 * i] = hle_host_gpu_reg(NV_PFB_TILE_BASE(i));
+        tiles[2 * i + 1] = hle_host_gpu_reg(NV_PFB_TILE_LIMIT(i));
+    }
+    uint32_t tail;
+    if (!hle_pb_blit_clip(w, h, bpp, sp, dp, dbase + oy * dp + ox * bpp, tiles, &w, &h, &tail)) {
+        g_pb.copies_skipped++;
+        return;
+    }
     const uint32_t row = w * bpp;
-    if (!bpp || !w || !h || (h > 1 && (!sp || !dp)) || (uint64_t)row * h > (16u << 20)) {
+    if ((uint64_t)row * (h + 1) > (16u << 20)) {
         g_pb.copies_skipped++;
         return;
     }
@@ -528,21 +546,22 @@ static void blit(const uint32_t *r)
      * pixels are in its image); else the copy in memory, now or queued behind
      * the landings of the images it reads (pbdraw.c hle_pbd_copy_begin),
      * the images over it following */
-    if (!hle_pbd_blit_images(sbase, sp, dbase, dp, bpp, ix, iy, ox, oy, w, h)) {
+    if (!h || !hle_pbd_blit_images(sbase, sp, dbase, dp, bpp, ix, iy, ox, oy, w, h)) {
         const uint32_t slo = sbase + iy * sp + ix * bpp, dlo = dbase + oy * dp + ox * bpp;
-        const uint64_t dep = hle_pbd_copy_begin(slo, sp, dlo, dp, row, h, dbase);
-        for (uint32_t y = 0; !dep && y < h; y++) {
-            const uint32_t so = slo + y * sp, d = dlo + y * dp;
-            uint8_t *sr = hle_pa_ptr(so, row), *dr = hle_pa_ptr(d, row);
+        const uint32_t rows = h + (tail ? 1 : 0);
+        const uint64_t dep = hle_pbd_copy_begin(slo, sp, dlo, dp, row, rows, dbase);
+        for (uint32_t y = 0; !dep && y < rows; y++) {
+            const uint32_t so = slo + y * sp, d = dlo + y * dp, n = y < h ? row : tail;
+            uint8_t *sr = hle_pa_ptr(so, n), *dr = hle_pa_ptr(d, n);
             if (!sr || !dr) {
                 g_pb.copies_skipped++;
                 return;
             }
-            memmove(dr, sr, row);
-            hle_mem_mark_written(d, row);
+            memmove(dr, sr, n);
+            hle_mem_mark_written(d, n);
         }
-        hle_pbd_copy_done(dlo, dp, row, h, dep);
-        hle_pbd_blit(dbase, dp, ox, oy, w, h, dep);
+        hle_pbd_copy_done(dlo, dp, row, rows, dep);
+        hle_pbd_blit(dbase, dp, ox, oy, w, rows, dep);
     }
     g_pb.blits++;
     g_pb.blit_bytes += (uint64_t)row * h;
