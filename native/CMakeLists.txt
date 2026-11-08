@@ -143,6 +143,7 @@ add_library(hakux_native STATIC
   kernel/ps.c
   kernel/ke.c
   kernel/mm.c
+  kernel/contig_run.c
   kernel/paging.c
   kernel/ex.c
   kernel/rtl.c
