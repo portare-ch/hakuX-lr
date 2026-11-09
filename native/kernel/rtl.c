@@ -113,11 +113,17 @@ static uint64_t RtlCompareMemoryUlong(NcKernel *k, NcFrame *f, const uint32_t *a
 }
 
 /* The memory routines run as guest code (kernel.c's install_fast_paths);
- * these are the same in the kernel, for NC_NO_FAST. */
+ * these are the same in the kernel, for NC_NO_FAST. Their ranges are checked
+ * first (nc_kernel_resident): a page the title commits on its fault faults
+ * before a byte moves, and the call runs again whole. An overlapping move
+ * that faulted halfway would run again from a source it had changed. */
 
 /* RtlCompareMemory(Source1, Source2, Length) -> the bytes alike from the start */
 static uint64_t RtlCompareMemory(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
+    if (!nc_kernel_resident(k, a[0], a[2], false) || !nc_kernel_resident(k, a[1], a[2], false)) {
+        return 0;
+    }
     const uint8_t *p = nc_vm_host(k->vm, a[0]), *q = nc_vm_host(k->vm, a[1]);
     uint32_t n = 0;
     while (n < a[2] && p[n] == q[n]) {
@@ -129,6 +135,9 @@ static uint64_t RtlCompareMemory(NcKernel *k, NcFrame *f, const uint32_t *a)
 /* RtlZeroMemory(Destination, Length) */
 static uint64_t RtlZeroMemory(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
+    if (!nc_kernel_resident(k, a[0], a[1], true)) {
+        return 0;
+    }
     memset(nc_vm_host(k->vm, a[0]), 0, a[1]);
     return 0;
 }
@@ -136,6 +145,9 @@ static uint64_t RtlZeroMemory(NcKernel *k, NcFrame *f, const uint32_t *a)
 /* RtlFillMemory(Destination, Length, Fill) */
 static uint64_t RtlFillMemory(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
+    if (!nc_kernel_resident(k, a[0], a[1], true)) {
+        return 0;
+    }
     memset(nc_vm_host(k->vm, a[0]), (uint8_t)a[2], a[1]);
     return 0;
 }
@@ -143,6 +155,9 @@ static uint64_t RtlFillMemory(NcKernel *k, NcFrame *f, const uint32_t *a)
 /* RtlFillMemoryUlong(Destination, Length, Pattern): Length / 4 words */
 static uint64_t RtlFillMemoryUlong(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
+    if (!nc_kernel_resident(k, a[0], a[1] & ~3u, true)) {
+        return 0;
+    }
     for (uint32_t n = 0; n + 4 <= a[1]; n += 4) {
         nc_vm_wr32(k->vm, a[0] + n, a[2]);
     }
@@ -152,6 +167,9 @@ static uint64_t RtlFillMemoryUlong(NcKernel *k, NcFrame *f, const uint32_t *a)
 /* RtlMoveMemory(Destination, Source, Length): the ranges may overlap */
 static uint64_t RtlMoveMemory(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
+    if (!nc_kernel_resident(k, a[1], a[2], false) || !nc_kernel_resident(k, a[0], a[2], true)) {
+        return 0;
+    }
     memmove(nc_vm_host(k->vm, a[0]), nc_vm_host(k->vm, a[1]), a[2]);
     return 0;
 }

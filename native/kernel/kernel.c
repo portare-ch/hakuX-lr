@@ -1268,6 +1268,13 @@ static bool nc_kernel_title_pages(NcKernel *k)
     return pf_handler(k) != k->trap_va;
 }
 
+/* A fault in a kernel call goes to the title: its page-fault handler, or the
+ * running thread's SEH handlers (an exception registration in fs:[0]). */
+static bool title_takes_faults(NcKernel *k)
+{
+    return nc_kernel_title_pages(k) || (k->current && nc_vm_rd32(k->vm, k->kpcr_va) != 0xFFFFFFFFu);
+}
+
 static void nc_kernel_fault_scope(nc_jmp_buf *env)
 {
     g_scope_thread = pthread_self();
@@ -1282,7 +1289,7 @@ static void nc_kernel_fault_scope_end(void)
 void nc_kernel_call_fault(NcKernel *k, uint32_t va, bool write)
 {
     nc_jmp_buf *env = t_call_env;
-    if (!env || !pthread_equal(g_scope_thread, pthread_self()) || !nc_kernel_title_pages(k)) {
+    if (!env || !pthread_equal(g_scope_thread, pthread_self()) || !title_takes_faults(k)) {
         return;
     }
     t_call_env = NULL;
@@ -1440,10 +1447,14 @@ static void kcall(NcKernel *k, NcFrame *f, unsigned ordinal)
     NcThread *caller = k->current;
     const unsigned slot = recent_add(caller, ordinal, ret, args);
     nc_jmp_buf env;
-    const bool scoped = nc_kernel_title_pages(k);
+    const bool scoped = title_takes_faults(k);
     if (scoped && nc_setjmp(env)) {
-        /* It touched a page the title pages in (nc_kernel_call_fault): it
-         * runs again from the trampoline once the title's handler has it. */
+        /* It touched a page the title pages in or commits on demand
+         * (nc_kernel_call_fault): the fault goes to the title's page-fault
+         * handler, else as an access violation to its SEH handlers, at the
+         * trampoline, and the call runs again once the page is in. Rainbow
+         * Six: Lockdown commits its heap in its exception handler, and
+         * initializes a critical section on a page it hasn't touched. */
         k->in_call = false;
         g_recent[slot].running = false;
         static unsigned s_logged;
@@ -1451,7 +1462,8 @@ static void kcall(NcKernel *k, NcFrame *f, unsigned ordinal)
             nc_log("hakuX-native", "kernel: %s from %08x touched %08x, paged out: it runs again", e->name, ret,
                    t_fault_va);
         }
-        if (!nc_kernel_page_fault(k, f, t_fault_va, t_fault_write)) {
+        if (!nc_kernel_page_fault(k, f, t_fault_va, t_fault_write) &&
+            !nc_seh_access_violation(k, f, t_fault_va, t_fault_write)) {
             nc_kernel_request_stop(k, f, "%s touched %08x, a page the guest doesn't have", e->name, t_fault_va);
         }
         return;
@@ -1617,7 +1629,8 @@ bool nc_kernel_resident(NcKernel *k, uint32_t va, uint32_t len, bool write)
         if (nc_vm_phys(k->vm, p) != UINT32_MAX || nc_paging_fault(k, p)) {
             continue;
         }
-        if (k->in_call && k->frame && nc_kernel_page_fault(k, k->frame, p, write)) {
+        if (k->in_call && k->frame &&
+            (nc_kernel_page_fault(k, k->frame, p, write) || nc_seh_access_violation(k, k->frame, p, write))) {
             k->redirected = true;
             return false;
         }

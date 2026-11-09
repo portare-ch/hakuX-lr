@@ -17,7 +17,7 @@ import tempfile
 
 HERE = Path(__file__).resolve().parent
 # Thunk order: DbgPrint, NtAllocateVirtualMemory, NtFreeVirtualMemory.
-IMPORTS = [8, 184, 199]
+IMPORTS = [8, 184, 199, 291, 298]
 
 
 def tool(*names):
@@ -46,6 +46,9 @@ def main():
         env = dict(os.environ, NC_TIMEOUT='10')
         check.run([build / 'xboxrun', '--headless', root / 'kernel_mm.iso', root / 'data'], 0,
                   ('kmm: all passed', 'guest executed HLT'), env)
+        # the memory routines in the kernel instead of as guest code
+        check.run([build / 'xboxrun', '--headless', root / 'kernel_mm.iso', root / 'data2'], 0,
+                  ('kmm: all passed', 'guest executed HLT'), dict(env, NC_NO_FAST='1'))
     return 0
 
 
