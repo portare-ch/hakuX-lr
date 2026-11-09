@@ -4823,7 +4823,7 @@ uint64_t hle_pbd_copy_begin(uint32_t slo, uint32_t sp, uint32_t dlo, uint32_t dp
     if (rd && (!rd->d.pitch || !coh_managed(rd, &len))) {
         rd = NULL;
     }
-    const uint64_t done = hle_tl_completed();
+    uint64_t done = hle_tl_completed();
     uint64_t v = MAX(coh_pend_any(s0, s1, false), coh_pend_any(d0, d1, true));
     for (unsigned i = 0; i < g_pd.nobjs; i++) {
         const PbObj *o = &g_pd.objs[i];
@@ -4842,10 +4842,11 @@ uint64_t hle_pbd_copy_begin(uint32_t slo, uint32_t sp, uint32_t dlo, uint32_t dp
      * its image is the newer: not when memory superseded it (a texture
      * defined there since, obj_superseded) or a target drawn later lies
      * anywhere in what the readback writes (its whole pitch x height). The
-     * CPU's writes into it go into its image first (rt_cpu_upload, as the
-     * front buffer's path takes them), so the readback carries them. An
-     * older target over reused memory once put its old image back over a
-     * texture, and its landing met pages the dirty tracking didn't hold. */
+     * CPU's writes into a frame buffer go into its image before the GPU
+     * draws on it or shows it (rt_cpu_sync); uploading them here as well
+     * changed it each copy, and the extra guarded readbacks met pages the
+     * dirty tracking didn't hold (a crash). An older target over reused
+     * memory once put its old image back over a texture the same way. */
     PbObj *fb = NULL;
     uint32_t fb_len = 0;
     for (unsigned i = 0; i < g_pd.nobjs; i++) {
@@ -4867,13 +4868,21 @@ uint64_t hle_pbd_copy_begin(uint32_t slo, uint32_t sp, uint32_t dlo, uint32_t dp
         }
     }
     if (fb) {
-        rt_cpu_upload(fb->id, true);        /* the CPU's writes there into its image first */
         if (fb->fb_wb_w != fb->written) {
             fb->fb_wb_v = writeback_ex(fb->id, true);
             fb->fb_wb_w = fb->written;
         }
         if (fb->fb_wb_v > done) {
-            v = MAX(v, fb->fb_wb_v);
+            /* waited for here, the copy made now: queued behind it, its
+             * destination was guarded, and the CPU's stores there (a
+             * buffer freed and taken again) met pages the dirty tracking
+             * didn't hold */
+            if (fb->fb_wb_v > hle_fe_last_value()) {
+                kick();
+            }
+            coh_wait(fb->fb_wb_v);
+            coh_adopt();
+            done = hle_tl_completed();      /* (its writeback note is landed now) */
         }
     }
     for (unsigned i = 0; i < WB_NOTES; i++) {           /* the old paths' writebacks in flight */
