@@ -1,0 +1,25 @@
+name: Request hakuX-lr 0.25.2 release
+on:
+  push:
+    branches:
+      - release/linux-v0.25.2
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  dispatch-release:
+    if: github.repository == 'portare-ch/hakuX-lr'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create the tag and start the release build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: linux-v0.25.2
+          SOURCE_SHA: f715ffa84a9562acc6b6f1d450dcbd3e472205f2
+        run: |
+          set -euo pipefail
+          gh api -X POST "repos/$GH_REPO/git/refs" -f ref="refs/tags/$TAG" -f sha="$SOURCE_SHA" > /dev/null
+          gh workflow run linux.yml --ref "$TAG" --repo "$GH_REPO"
