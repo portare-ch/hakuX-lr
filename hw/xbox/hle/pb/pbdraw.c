@@ -4834,27 +4834,40 @@ uint64_t hle_pbd_copy_begin(uint32_t slo, uint32_t sp, uint32_t dlo, uint32_t dp
     }
     /* A frame buffer the copy reads: the front buffer's path keeps its image,
      * not its memory (coh_display), so its image is read back first, once a
-     * drawing, and the copy waits for that landing. Only the newest drawn
-     * one holding the whole source: an older target over the same memory
-     * (a frame buffer since freed, its memory a texture's now) would put
-     * its old image back over newer bytes. nxdk_pgraph_tests saves each
-     * test's back buffer with an M2MF copy (pbkit++ gpum_copy): from the
-     * memory as it was, most of its pictures were an earlier test's. */
+     * drawing, and the copy waits for that landing. nxdk_pgraph_tests saves
+     * each test's back buffer with an M2MF copy (pbkit++ gpum_copy): from the
+     * memory as it was, most of its pictures were an earlier test's.
+     *
+     * Only the newest drawn one holding the whole source, and only while
+     * its image is the newer: not when memory superseded it (a texture
+     * defined there since, obj_superseded) or a target drawn later lies
+     * anywhere in what the readback writes (its whole pitch x height). The
+     * CPU's writes into it go into its image first (rt_cpu_upload, as the
+     * front buffer's path takes them), so the readback carries them. An
+     * older target over reused memory once put its old image back over a
+     * texture, and its landing met pages the dirty tracking didn't hold. */
     PbObj *fb = NULL;
+    uint32_t fb_len = 0;
     for (unsigned i = 0; i < g_pd.nobjs; i++) {
         PbObj *o = &g_pd.objs[i];
         if (o->d.pitch && coh_len(o, &len) && coh_display(o) && !past_block(&o->d) && o->d.pa <= s0 &&
             s1 <= o->d.pa + len && (!fb || o->written > fb->written)) {
             fb = o;
+            fb_len = len;
         }
+    }
+    if (fb && obj_superseded(fb)) {
+        fb = NULL;                          /* its memory is the newer */
     }
     for (unsigned i = 0; fb && i < g_pd.nobjs; i++) {
         const PbObj *o = &g_pd.objs[i];
-        if (o != fb && coh_len(o, &len) && o->d.pa < s1 && o->d.pa + len > s0 && o->written > fb->written) {
+        if (o != fb && coh_len(o, &len) && o->d.pa < fb->d.pa + fb_len && o->d.pa + len > fb->d.pa &&
+            o->written > fb->written) {
             fb = NULL;                      /* something newer was drawn over it */
         }
     }
     if (fb) {
+        rt_cpu_upload(fb->id, true);        /* the CPU's writes there into its image first */
         if (fb->fb_wb_w != fb->written) {
             fb->fb_wb_v = writeback_ex(fb->id, true);
             fb->fb_wb_w = fb->written;
