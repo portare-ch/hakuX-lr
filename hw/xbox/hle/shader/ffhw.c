@@ -48,18 +48,15 @@ static const char *src_rgb(unsigned s)
     return s == 1 ? "v3.rgb" : s == 2 ? "v4.rgb" : "vec3(1.0)";
 }
 
-/* The lighting unit's curve (NVIDIA's patent US6417851: "(x+L)/(M*x+N)",
- * approximating the specular term's (N.H)^power and the spot's s^falloff):
- * k holds the methods' L, M, N as D3D derives them from the material's power
- * or the light's falloff (a table over log2 of it, reverse-engineered in
- * xgu's xgux.h; N = 1 + L - M, so 1 at x = 1). 0 for x <= -L, where the
- * fraction would go negative; capped at top. xemu evaluates it so, compared
- * with the hardware's nxdk_pgraph_tests results (its PRs 3076 and 3078:
- * Specular, Lighting spotlight); what a denominator of 0 or below gives (top,
- * 0) is its guess. The specular term takes the first three of
- * SET_SPECULAR_PARAMS's six; the other three (the half power's) have no
- * known use. */
-#define NVC_DEFINE "#define NVC(d, k, top) ((d) <= -(k).x ? 0.0 : (k).y * (d) + (k).z == 0.0 ? (top) : " \
+/* NV2A approximates specular power and spotlight falloff with
+ * (x + L) / (M*x + N) (NVIDIA US6417851). D3D's coefficient table is
+ * documented in xgu's xgux.h. N = 1 + L - M gives 1 at x = 1.
+ * Xbox spotlight captures show saturation at a zero denominator. Use a
+ * finite value so combining lighting factors stays within FP32. Negative
+ * denominators return zero, following xemu's approximation.
+ * Specular uses the first three SET_SPECULAR_PARAMS values. */
+#define SAT "1.0e10"
+#define NVC_DEFINE "#define NVC(d, k, top) ((d) <= -(k).x ? 0.0 : (k).y * (d) + (k).z == 0.0 ? " SAT " : " \
                    "(k).y * (d) + (k).z < 0.0 ? 0.0 : min(((d) + (k).x) / ((k).y * (d) + (k).z), (top)))\n"
 
 static void skinning(Buf *b, const HleFfhwKey *k)
@@ -194,19 +191,17 @@ static void lighting(Buf *b, const HleFfhwKey *k)
                    "      lit = d <= c[%u].x;\n"
                    "      VP = normalize(VP);\n"
                    "      vec3 at = c[%u].xyz;\n"
-                   "      att = 1.0 / (at.x + at.y * d + at.z * d * d);\n"
+                   "      float ad = at.x + at.y * d + at.z * d * d;\n"
+                   "      att = ad == 0.0 ? " SAT " : clamp(1.0 / ad, -" SAT ", " SAT ");\n"
                    "      nl = max(dot(tN, VP), 0.0);\n"
                    "      nh = max(dot(tN, normalize(VP + eyeV)), 0.0);\n",
                 L + HLE_FFHW_L_POSITION, L + HLE_FFHW_L_RANGE, L + HLE_FFHW_L_ATTENUATION);
             if (t == 3) {
-                /* the spot factor s: D3D's direction scaled by 1 / (cos(theta/2)
-                 * - cos(phi/2)), w -cos(phi/2) times that, makes s 0 at the
-                 * outer cone and 1 at the inner one; between them the falloff
-                 * curve, not s itself (falloff 1, D3D's default, is 0.4 at s =
-                 * 0.5) */
+                /* D3D scales s to 0 at the outer cone and 1 at the inner cone.
+                 * Evaluate the curve at 1 throughout the inner cone. */
                 put(b, "      float s = dot(c[%u].xyz, VP) + c[%u].w;\n"
                        "      if (s <= 0.0) att = 0.0;\n"
-                       "      else if (s < 1.0) att *= NVC(s, c[%u], 1.0);\n",
+                       "      else att = min(att * NVC(min(s, 1.0), c[%u], 1.0), " SAT ");\n",
                     L + HLE_FFHW_L_SPOT, L + HLE_FFHW_L_SPOT, L + HLE_FFHW_L_FALLOFF);
             }
         }
