@@ -4,7 +4,8 @@
  * | stencil). A fullscreen pass fetches each texel's depth and stencil and
  * writes the word's bytes as the texture format's channels into the colour
  * image the texture samples, or for a 16-bit texture twice as wide the
- * words' halves (HLE_ZREAD_HALVES).
+ * words' halves (HLE_ZREAD_HALVES); a D16 target's 16-bit words
+ * (HLE_ZREAD_D16).
  */
 #include "hw/xbox/hle/base.h"
 #include "hw/xbox/hle/hle.h"
@@ -59,6 +60,16 @@ static const char k_fs[] =
     "  o = vec4(ch(w, pc.map.x), ch(w, pc.map.y), ch(w, pc.map.z), ch(w, pc.map.w));\n"
     "}\n";
 
+/* HLE_ZREAD_D16: a D16 target's words, as 16-bit luminance (no stencil) */
+static const char k_fs16[] =
+    "#version 450\n"
+    "layout(set = 0, binding = 0) uniform sampler2D zt;\n"
+    "layout(location = 0) out vec4 o;\n"
+    "void main() {\n"
+    "  float d = clamp(texelFetch(zt, ivec2(gl_FragCoord.xy), 0).r, 0.0, 1.0);\n"
+    "  o = vec4(float(uint(d * 65535.0 + 0.5)) / 65535.0);\n"
+    "}\n";
+
 /* HLE_OP_ZWRITE: a colour surface's 32-bit words a.r.g.b as D24S8 depth << 8 |
  * stencil; the depth is the top 24 bits (k_fs_zw), the stencil the low byte
  * (k_fs_zws: one pass per bit, each writing that bit where it is set, after
@@ -88,9 +99,9 @@ static struct {
     VkSampler smp;
     VkDescriptorPool pool;
     VkDescriptorSet set[ZR_SLOTS][ZR_PER_SLOT];
-    VkShaderModule vs, fs, fs_zw, fs_zws;
+    VkShaderModule vs, fs, fs16, fs_zw, fs_zws;
     struct { VkFormat f; bool bits; VkPipeline p; } zw[4];
-    struct { VkFormat f; VkPipeline p; } pipe[4];
+    struct { VkFormat f; bool d16; VkPipeline p; } pipe[4];
     unsigned npipe, nzw;
     unsigned slot, used;
     uint64_t rec;                       /* submit count when slot's recording began */
@@ -156,10 +167,11 @@ static bool init(void)
                                         .descriptorSetCount = ARRAY_SIZE(ls), .pSetLayouts = ls };
     g_zr.vs = module(HLE_SHADER_VERTEX, k_vs);
     g_zr.fs = module(HLE_SHADER_FRAGMENT, k_fs);
+    g_zr.fs16 = module(HLE_SHADER_FRAGMENT, k_fs16);
     g_zr.fs_zw = module(HLE_SHADER_FRAGMENT, k_fs_zw);
     g_zr.fs_zws = module(HLE_SHADER_FRAGMENT, k_fs_zws);
     if (T.vkAllocateDescriptorSets(g_hvk.dev, &dai, &g_zr.set[0][0]) != VK_SUCCESS ||
-        !g_zr.vs || !g_zr.fs || !g_zr.fs_zw || !g_zr.fs_zws) {
+        !g_zr.vs || !g_zr.fs || !g_zr.fs16 || !g_zr.fs_zw || !g_zr.fs_zws) {
         hle_log("hakuX-hle-back", "zread: shaders failed (depth buffers not read as colour)");
         return false;
     }
@@ -169,11 +181,12 @@ static bool init(void)
     return true;
 }
 
-/* The pipeline writing colour format f, made on first use. */
-static VkPipeline pipe_for(VkFormat f)
+/* The pipeline writing colour format f (d16: from a D16 target), made on
+ * first use. */
+static VkPipeline pipe_for(VkFormat f, bool d16)
 {
     for (unsigned i = 0; i < g_zr.npipe; i++) {
-        if (g_zr.pipe[i].f == f) {
+        if (g_zr.pipe[i].f == f && g_zr.pipe[i].d16 == d16) {
             return g_zr.pipe[i].p;
         }
     }
@@ -184,7 +197,8 @@ static VkPipeline pipe_for(VkFormat f)
         { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
           .stage = VK_SHADER_STAGE_VERTEX_BIT, .module = g_zr.vs, .pName = "main" },
         { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-          .stage = VK_SHADER_STAGE_FRAGMENT_BIT, .module = g_zr.fs, .pName = "main" },
+          .stage = VK_SHADER_STAGE_FRAGMENT_BIT, .module = d16 ? g_zr.fs16 : g_zr.fs,
+          .pName = "main" },
     };
     VkPipelineVertexInputStateCreateInfo vi = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
@@ -221,6 +235,7 @@ static VkPipeline pipe_for(VkFormat f)
         return VK_NULL_HANDLE;
     }
     g_zr.pipe[g_zr.npipe].f = f;
+    g_zr.pipe[g_zr.npipe].d16 = d16;
     g_zr.pipe[g_zr.npipe++].p = p;
     return p;
 }
@@ -318,7 +333,7 @@ static bool view(HleVkSurf *s, unsigned i)
 
 static bool views(HleVkSurf *s)
 {
-    return view(s, 0) && view(s, 1);
+    return view(s, 0) && ((s->aspect & VK_IMAGE_ASPECT_STENCIL_BIT) ? view(s, 1) : true);
 }
 
 VkImageView hle_zread_depth_view(HleVkSurf *s)
@@ -420,7 +435,11 @@ const char *hle_zread_pass(VkCommandBuffer cb, unsigned slot, HleVkSurf *src, Hl
     if (!init()) {
         return "setup failed";
     }
-    VkPipeline p = pipe_for(dst->fmt);
+    const bool d16 = map[0] == HLE_ZREAD_D16;
+    if (d16 == ((src->aspect & VK_IMAGE_ASPECT_STENCIL_BIT) != 0)) {
+        return "depth format and mode differ";
+    }
+    VkPipeline p = pipe_for(dst->fmt, d16);
     if (!p) {
         return "no pipeline";
     }
@@ -441,7 +460,7 @@ const char *hle_zread_pass(VkCommandBuffer cb, unsigned slot, HleVkSurf *src, Hl
             .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             .pImageInfo = &ii[i] };
     }
-    T.vkUpdateDescriptorSets(g_hvk.dev, 2, w, 0, NULL);
+    T.vkUpdateDescriptorSets(g_hvk.dev, d16 ? 1 : 2, w, 0, NULL);     /* (D16's shader: no stencil) */
     hle_surf_transition(cb, dst, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     const bool halves = map[0] == HLE_ZREAD_HALVES;
     uint32_t fw = MIN(src->w * (halves ? 2 : 1), dst->w), fh = MIN(src->h, dst->h);
@@ -483,6 +502,7 @@ void hle_zread_shutdown(void)
     }
     T.vkDestroyShaderModule(d, g_zr.vs, NULL);
     T.vkDestroyShaderModule(d, g_zr.fs, NULL);
+    T.vkDestroyShaderModule(d, g_zr.fs16, NULL);
     T.vkDestroyShaderModule(d, g_zr.fs_zw, NULL);
     T.vkDestroyShaderModule(d, g_zr.fs_zws, NULL);
     T.vkDestroyDescriptorPool(d, g_zr.pool, NULL);      /* its sets with it */

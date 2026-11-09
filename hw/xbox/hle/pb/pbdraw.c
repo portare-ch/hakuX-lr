@@ -140,6 +140,7 @@ typedef struct PbObj {
                                            title's data: superseded while written <= it */
     bool zbase;                         /* depth: cleared whole, the CPU's writes before taken */
     uint64_t zedge[2];                  /* depth: its first and last pages' bytes then */
+    uint64_t z_rows;                     /* padded D16: the last known RAM depth pixels */
     /* its memory against its image (coh_*, colour targets) */
     uint64_t synced;                    /* written when the two last matched */
     CohSnap snap;                       /* its memory's write counts then */
@@ -173,6 +174,7 @@ typedef struct PbTex {
     uint32_t pal_hash;
     uint64_t checked;                   /* the epoch it was last checked at */
     uint64_t edge_hash[2];              /* its bytes on its first and last pages, at definition */
+    uint64_t landing;                   /* render target readback used to define this texture */
     uint32_t host_bytes;                /* its image's texels as uploaded (g_pd.tex_bytes) */
     bool ok;                            /* defined (else it can't be: not again) */
 } PbTex;
@@ -199,11 +201,12 @@ static struct {
      * from the depth image (HLE_OP_ZREAD) at each use, or the CPU's bytes
      * when it wrote the memory since (zread) */
     struct {
-        uint32_t id, src, pa, w, h, xfmt;
+        uint32_t id, src, pa, w, h, xfmt, pitch;
         uint64_t edge_hash[2];          /* the memory's bytes on its first and last page */
     } zr[MAX_ZREADS];
     uint64_t zr_uploads;                /* CPU-written zread memory uploaded (debug) */
     unsigned nzr;
+    uint64_t tex_landing[4];            /* completed readbacks for the current draw's stages */
     uint32_t next_id;
     uint64_t clears, swaps;             /* swaps: FLIP_INCREMENT_WRITE's */
     uint32_t swap_ids;                  /* every swap's id (those and PCRTC_START's) */
@@ -809,6 +812,28 @@ static bool past_block(const HleSurfDesc *d)
     return end && (uint64_t)d->pitch * d->h > end - d->pa;
 }
 
+static bool d16_padded(const HleSurfDesc *d)
+{
+    return d->xfmt == HLE_XFMT_LIN_D16 && d->w && d->h && d->pitch > d->w * 2;
+}
+
+/* Dirty pages and contiguous spans include the gaps between depth rows.
+ * Hash only the bytes the depth image can read or write. */
+static uint64_t d16_rows_hash(const HleSurfDesc *d)
+{
+    const uint32_t row = d->w * 2;
+    const uint8_t *ram = hle_pa_ptr(d->pa, d->pitch * (d->h - 1) + row);
+    if (!ram) {
+        return 0;
+    }
+    XXH3_state_t state;
+    XXH3_64bits_reset(&state);
+    for (uint32_t y = 0; y < d->h; y++) {
+        XXH3_64bits_update(&state, ram + y * d->pitch, row);
+    }
+    return XXH3_64bits_digest(&state);
+}
+
 /* The object for a surface (memory, format, pitch, size), made the first
  * time; 0 if none can be. A linear surface's height is only what its clip
  * reaches (the NV2A has none): a view of the top rows of one already made,
@@ -895,6 +920,9 @@ static uint32_t object(uint32_t pa, uint32_t xfmt, uint32_t pitch, uint32_t w, u
     if (pitch) {
         hle_mem_written(pa, pitch * h);     /* CPU writes from now on (rt_cpu_sync) */
         obj_edges_set(o);
+        if (d16_padded(&o->d)) {
+            o->z_rows = d16_rows_hash(&o->d);
+        }
         restored_pixels(o);
     }
     if (g_lg.surfaces++ < 32) {
@@ -1467,6 +1495,10 @@ static void zbase(PbObj *o)
     if (!o->d.pitch || (o->d.xfmt != HLE_XFMT_LIN_D24S8 && o->d.xfmt != HLE_XFMT_LIN_D16) || past_block(&o->d)) {
         return;
     }
+    if (d16_padded(&o->d)) {
+        o->z_rows = d16_rows_hash(&o->d);
+        return;
+    }
     const uint32_t len = o->d.pitch * o->d.h, hi = o->d.pa + len;
     const uint32_t p0 = o->d.pa & ~4095u, pl = (hi - 1) & ~4095u;
     if (pl > p0 + 4096) {
@@ -1477,7 +1509,8 @@ static void zbase(PbObj *o)
     for (unsigned i = 0; i < g_pd.nzr; i++) {
         if (g_pd.zr[i].pa == o->d.pa) {
             const uint32_t bpp = g_pd.zr[i].xfmt == HLE_XFMT_LIN_L16 ? 2 : 4;
-            span_edges_set(o->d.pa, g_pd.zr[i].w * bpp * g_pd.zr[i].h, g_pd.zr[i].edge_hash);
+            span_edges_set(o->d.pa, g_pd.zr[i].pitch * (g_pd.zr[i].h - 1) + g_pd.zr[i].w * bpp,
+                           g_pd.zr[i].edge_hash);
         }
     }
 }
@@ -1505,10 +1538,24 @@ static void clear(uint32_t flags)
     HleCmdClear *c = begin(HLE_OP_CLEAR, sizeof(*c));
     c->flags = flags & 0xF3;
     c->color = R(NV097_SET_COLOR_CLEAR_VALUE);
-    if ((R(NV097_SET_SURFACE_FORMAT) & 0xF) == 3) {     /* R5G6B5: the value is in its format */
-        uint32_t v = c->color;
+    /* The X formats' unused bits are 0 (Z) or 1 (O) in memory, whatever the
+     * value's (the Clear tests sample such targets as A8B8G8R8): X1A7's
+     * alpha top bit, X1R5G5B5's bit 15. Not X8R8G8B8's byte: its image's
+     * alpha is what DST_ALPHA blends read, and D3D's X8R8G8B8 back buffers
+     * are Z8. The 16-bit formats take the value's low half in their own
+     * format. */
+    const uint32_t cf = R(NV097_SET_SURFACE_FORMAT) & 0xF, v = c->color;
+    switch (cf) {
+    case 1: case 2:
+        c->color = (cf == 2 ? 0xFF000000u : 0) | ((v >> 10) & 0x1F) * 255 / 31 << 16 |
+                   ((v >> 5) & 0x1F) * 255 / 31 << 8 | (v & 0x1F) * 255 / 31;
+        break;
+    case 3:
         c->color = 0xFF000000u | ((v >> 11) & 0x1F) * 255 / 31 << 16 |
                    ((v >> 5) & 0x3F) * 255 / 63 << 8 | (v & 0x1F) * 255 / 31;
+        break;
+    case 6: c->color &= 0x7FFFFFFFu; break;
+    case 7: c->color |= 0x80000000u; break;
     }
     if (zf == 2) {
         c->z = zfloat ? zfloat_clear(zs >> 8, true) : (zs >> 8) / 16777215.0f;
@@ -2725,11 +2772,12 @@ static bool tex_evict(bool full)
     return true;
 }
 
-static unsigned zread_view(uint32_t pa, uint32_t w, uint32_t h, uint32_t xfmt, uint32_t bpp, bool *fresh)
+static unsigned zread_view(uint32_t pa, uint32_t w, uint32_t h, uint32_t xfmt, uint32_t bpp,
+                           uint32_t pitch, bool *fresh)
 {
     unsigned i = 0;
     while (i < g_pd.nzr && !(g_pd.zr[i].pa == pa && g_pd.zr[i].w == w && g_pd.zr[i].h == h &&
-                             g_pd.zr[i].xfmt == xfmt)) {
+                             g_pd.zr[i].xfmt == xfmt && g_pd.zr[i].pitch == pitch)) {
         i++;
     }
     if (fresh) {
@@ -2750,10 +2798,11 @@ static unsigned zread_view(uint32_t pa, uint32_t w, uint32_t h, uint32_t xfmt, u
         g_pd.zr[i].w = w;
         g_pd.zr[i].h = h;
         g_pd.zr[i].xfmt = xfmt;
+        g_pd.zr[i].pitch = pitch;
         HleCmdObj *c = begin(HLE_OP_OBJ_CREATE, sizeof(*c));
         memset(c, 0, sizeof(*c));
         c->s = (HleSurfDesc){ .id = g_pd.zr[i].id, .xfmt = bpp == 2 ? xfmt : HLE_XFMT_LIN_A8R8G8B8,
-                              .w = w, .h = h, .pa = pa, .pitch = w * bpp, .levels = 1, .faces = 1 };
+                              .w = w, .h = h, .pa = pa, .pitch = pitch, .levels = 1, .faces = 1 };
         hle_fe_commit();
         hle_log("hakuX-hle-pb", "depth view %08x (%ux%u)", pa, w, h);
     }
@@ -2772,7 +2821,7 @@ static bool zsync_stencil(PbObj *o)
     const uint32_t len = pitch * h;
     coh_pend_wait(pa, len);
     if (span_written(pa, len, o->zbase ? o->zedge : o->edge_hash)) {
-        const unsigned i = zread_view(pa, w, h, HLE_XFMT_LIN_A8R8G8B8, 4, NULL);
+        const unsigned i = zread_view(pa, w, h, HLE_XFMT_LIN_A8R8G8B8, 4, pitch, NULL);
         const HleRect r = { 0, 0, (int32_t)w, (int32_t)h };
         const int32_t pt[1][2] = { { 0, 0 } };
         if (!hle_res_upload(g_pd.zr[i].id, pa, pitch, 1, &r, pt)) {
@@ -2799,18 +2848,21 @@ static bool zsync_stencil(PbObj *o)
  * HLE_ZREAD_HALVES): Midtown Madness 3 reads its depth buffer as 1280 x 480
  * L16, the words' upper halves its depth's top 16 bits, into the alpha its
  * sky dome blends in by (DST_ALPHA); read from memory the GPU never wrote,
- * the alpha stayed 0 and the sky was the clear colour. want: that target
- * (a copy's readback picks the newest drawn), else the one bound last. */
+ * the alpha stayed 0 and the sky was the clear colour. HLE_ZREAD_D16
+ * reads a D16 target's own words as LIN_L16. A zero pitch means tightly
+ * packed rows. want selects the copy's depth writer when supplied. */
 static uint32_t zread(uint32_t pa, uint32_t w, uint32_t h, const uint8_t map[4], uint32_t xfmt,
-                      const PbObj *want)
+                      uint32_t pitch, const PbObj *want)
 {
-    const bool halves = map[0] == HLE_ZREAD_HALVES;
-    const uint32_t bpp = halves ? 2 : 4;
+    const bool halves = map[0] == HLE_ZREAD_HALVES, d16 = map[0] == HLE_ZREAD_D16;
+    const uint32_t bpp = halves || d16 ? 2 : 4;
+    pitch = pitch ? pitch : w * bpp;
     const PbObj *src = NULL;
     for (unsigned i = 0; i < g_pd.nobjs; i++) {
         const PbObj *o = &g_pd.objs[i];
         if (o->d.pa == pa && o->d.w * (halves ? 2 : 1) == w && o->d.h == h &&
-            (o->d.xfmt == HLE_XFMT_D24S8 || o->d.xfmt == HLE_XFMT_LIN_D24S8) &&
+            (d16 ? o->d.xfmt == HLE_XFMT_LIN_D16 :
+                   o->d.xfmt == HLE_XFMT_D24S8 || o->d.xfmt == HLE_XFMT_LIN_D24S8) &&
             (!want || o == want) && (!src || o->bound > src->bound)) {
             src = o;
         }
@@ -2841,7 +2893,7 @@ static uint32_t zread(uint32_t pa, uint32_t w, uint32_t h, const uint8_t map[4],
         }
     }
     bool fresh;
-    const unsigned i = zread_view(pa, w, h, xfmt, bpp, &fresh);
+    const unsigned i = zread_view(pa, w, h, xfmt, bpp, pitch, &fresh);
     /* What the CPU wrote into the memory since is the memory's now: its rows
      * go into the texture's image, and the back end converts the depth image
      * again only once the depth buffer is written after them (cmd_zread).
@@ -2849,19 +2901,22 @@ static uint32_t zread(uint32_t pa, uint32_t w, uint32_t h, const uint8_t map[4],
      * depth buffer's memory, written on the CPU: converted from the cleared
      * depth image instead, they were 0xFFFFFF00, a yellow screen) */
     {
-        const uint32_t len = w * bpp * h;
-        const bool cpu = !fresh ? span_written(pa, len, g_pd.zr[i].edge_hash) :
-                         src->zbase ? span_written(pa, len, src->zedge) : hle_mem_written(pa, len);
+        const uint32_t len = pitch * (h - 1) + w * bpp;
+        const bool padded = d16_padded(&src->d);
+        const bool cpu = padded ? d16_rows_hash(&src->d) != src->z_rows :
+                         !fresh ? span_written(pa, len, g_pd.zr[i].edge_hash) :
+                         src->zbase ? span_written(src->d.pa, src->d.pitch * src->d.h, src->zedge) :
+                                      hle_mem_written(pa, len);
         if (cpu) {
             const HleRect r = { 0, 0, (int32_t)w, (int32_t)h };
             const int32_t pt[1][2] = { { 0, 0 } };
-            hle_res_upload(g_pd.zr[i].id, pa, w * bpp, 1, &r, pt);
+            hle_res_upload(g_pd.zr[i].id, pa, pitch, 1, &r, pt);
             if (g_pd.zr_uploads++ < 8) {
                 hle_log("hakuX-hle-pb", "texture %08x over depth target %u: the CPU's writes (%ux%u, "
                         "first 8 logged)", pa, src->id, w, h);
             }
-            span_edges_set(pa, len, g_pd.zr[i].edge_hash);
-        } else if (fresh) {
+        }
+        if (!padded && (cpu || fresh)) {
             span_edges_set(pa, len, g_pd.zr[i].edge_hash);
         }
     }
@@ -2980,6 +3035,79 @@ static uint32_t target_part(uint32_t pa, uint32_t code, const HleFmtInfo *fi, ui
     return dst->id;
 }
 
+/* The target a texture over pa samples: of the texture's kind, colour or
+ * depth, the one bound last; not a colour target whose memory is newer than
+ * its image (coh_mem_newer: a copy into it, its twin's image landed there,
+ * the title's writes): the memory is what the NV2A samples. */
+static PbObj *tex_target(uint32_t pa, bool want_depth)
+{
+    PbObj *best = NULL;
+    coh_adopt();
+    for (unsigned i = 0; i < g_pd.nobjs; i++) {
+        PbObj *o = &g_pd.objs[i];
+        const HleFmtInfo *oi = o->d.pa == pa && !o->cube ? hle_fmt_info(o->d.xfmt) : NULL;
+        if (oi && !!(oi->flags & HLE_FI_DEPTH) == want_depth && (!best || o->bound > best->bound) &&
+            (want_depth || !coh_mem_newer(o))) {
+            best = o;
+        }
+    }
+    return best;
+}
+
+/* A linear colour target of another texel size than texture format fi's
+ * (the Clear tests' 16-bit targets read as A8B8G8R8): its image can't stand
+ * for the texels, two of its pixels a texel. */
+static bool tex_other_size(const PbObj *o, const HleFmtInfo *fi)
+{
+    const HleFmtInfo *oi = fi ? hle_fmt_info(o->d.xfmt) : NULL;
+    return oi && !(oi->flags & HLE_FI_DEPTH) && !(fi->flags & (HLE_FI_DEPTH | HLE_FI_DXT)) &&
+           oi->bpp != fi->bpp && o->d.pitch && !past_block(&o->d);
+}
+
+/* Before a draw allocates its data (a wait completes the submission they
+ * would be tagged with), land colour targets sampled at another texel size.
+ * Pick all the sources before any landing can change the memory's writer.
+ * Each stage keeps its landing even if a later upload changes the target. */
+static void tex_land(void)
+{
+    PbObj *src[4] = { NULL };
+    memset(g_pd.tex_landing, 0, sizeof(g_pd.tex_landing));
+    for (unsigned s = 0; s < ARRAY_SIZE(src); s++) {
+        const uint32_t b = 64 * s;
+        if (!(R(NV097_SET_TEXTURE_CONTROL0 + b) & 0x40000000u)) {
+            continue;
+        }
+        const uint32_t fmt = R(NV097_SET_TEXTURE_FORMAT + b);
+        const uint32_t pa = (dma_base(hle_kdma_texture(fmt)) + R(NV097_SET_TEXTURE_OFFSET + b)) & 0x0FFFFFFFu;
+        const HleFmtInfo *fi = hle_fmt_info(HLE_FMT_CODE(fmt));
+        PbObj *o = fi && !(fi->flags & (HLE_FI_DEPTH | HLE_FI_DXT)) ? tex_target(pa, false) : NULL;
+        if (o && tex_other_size(o, fi)) {
+            src[s] = o;
+        }
+    }
+    for (unsigned s = 0; s < ARRAY_SIZE(src); s++) {
+        PbObj *o = src[s];
+        if (!o) {
+            continue;
+        }
+        rt_cpu_sync(o->id);
+        if (!o->fb_wb_v || o->fb_wb_w != o->written) {
+            o->fb_wb_v = writeback_ex(o->id, true);
+            o->fb_wb_w = o->written;
+        }
+        if (o->fb_wb_v > hle_tl_completed()) {
+            coh_wait(o->fb_wb_v);
+            coh_adopt();
+        }
+        for (unsigned t = s; t < ARRAY_SIZE(src); t++) {
+            if (src[t] == o) {
+                g_pd.tex_landing[t] = o->fb_wb_v;
+                src[t] = NULL;
+            }
+        }
+    }
+}
+
 /* The texture stage s samples: the object id, 0 if it can't be drawn;
  * *unset when the stage has none (CONTROL0 disabled), *lin when its format
  * is linear (sampled by texel coordinates). */
@@ -3003,8 +3131,9 @@ static uint32_t texture(unsigned s, bool *unset, bool *lin)
                (MAX(pitch, 64u) / 64 - 1) << HLE_SIZE_PITCH_SHIFT;
         static const uint8_t k_halves[4] = { HLE_ZREAD_HALVES, 0, 0, 0 };
         uint8_t map[4];
-        uint32_t zid = hle_res_zread_map(code, map) ? zread(pa, rect >> 16, rect & 0xFFFF, map, code, NULL) :
-                       code == HLE_XFMT_LIN_L16 ? zread(pa, rect >> 16, rect & 0xFFFF, k_halves, code, NULL) : 0;
+        uint32_t zid = hle_res_zread_map(code, map) ? zread(pa, rect >> 16, rect & 0xFFFF, map, code, 0, NULL) :
+                       code == HLE_XFMT_LIN_L16 ? zread(pa, rect >> 16, rect & 0xFFFF, k_halves, code, 0, NULL)
+                                                : 0;
         if (zid) {
             return zid;
         }
@@ -3036,23 +3165,12 @@ static uint32_t texture(unsigned s, bool *unset, bool *lin)
      * colour pass used; sampled as that target, the CPU's DXT bytes uploaded
      * into it as colour, the picture was the clear colour (teal). */
     const bool dxt = fi && (fi->flags & HLE_FI_DXT);
-    PbObj *best = NULL;
-    /* nor a colour target whose memory is newer than its image
-     * (coh_mem_newer: a copy into it, its twin's image landed there, the
-     * title's writes): the memory is what the NV2A samples */
-    coh_adopt();
-    for (unsigned i = 0; !dxt && i < g_pd.nobjs; i++) {
-        PbObj *o = &g_pd.objs[i];
-        const HleFmtInfo *oi = o->d.pa == pa && !o->cube ? hle_fmt_info(o->d.xfmt) : NULL;
-        if (oi && !!(oi->flags & HLE_FI_DEPTH) == want_depth && (!best || o->bound > best->bound) &&
-            (want_depth || !coh_mem_newer(o))) {
-            best = o;
-        }
-    }
+    const uint64_t landing = g_pd.tex_landing[s];
+    PbObj *best = dxt || landing ? NULL : tex_target(pa, want_depth);
     if (best) {
         rt_cpu_sync(best->id);
     }
-    if (fi && (fi->flags & HLE_FI_LIN) && !want_depth && !dxt && (!best || best->d.pitch)) {
+    if (fi && (fi->flags & HLE_FI_LIN) && !want_depth && !dxt && !landing && (!best || best->d.pitch)) {
         const uint32_t rect = R(NV097_SET_TEXTURE_IMAGE_RECT + b);
         const uint32_t part = target_part(pa, code, fi, R(NV097_SET_TEXTURE_CONTROL1 + b) >> 16,
                                           rect >> 16, rect & 0xFFFF, best);
@@ -3107,6 +3225,9 @@ static uint32_t texture(unsigned s, bool *unset, bool *lin)
         t->checked = g_pd.epoch;
         coh_pend_wait(t->pa, t->bytes);             /* a copy queued into it lands first */
         redefine = tex_written(t);
+        /* Each reinterpretation sees the new bytes, even if another stage
+         * already checked these pages for CPU writes. */
+        redefine |= landing && t->landing != landing;
     }
     static uint32_t pal[256];
     uint32_t npal = 0, pal_hash = 0;
@@ -3154,6 +3275,7 @@ static uint32_t texture(unsigned s, bool *unset, bool *lin)
             g_pd.tex_bytes -= t->host_bytes;
             g_pd.tex_bytes += host_bytes;
             t->host_bytes = host_bytes;
+            t->landing = landing;
         }
         t->pa = pa;
         t->bytes = bytes;
@@ -4071,6 +4193,7 @@ static void draw(void)
         return;
     }
     rt_first_land(false);
+    tex_land();
     if (g_pd.nimm) {
         draw_imm();
     } else if (g_pd.ninl) {
@@ -5067,17 +5190,20 @@ uint64_t hle_pbd_copy_begin(uint32_t slo, uint32_t sp, uint32_t dlo, uint32_t dp
             done = hle_tl_completed();      /* (its writeback note is landed now) */
         }
     }
-    /* A linear 24-bit depth buffer the copy reads: its image's bits, as the
-     * NV2A's memory holds them (zread's colour view, read back), landed in
-     * its memory first and waited for, the copy made after. nxdk_pgraph_tests
-     * saves its Z buffer that way (the _ZB pictures): from the memory as it
-     * was, they were whatever the CPU last left there. Not a swizzled or a
-     * 16-bit one (zread makes neither). */
+    /* A linear 24-bit or 16-bit depth buffer the copy reads: its image's
+     * bits, as the NV2A's memory holds them (zread's colour view, read back),
+     * landed in its memory first and waited for, the copy made after.
+     * nxdk_pgraph_tests saves its Z buffer that way (the _ZB pictures): from
+     * the memory as it was, they were whatever the CPU last left there. A
+     * D16 one's rows may be longer than its words (the Clear tests' 640
+     * wide, 2560 bytes a row). Not a swizzled one (zread makes none). */
     PbObj *zb = NULL;
     for (unsigned i = 0; i < g_pd.nobjs; i++) {
         PbObj *o = &g_pd.objs[i];
         const uint32_t zlen = o->d.pitch * o->d.h;
-        if (o->d.xfmt == HLE_XFMT_LIN_D24S8 && o->d.pitch && o->d.pitch == o->d.w * 4 && !past_block(&o->d) &&
+        const bool lin = o->d.xfmt == HLE_XFMT_LIN_D24S8 ? o->d.pitch == o->d.w * 4 :
+                         o->d.xfmt == HLE_XFMT_LIN_D16 && o->d.pitch >= o->d.w * 2 && !(o->d.pitch & 1);
+        if (lin && o->d.pitch && !past_block(&o->d) &&
             o->d.pa <= s0 && s1 <= o->d.pa + zlen && (!zb || o->written > zb->written)) {
             zb = o;                         /* the newest drawn one holding the source */
         }
@@ -5099,9 +5225,11 @@ uint64_t hle_pbd_copy_begin(uint32_t slo, uint32_t sp, uint32_t dlo, uint32_t dp
         PbObj *o = zb;
         const uint32_t zlen = o->d.pitch * o->d.h;
         if (o->fb_wb_w != o->written) {
-            uint8_t map[4];
-            const uint32_t zid = hle_res_zread_map(HLE_XFMT_LIN_A8R8G8B8, map) ?
-                                 zread(o->d.pa, o->d.w, o->d.h, map, HLE_XFMT_LIN_A8R8G8B8, o) : 0;
+            uint8_t map[4] = { HLE_ZREAD_D16, 0, 0, 0 };
+            const bool d16 = o->d.xfmt == HLE_XFMT_LIN_D16;
+            const uint32_t zid = d16 ? zread(o->d.pa, o->d.w, o->d.h, map, HLE_XFMT_LIN_L16, o->d.pitch, o) :
+                                 hle_res_zread_map(HLE_XFMT_LIN_A8R8G8B8, map) ?
+                                 zread(o->d.pa, o->d.w, o->d.h, map, HLE_XFMT_LIN_A8R8G8B8, 0, o) : 0;
             o->fb_wb_v = 0;
             const bool direct = hle_res_ram_direct();
             if (zid && (direct || hle_tl_land_room(2))) {
@@ -5133,6 +5261,10 @@ uint64_t hle_pbd_copy_begin(uint32_t slo, uint32_t sp, uint32_t dlo, uint32_t dp
             coh_wait(o->fb_wb_v);
             coh_adopt();
             done = hle_tl_completed();
+            if (d16_padded(&o->d)) {
+                /* The GPU readback is the new baseline for CPU writes. */
+                o->z_rows = d16_rows_hash(&o->d);
+            }
         }
     }
     for (unsigned i = 0; i < WB_NOTES; i++) {           /* the old paths' writebacks in flight */

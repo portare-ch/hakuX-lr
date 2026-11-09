@@ -39,8 +39,11 @@ enum HleOp {
  * stencil): channel c (r, g, b, a) of dst is byte map[c] of the word, or 1
  * for map[c] = 4. A texture over a depth buffer's memory samples dst.
  * map[0] = HLE_ZREAD_HALVES: dst is twice src's width in 16-bit texels, one
- * a half word (the even texel the low half), as 16-bit luminance. */
+ * a half word (the even texel the low half), as 16-bit luminance.
+ * map[0] = HLE_ZREAD_D16: src is a D16 buffer, dst (same size) its 16-bit
+ * words, as 16-bit luminance. */
 #define HLE_ZREAD_HALVES 5
+#define HLE_ZREAD_D16    6
 typedef struct HleCmdZRead {
     uint32_t dst, src;          /* object ids */
     uint8_t map[4];
