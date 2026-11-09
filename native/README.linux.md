@@ -250,7 +250,9 @@ Under **Xbox Live**, select **Register this console**, then
 you. **Network** is on by default. Account recovery from this dashboard is
 still pending.
 
-PAL60 is always enabled; 480p, 720p and 1080i are disabled. Use RetroArch's
+480p is enabled, as on a console with the component cable, so a 4:3
+NTSC console's video flags are `00080000`. PAL consoles also get PAL60;
+720p and 1080i are disabled. Use RetroArch's
 shaders for filters such as FXAA and **Core provided** for the core's 4:3 or
 16:9 aspect ratio.
 

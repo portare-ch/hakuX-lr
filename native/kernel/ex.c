@@ -475,7 +475,10 @@ static uint8_t *eeprom(NcKernel *k)
         nc_wr32(g_eeprom + 0xBC, pal ? 2 : 1);
         /* So do the video settings: the app's (widescreen, 480p...). */
         if (g_video_flags >= 0) {
-            nc_wr32(g_eeprom + 0x94, (uint32_t)g_video_flags);
+            /* PAL60 is a PAL console's setting: an NTSC one never has it */
+            const uint32_t region = g_av_region ? g_av_region : pal ? NC_AV_REGION_PAL_I : NC_AV_REGION_NTSC_M;
+            const bool pal_tv = region == NC_AV_REGION_PAL_I;
+            nc_wr32(g_eeprom + 0x94, (uint32_t)g_video_flags & (pal_tv ? ~0u : ~NC_VIDEO_PAL60));
         }
         if (g_language) {
             nc_wr32(g_eeprom + 0x90, (uint32_t)g_language);

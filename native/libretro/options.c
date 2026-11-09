@@ -271,10 +271,11 @@ void nc_lr_options_apply(void)
     nc_lr_video_set_repeat(!strcmp(g_defs[OPT_REPEAT].values[g_applied[OPT_REPEAT]].value, "enabled"));
     nc_online_set_cheats(!strcmp(g_defs[OPT_MODS].values[g_applied[OPT_MODS]].value, "enabled"));
 
-    /* PAL60 always: RetroArch runs at 59.94 Hz, and an NTSC title ignores it.
-     * No 480p, 720p or 1080i, as before the options. */
+    /* 480p, as a console on its component cable (the AV pack here) is set
+     * up: 4:3 480p is 00080000. PAL60 for a PAL console only (RetroArch
+     * runs at 59.94 Hz); ex.c drops it for NTSC, which has no such setting. */
     const char *format = g_defs[OPT_FORMAT].values[g_applied[OPT_FORMAT]].value;
-    const uint32_t flags = NC_VIDEO_PAL60 | (!strcmp(format, "widescreen") ? NC_VIDEO_WIDESCREEN
+    const uint32_t flags = NC_VIDEO_480P | NC_VIDEO_PAL60 | (!strcmp(format, "widescreen") ? NC_VIDEO_WIDESCREEN
                                              : !strcmp(format, "letterbox") ? NC_VIDEO_LETTERBOX
                                                                             : 0);
     nc_kernel_set_video(flags, NC_AV_PACK_HDTV);
