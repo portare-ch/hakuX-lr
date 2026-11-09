@@ -201,8 +201,40 @@ static NcSeh *push_level(NcKernel *k, NcFrame *f, NcThread *t, uint32_t esp)
     return l;
 }
 
+/* Bytes at va as hex, as far as they are mapped. */
+static void hex_at(NcKernel *k, uint32_t va, unsigned len, char *out, size_t cap)
+{
+    int n = 0;
+    out[0] = 0;
+    for (unsigned i = 0; i < len && (size_t)n + 4 < cap && nc_vm_phys(k->vm, va + i) != UINT32_MAX; i++) {
+        n += snprintf(out + n, cap - (size_t)n, "%02x", *(const uint8_t *)nc_vm_host(k->vm, va + i));
+    }
+}
+
+/* The faulting context: registers, the code around eip and the stack top,
+ * so a crash report shows what the title was doing. */
+static void log_context(NcKernel *k, uint32_t ctx)
+{
+    const uint32_t eip = rd(k, ctx + CX_EIP), esp = rd(k, ctx + CX_ESP);
+    nc_log("hakuX-native", "seh:   eax=%08x ebx=%08x ecx=%08x edx=%08x esi=%08x edi=%08x ebp=%08x esp=%08x",
+           rd(k, ctx + CX_EAX), rd(k, ctx + CX_EBX), rd(k, ctx + CX_ECX), rd(k, ctx + CX_EDX),
+           rd(k, ctx + CX_ESI), rd(k, ctx + CX_EDI), rd(k, ctx + CX_EBP), esp);
+    char before[100], after[100];
+    hex_at(k, eip - 32, 32, before, sizeof(before));
+    hex_at(k, eip, 16, after, sizeof(after));
+    nc_log("hakuX-native", "seh:   code %08x: %s | %s", eip - 32, before, after);
+    char line[200];
+    int n = 0;
+    for (unsigned i = 0; i < 12 && nc_vm_phys(k->vm, esp + 4 * i + 3) != UINT32_MAX; i++) {
+        n += snprintf(line + n, sizeof(line) - (size_t)n, " %08x", rd(k, esp + 4 * i));
+    }
+    line[n] = 0;
+    nc_log("hakuX-native", "seh:   stack:%s", line);
+}
+
 static void unhandled(NcKernel *k, NcFrame *f, NcSeh *l, const char *why)
 {
+    log_context(k, l->ctx);
     char type[96];
     const uint32_t code = rd(k, l->rec + ER_CODE);
     if (code == STATUS_ACCESS_VIOLATION) {

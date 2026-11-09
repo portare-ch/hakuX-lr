@@ -90,7 +90,8 @@ again:
 
     /* 5. RtlInitializeCriticalSection on a reserved page: the fault goes
      * to the SEH handler, which commits the page and continues, and the
-     * call runs again (Rainbow Six: Lockdown commits its heap so) */
+     * call runs again (Rainbow Six: Lockdown commits its heap so). The
+     * fault is a write: its pager commits a page read-only on a read. */
     STEP 5
     mov dword ptr [base], 0
     mov dword ptr [size], 0x10000
@@ -119,6 +120,8 @@ again:
     jne fail
     mov eax, dword ptr [cs_va]
     cmp dword ptr [eax + 0x10], 0xFFFFFFFF  /* LockCount */
+    jne fail
+    cmp dword ptr [seh_write], 1            /* the call's store faulted as a write */
     jne fail
 
     /* 8. RtlMoveMemory down by 8 over a reserved page: pages 0 and 2 of
@@ -212,6 +215,8 @@ seh_commit:
     cmp dword ptr [eax], 0xC0000005
     jne 1f
     inc dword ptr [seh_count]
+    mov ecx, dword ptr [eax + 0x14]     /* ExceptionInformation[0]: 1 for a write */
+    mov dword ptr [seh_write], ecx
     mov ecx, dword ptr [eax + 0x18]     /* ExceptionInformation[1]: the address */
     and ecx, 0xFFFFF000
     mov dword ptr [cbase], ecx
@@ -230,6 +235,7 @@ seh_commit:
 
 .align 4
 seh_count: .long 0
+seh_write: .long 0
 cs_va: .long 0
 mbase: .long 0
 cbase: .long 0

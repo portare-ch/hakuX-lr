@@ -40,6 +40,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <ucontext.h>
 #include <unistd.h>
 
 const char nc_cpu_backend[] = "kvm";
@@ -1499,6 +1500,18 @@ bool nc_cpu_sample_pc(NcCpu *cpu, uintptr_t host_pc, uint32_t *eip)
 /* Guest code never raises a host signal here: a host fault is host code's. */
 NcFrame *nc_cpu_fault_frame(NcCpu *cpu, void *ucontext) { return NULL; }
 void nc_cpu_fault_resume(NcCpu *cpu, void *ucontext) {}
-bool nc_cpu_fault_is_write(const void *ucontext) { return false; }
+/* Host code's fault (a kernel call touching a page the title commits on its
+ * fault): #PF's error code, bit 1 set for a write. Reported as a read, a
+ * store went to the title's handler as one: Rainbow Six: Lockdown's pager
+ * paged such a page in read-only and clean, and dropped the store with it
+ * when it paged the page out again. */
+bool nc_cpu_fault_is_write(const void *ucontext)
+{
+#if defined(__x86_64__)
+    return ucontext && (((const ucontext_t *)ucontext)->uc_mcontext.gregs[REG_ERR] & 2) != 0;
+#else
+    return false;
+#endif
+}
 bool nc_cpu_unaligned_fault(NcCpu *cpu, int code, void *ucontext) { return false; }
 bool nc_cpu_callret_fault(NcCpu *cpu, uintptr_t fault_addr, void *ucontext) { return false; }
