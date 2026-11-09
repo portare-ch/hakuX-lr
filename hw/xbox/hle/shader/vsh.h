@@ -8,7 +8,7 @@
  *   ivec4 for int_mask: S32K shorts; uvec2 for cmp_mask: the two 16-bit
  *   halves of a packed 11:11:10 dword, unpacked here); unbound registers
  *   read their current values vcur[N] (SetVertexData*);
- * - constants: set 1, binding 0, std140 { vec4 c[192]; vec4 vcur[16]; };
+ * - constants: set 1, binding 0, std140 { vec4 c[192]; vec4 vcur[16]; vec4 vpsz; };
  * - push constants: HleFfPush (vp = screen -> NDC mapping, zscale);
  * - outputs: location 0 oD0, 1 oD1, 2..5 oT0..oT3, 6 fog (x), 7 oB0, 8 oB1.
  */
@@ -22,6 +22,7 @@
 #define HLE_VSH_MAX_SLOTS 136
 #define HLE_VSH_CONSTANTS 192
 #define HLE_VSH_CUR_REGS  16    /* current attribute values after the constants */
+#define HLE_VSH_EXTRA_REGS 1    /* vpsz: size in pixels, point params enable, 0, 0 */
 
 typedef struct HleVshKey {
     uint32_t in_mask;           /* vertex attribute registers bound (bit per vN) */

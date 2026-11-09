@@ -34,7 +34,7 @@
 #define HLE_MAX_PIPES    8192   /* kept for the session: Halo 2 makes ~600 in one level; the
                                    prebuild fills at most half (hle_draw_prebuild) */
 #define HLE_MAX_PROGS    1024
-#define HLE_CONST_BYTES  ((HLE_VSH_CONSTANTS + HLE_VSH_CUR_REGS) * 16)  /* c[], vcur[] */
+#define HLE_CONST_BYTES  ((HLE_VSH_CONSTANTS + HLE_VSH_CUR_REGS + HLE_VSH_EXTRA_REGS) * 16)  /* c[], vcur[], vpsz */
 
 /* 5659 render-state indices (D3DRENDERSTATETYPE) */
 enum {

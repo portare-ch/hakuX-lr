@@ -204,7 +204,7 @@ static void head(Buf *bp, const HleVshKey *k)
     const char *interp = k->flat ? "flat " : "";
     put(&b, "#version 450\n%s", hle_push_glsl());
     put(&b, "layout(set = 1, binding = 0, std140) uniform VshConst { vec4 c[192]; "
-            "vec4 vcur[16]; };\n"
+            "vec4 vcur[16]; vec4 vpsz; };\n"
             "invariant gl_Position;\n");
     for (unsigned i = 0; i < 16; i++) {
         if (k->in_mask & (1u << i)) {
@@ -333,7 +333,9 @@ static void tail(Buf *bp, const HleVshKey *k, bool fogw)
     } else {
         put(&b, "  vFog = %s;\n", k->fog_table ? "0.0" : "1.0");
     }
-    put(&b, "  gl_PointSize = max(oPts.x, 1.0) * float(max((pc.flags >> 16) & 255u, 1u));\n"
+    /* On Xbox, oPts controls size only when point params are enabled. */
+    put(&b, "  gl_PointSize = (vpsz.y != 0.0 ? max(oPts.x, 1.0) : max(vpsz.x, 1.0)) *\n"
+            "                 float(max((pc.flags >> 16) & 255u, 1u));\n"
             /* screen space -> clip space (the NV2A rasterizer's subpixel
              * placement, ff.h) */
             "  float w = oPos.w;\n"
