@@ -156,6 +156,8 @@ typedef struct PbObj {
     bool want;                          /* ... drawn into since its last landing */
     uint8_t unread;                     /* its landings in a row the guest didn't take */
     bool display;                       /* shown: the front-buffer path keeps its memory */
+    uint64_t fb_wb_w, fb_wb_v;          /* a frame buffer read back for a copy from it
+                                           (hle_pbd_copy_begin): written then, its landing */
 } PbObj;
 
 /* A texture the stage registers described: the back end's image of it,
@@ -1125,7 +1127,16 @@ static void wb_note(uint32_t pa, uint32_t len, uint64_t v)
  * it fades the menu in from; the memory still held the TGA's bytes, and four
  * small upside-down copies of the picture faded in across the top of the
  * screen. HAKUX_HLE_PB_CPUWB=0: small targets only (A/B). */
+static uint64_t writeback_ex(uint32_t id, bool force);
+
 static void writeback(uint32_t id)
+{
+    writeback_ex(id, false);
+}
+
+/* force: whatever its size (a frame buffer a copy reads); the landing's
+ * value, 0 for none */
+static uint64_t writeback_ex(uint32_t id, bool force)
 {
     static int cpu_wb = -1;
     if (cpu_wb < 0) {
@@ -1136,8 +1147,8 @@ static void writeback(uint32_t id)
     const HleFmtInfo *fi = d ? hle_fmt_info(d->xfmt) : NULL;
     const PbObj *o = d ? obj_of(id) : NULL;
     if (!fi || !d->pitch || (fi->flags & (HLE_FI_DEPTH | HLE_FI_DXT)) || past_block(d) ||
-        ((uint64_t)d->pitch * d->h > WRITEBACK_MAX && !(cpu_wb && o && o->cpu_used))) {
-        return;
+        (!force && (uint64_t)d->pitch * d->h > WRITEBACK_MAX && !(cpu_wb && o && o->cpu_used))) {
+        return 0;
     }
     const uint32_t len = d->pitch * d->h;
     const uint32_t fb = hle_res_rb_fb(len);
@@ -1154,8 +1165,10 @@ static void writeback(uint32_t id)
     hle_res_rb_land(rb, fb, len, hle_fe_last_value() + 1);     /* the next submission */
     hle_barrier_arm_landing(d->pa, len, hle_fe_last_value() + 1);
     hle_fe_commit();
-    wb_note(d->pa, len, hle_fe_last_value() + 1);
+    const uint64_t v = hle_fe_last_value() + 1;
+    wb_note(d->pa, len, v);
     g_pd.writebacks++;
+    return v;
 }
 
 /* A D24S8 depth target bound over the memory of a 32-bit colour target of
@@ -4817,6 +4830,50 @@ uint64_t hle_pbd_copy_begin(uint32_t slo, uint32_t sp, uint32_t dlo, uint32_t dp
         if (o->land_last > done && coh_len(o, &len) &&
             ((o->d.pa < s1 && o->d.pa + len > s0) || (o->d.pa < d1 && o->d.pa + len > d0))) {
             v = MAX(v, o->land_last);
+        }
+    }
+    /* A frame buffer the copy reads: the front buffer's path keeps its image,
+     * not its memory (coh_display), so its image is read back first, once a
+     * drawing, and the copy waits for that landing. nxdk_pgraph_tests saves
+     * each test's back buffer with an M2MF copy (pbkit++ gpum_copy): from the
+     * memory as it was, most of its pictures were an earlier test's.
+     *
+     * Only the newest drawn one holding the whole source, and only while
+     * its image is the newer: not when memory superseded it (a texture
+     * defined there since, obj_superseded) or a target drawn later lies
+     * anywhere in what the readback writes (its whole pitch x height). The
+     * CPU's writes into it go into its image first (rt_cpu_upload, as the
+     * front buffer's path takes them), so the readback carries them. An
+     * older target over reused memory once put its old image back over a
+     * texture, and its landing met pages the dirty tracking didn't hold. */
+    PbObj *fb = NULL;
+    uint32_t fb_len = 0;
+    for (unsigned i = 0; i < g_pd.nobjs; i++) {
+        PbObj *o = &g_pd.objs[i];
+        if (o->d.pitch && coh_len(o, &len) && coh_display(o) && !past_block(&o->d) && o->d.pa <= s0 &&
+            s1 <= o->d.pa + len && (!fb || o->written > fb->written)) {
+            fb = o;
+            fb_len = len;
+        }
+    }
+    if (fb && obj_superseded(fb)) {
+        fb = NULL;                          /* its memory is the newer */
+    }
+    for (unsigned i = 0; fb && i < g_pd.nobjs; i++) {
+        const PbObj *o = &g_pd.objs[i];
+        if (o != fb && coh_len(o, &len) && o->d.pa < fb->d.pa + fb_len && o->d.pa + len > fb->d.pa &&
+            o->written > fb->written) {
+            fb = NULL;                      /* something newer was drawn over it */
+        }
+    }
+    if (fb) {
+        rt_cpu_upload(fb->id, true);        /* the CPU's writes there into its image first */
+        if (fb->fb_wb_w != fb->written) {
+            fb->fb_wb_v = writeback_ex(fb->id, true);
+            fb->fb_wb_w = fb->written;
+        }
+        if (fb->fb_wb_v > done) {
+            v = MAX(v, fb->fb_wb_v);
         }
     }
     for (unsigned i = 0; i < WB_NOTES; i++) {           /* the old paths' writebacks in flight */

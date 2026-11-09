@@ -582,8 +582,32 @@ static void blit(const uint32_t *r)
     g_pb.blit_bytes += (uint64_t)w * bpp * h + tail_px * bpp;
 }
 
+/* NV039's notifier: BUFFER_NOTIFY writes notifier 1 of its DMA_NOTIFY
+ * context (bytes 0x10-0x1F): the PTIMER time, 0, and status 0, done.
+ * Without it a title that waits for its copy waits forever or gives up:
+ * pbkit++'s gpum_copy (nxdk_pgraph_tests) timed its check out and fell
+ * back to reading the render target with the CPU, before it had landed.
+ * A copy queued behind an image's landing is written now too: the guest's
+ * access to its destination waits for the landing (hle_pbd_copy_done). */
+static void m2mf_notify(const uint32_t *r)
+{
+    const uint32_t handle = r[0x180 >> 2];
+    if (!handle) {
+        return;
+    }
+    const uint32_t pa = (ctx_base(handle) + 0x10) & 0x07FFFFFFu;
+    uint8_t *p = hle_pa_ptr(pa, 16);
+    if (!p) {
+        return;
+    }
+    const uint64_t t = hle_host_gpu_time_ns();
+    const uint32_t n[4] = {(uint32_t)t, (uint32_t)(t >> 32), 0, 0};
+    memcpy(p, n, sizeof(n));
+    hle_mem_mark_written(pa, 16);
+}
+
 /* NV039 BUFFER_NOTIFY: LINE_COUNT lines of LINE_LENGTH_IN bytes, OFFSET_IN
- * + PITCH_IN steps to OFFSET_OUT + PITCH_OUT steps */
+ * + PITCH_IN steps to OFFSET_OUT + PITCH_OUT steps; then its notifier */
 static void m2mf(const uint32_t *r)
 {
     const uint32_t in = (ctx_base(r[0x184 >> 2]) + r[0x30C >> 2]) & 0x07FFFFFFu;
@@ -633,6 +657,7 @@ static void method_2d(unsigned subch, uint32_t m, uint32_t v)
     case NV_CLASS_M2MF:
         if (m == 0x328) {
             m2mf(r);
+            m2mf_notify(r);
         }
         break;
     default:

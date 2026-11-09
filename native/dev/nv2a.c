@@ -901,6 +901,11 @@ int64_t hle_host_vblank_period_ns(void)
     return (int64_t)__atomic_load_n(&g_frame_ns, __ATOMIC_RELAXED);
 }
 
+uint64_t hle_host_gpu_time_ns(void)
+{
+    return nc_ke_now_ns() & ~0x1Full;  /* NV_PTIMER_TIME_0/1's */
+}
+
 uint32_t hle_host_gpu_reg(uint32_t off)
 {
     return g_regs && off < NV2A_SIZE - 3 ? ld(off & ~3u) : 0;
