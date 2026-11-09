@@ -73,9 +73,9 @@ static void test_lit_skinned(void)
              strstr(buf, "/* light 2 */") && !strstr(buf, "/* light 3 */"));
     HT_CHECK(strstr(buf, "nh = max(dot(tN, c[80].xyz), 0.0);") != NULL);  /* infinite: half */
     HT_CHECK(strstr(buf, "lit = d <= c[89].x;") != NULL);               /* local: range */
-    /* spot: s from the scaled direction, the falloff curve between the cones */
+    /* Evaluate spotlight falloff through the inner cone. */
     HT_CHECK(strstr(buf, "float s = dot(c[103].xyz, VP) + c[103].w;") != NULL);
-    HT_CHECK(strstr(buf, "else if (s < 1.0) att *= NVC(s, c[102], 1.0);") != NULL);
+    HT_CHECK(strstr(buf, "else att = min(att * NVC(min(s, 1.0), c[102], 1.0), 1.0e10);") != NULL);
     HT_CHECK(strstr(buf, "float pf = nl > 0.0 ? NVC(nh, c[182], 10000.0) : 0.0;") != NULL);
     HT_CHECK(strstr(buf, "pow(") == NULL);
     HT_CHECK(strstr(buf, "oD0.rgb += v3.rgb * c[77].rgb * (att * nl);") != NULL);
@@ -150,7 +150,30 @@ static void test_not_a_key(void)
 static float nvc(float x, const float k[3], float top)
 {
     const float q = k[1] * x + k[2];
-    return x <= -k[0] ? 0.0f : q == 0.0f ? top : q < 0.0f ? 0.0f : fminf((x + k[0]) / q, top);
+    return x <= -k[0] ? 0.0f : q == 0.0f ? 1.0e10f : q < 0.0f ? 0.0f : fminf((x + k[0]) / q, top);
+}
+
+/* Saturated attenuation, falloff and specular can combine in one light.
+ * Its contributions must stay finite and preserve zero colour channels. */
+static void test_saturated(void)
+{
+    const float zero[3] = { 0.0f, 0.0f, 0.0f };
+    const float ad = 0.0f, s = 1.2f, nl = 0.7f, nh = 0.9f;
+    float att = ad == 0.0f ? 1.0e10f : fmaxf(fminf(1.0f / ad, 1.0e10f), -1.0e10f);
+    att = fminf(att * nvc(fminf(s, 1.0f), zero, 1.0f), 1.0e10f);
+    const float pf = nvc(nh, zero, 10000.0f);
+    const float col[3] = { 1.0f, 0.0f, 0.5f };
+    for (unsigned c = 0; c < 3; c++) {
+        const float d = col[c] * att + col[c] * (att * nl), sp = col[c] * (att * pf);
+        HT_CHECK(isfinite(d) && isfinite(sp));
+        HT_CHECK(col[c] != 0.0f || (d == 0.0f && sp == 0.0f));
+        HT_CHECK(col[c] == 0.0f || (fminf(d, 1.0f) == 1.0f && fminf(sp, 1.0f) == 1.0f));
+    }
+    /* A tiny negative denominator clamps to the negative limit. */
+    HT_CHECK(fmaxf(fminf(1.0f / -1.0e-39f, 1.0e10f), -1.0e10f) == -1.0e10f);
+    HleFfhwKey k = { .magic = HLE_FFHW_MAGIC, .lighting = 1, .light = { 2 } };
+    HT_CHECK(gen(&k, 0x1E1F) > 0);
+    HT_CHECK(strstr(buf, "att = ad == 0.0 ? 1.0e10 : clamp(1.0 / ad, -1.0e10, 1.0e10);") != NULL);
 }
 
 /* The lighting unit's curve over the coefficients D3D writes, as the NV2A
@@ -179,13 +202,13 @@ static void test_curve(void)
     /* falloff 0: 1 throughout */
     const float pow0[3] = { -0.0f, 1.0f, 0.0f };
     HT_CHECK(nvc(0.25f, pow0, 1.0f) == 1.0f);
-    /* all 0: the denominator 0, full */
+    /* A zero denominator uses the saturation value. */
     const float none[3] = { 0.0f, 0.0f, 0.0f };
-    HT_CHECK(nvc(0.5f, none, 10000.0f) == 10000.0f);
+    HT_CHECK(nvc(0.5f, none, 1.0f) == 1.0e10f);
     /* the shader's macro is the same expression */
     HleFfhwKey k = { .magic = HLE_FFHW_MAGIC, .lighting = 1, .specular = 1, .light = { 1 } };
     HT_CHECK(gen(&k, 0x1E1F) > 0);
-    HT_CHECK(strstr(buf, "#define NVC(d, k, top) ((d) <= -(k).x ? 0.0 : (k).y * (d) + (k).z == 0.0 ? (top) : "
+    HT_CHECK(strstr(buf, "#define NVC(d, k, top) ((d) <= -(k).x ? 0.0 : (k).y * (d) + (k).z == 0.0 ? 1.0e10 : "
                          "(k).y * (d) + (k).z < 0.0 ? 0.0 : min(((d) + (k).x) / ((k).y * (d) + (k).z), (top)))\n")
              != NULL);
     HT_CHECK(strstr(buf, "#undef NVC") != NULL);
@@ -198,5 +221,6 @@ int main(void)
     HT_RUN(test_two_side);
     HT_RUN(test_not_a_key);
     HT_RUN(test_curve);
+    HT_RUN(test_saturated);
     HT_DONE();
 }
