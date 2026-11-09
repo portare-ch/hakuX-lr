@@ -98,6 +98,8 @@ int64_t hle_host_vblank_period_ns(void);
  * instance memory, included) as the guest last wrote it, and a write as the
  * GPU makes one (the value only). Any thread. */
 uint32_t hle_host_gpu_reg(uint32_t off);
+/* The GPU's time now, as its PTIMER reads (ns): a notifier's timestamp. */
+uint64_t hle_host_gpu_time_ns(void);
 void hle_host_gpu_reg_set(uint32_t off, uint32_t v);
 /* The bits of mask set to bits', atomically (fields the guest's writes
  * change too: PGRAPH_SURFACE's flip counters). */
