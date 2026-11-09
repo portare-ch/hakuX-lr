@@ -4001,6 +4001,96 @@ static void attr_set(unsigned a, const float x[4], bool emit_vertex)
     }
 }
 
+/* The class's own inline attribute methods (NV097 0x1530-0x16CC), as
+ * xemu's pgraph.c decodes them: a normal, the colours, the texture
+ * coordinates, fog and weights, one attribute each (NV2A attribute
+ * numbers). D3D sets them through SET_VERTEX_DATA*, so only these were
+ * decoded; nxdk's pbkit uses these, and nxdk_pgraph_tests drew its
+ * backgrounds without texture coordinates and its lines without colours.
+ * kind: F floats, words in order; C3 three floats, alpha 1; T2F two
+ * floats, r 0, q 1; T2S two shorts (not normalized), r 0, q 1; S4 shorts
+ * two to a word; N3S the normal's shorts over 32767; UB four bytes over
+ * 255; FOG one float in all four; W1 x, 0, 0, 1; W3 three floats, w 1. */
+enum { IA_F, IA_C3, IA_T2F, IA_T2S, IA_S4, IA_N3S, IA_UB, IA_FOG, IA_W1, IA_W3 };
+static const struct InlineAttr {
+    uint16_t m;
+    uint8_t words, attr, kind;
+} k_inline_attrs[] = {
+    {0x1530, 3, 2, IA_F},   {0x1540, 2, 2, IA_N3S},                           /* normal */
+    {0x1550, 4, 3, IA_F},   {0x1560, 3, 3, IA_C3},  {0x156C, 1, 3, IA_UB},    /* diffuse */
+    {0x1570, 4, 4, IA_F},   {0x1580, 3, 4, IA_C3},  {0x158C, 1, 4, IA_UB},    /* specular */
+    {0x1590, 2, 9, IA_T2F}, {0x1598, 1, 9, IA_T2S}, {0x15A0, 4, 9, IA_F},  {0x15B0, 2, 9, IA_S4},
+    {0x15B8, 2, 10, IA_T2F}, {0x15C0, 1, 10, IA_T2S}, {0x15C8, 4, 10, IA_F}, {0x15D8, 2, 10, IA_S4},
+    {0x15E0, 2, 11, IA_T2F}, {0x15E8, 1, 11, IA_T2S}, {0x15F0, 4, 11, IA_F}, {0x1600, 2, 11, IA_S4},
+    {0x1608, 2, 12, IA_T2F}, {0x1610, 1, 12, IA_T2S}, {0x1620, 4, 12, IA_F}, {0x1630, 2, 12, IA_S4},
+    {0x1698, 1, 5, IA_FOG},                                                   /* SET_FOG_COORD */
+    {0x169C, 1, 1, IA_W1},  {0x16A0, 2, 1, IA_T2F}, {0x16B0, 3, 1, IA_W3}, {0x16C0, 4, 1, IA_F},
+};
+
+static bool inline_attr(uint32_t m, uint32_t v)
+{
+    if (m < 0x1530 || m >= 0x16D0) {
+        return false;
+    }
+    for (unsigned i = 0; i < sizeof(k_inline_attrs) / sizeof(k_inline_attrs[0]); i++) {
+        const struct InlineAttr *e = &k_inline_attrs[i];
+        if (m < e->m || m >= e->m + 4u * e->words) {
+            continue;
+        }
+        const unsigned slot = (m - e->m) / 4;
+        float x[4], f;
+        memcpy(x, g_pd.cur[e->attr], 16);
+        memcpy(&f, &v, 4);
+        switch (e->kind) {
+        case IA_F:
+            x[slot] = f;
+            break;
+        case IA_C3:
+        case IA_W3:
+            x[slot] = f;
+            x[3] = 1.0f;
+            break;
+        case IA_T2F:
+            x[slot] = f;
+            x[2] = 0.0f;
+            x[3] = 1.0f;
+            break;
+        case IA_T2S:
+            x[0] = (float)(int16_t)(v & 0xFFFF);
+            x[1] = (float)(int16_t)(v >> 16);
+            x[2] = 0.0f;
+            x[3] = 1.0f;
+            break;
+        case IA_S4:
+            x[2 * slot] = (float)(int16_t)(v & 0xFFFF);
+            x[2 * slot + 1] = (float)(int16_t)(v >> 16);
+            break;
+        case IA_N3S:
+            x[2 * slot] = MAX(-1.0f, (float)(int16_t)(v & 0xFFFF) / 32767.0f);
+            if (2 * slot + 1 < 4) {
+                x[2 * slot + 1] = MAX(-1.0f, (float)(int16_t)(v >> 16) / 32767.0f);
+            }
+            break;
+        case IA_UB:
+            for (unsigned c = 0; c < 4; c++) {
+                x[c] = ((v >> (8 * c)) & 0xFF) / 255.0f;
+            }
+            break;
+        case IA_FOG:
+            x[0] = x[1] = x[2] = x[3] = f;
+            break;
+        case IA_W1:
+            x[0] = f;
+            x[1] = x[2] = 0.0f;
+            x[3] = 1.0f;
+            break;
+        }
+        attr_set(e->attr, x, false);
+        return true;
+    }
+    return false;
+}
+
 /* SET_VERTEX3F / 4F and SET_VERTEX_DATA*: true if m was one. */
 static bool vertex_data(uint32_t m, uint32_t v)
 {
@@ -4051,7 +4141,7 @@ static bool vertex_data(uint32_t m, uint32_t v)
         memcpy(x, g_pd.cur[a], 16);
         memcpy(&x[comp], &v, 4);
     } else {
-        return false;
+        return inline_attr(m, v);
     }
     attr_set(a, x, a == 0 && comp == last);
     return true;
@@ -4210,6 +4300,7 @@ static const bool k_pbd_acts[2048] = {
     [0x09D0 / 4 ... 0x09DC / 4] = true,
     [0x0A50 / 4 ... 0x0A5C / 4] = true,
     [NV097_SET_VERTEX3F / 4 ... (NV097_SET_VERTEX4F + 12) / 4] = true,
+    [0x1530 / 4 ... 0x16CC / 4] = true,         /* inline_attr's */
     [NV097_SET_VERTEX_DATA2F_M / 4 ... (NV097_SET_VERTEX_DATA4F_M + 16 * ATTRS - 4) / 4] = true,
     [NV097_SET_TRANSFORM_PROGRAM / 4 ... (NV097_SET_TRANSFORM_PROGRAM + 0x7C) / 4] = true,
     [NV097_SET_TRANSFORM_CONSTANT / 4 ... (NV097_SET_TRANSFORM_CONSTANT + 0x7C) / 4] = true,
