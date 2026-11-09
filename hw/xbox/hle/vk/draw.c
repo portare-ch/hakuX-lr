@@ -289,8 +289,8 @@ static bool tex_format(uint32_t x, TexFmt *o)
         o->fmt = VK_FORMAT_R8G8_UNORM; o->sw = m; return true;
     }
     case HLE_XFMT_V16U16: case HLE_XFMT_LIN_V16U16: {
-        /* as G8B8 (V8U8): U the low half, du; V the high, dv */
-        VkComponentMapping m = SW(R, G, R, G);
+        /* R16B16 maps the high half to R and A, and the low half to G and B. */
+        VkComponentMapping m = SW(G, R, R, G);
         o->fmt = VK_FORMAT_R16G16_UNORM; o->sw = m; return g_hvk.caps.r16;
     }
     /* Depth: compared with r as a shadow buffer (shadow_fmt), the depth in

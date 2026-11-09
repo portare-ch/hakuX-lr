@@ -37,16 +37,17 @@ uint32_t hle_fmt_sign_xor(uint32_t code, uint32_t sign);
  * the guest's format, not a conversion's. */
 uint32_t hle_fmt_sign_rgba(uint32_t code, uint32_t sign);
 
-/* Texels the back end samples in another format (pb/pbres.c, vk/draw.c
- * tex_format): n of format code, unswizzled, converted into dst. Colour
- * becomes A8R8G8B8 (bytes B, G, R, A), each n-bit channel's top bits repeated
- * below it: R6G5B5 always (R the 6-bit L of L6V5U5, G V, B U), and where the
- * GPU lacks theirs A4R4G4B4, R4G4B4A4, R5G5B5A1 and V16U16 as (u, v, u, v)
- * from its high bytes. Depth becomes a 32-bit float, compared as a shadow
- * buffer (shader/psh.c shadow_sample): D24S8's top 24 bits over 2^24 - 1, D16
- * over 65535 and the NV2A's F16 (unsigned, a 4-bit exponent biased by 7, a
- * 12-bit mantissa) over its largest, 511.9375, a larger one 1; F24 (a float's
- * bits 30 to 7) as the float itself. false for a format it doesn't convert. */
+/* Convert n unswizzled texels to a format the backend can sample.
+ * Colour becomes A8R8G8B8 (bytes B, G, R, A). R6G5B5 always converts with
+ * R = L, G = V, B = U. A4R4G4B4, R4G4B4A4, R5G5B5A1 and R16B16 convert
+ * when the GPU lacks the native format. Packed channels expand by repeating
+ * high bits. R16B16 uses the high byte of each half in RGBA order (V, U, U, V).
+ *
+ * Depth becomes a 32-bit float for shadow comparisons (psh.c shadow_sample).
+ * Divide D24S8 depth by 2^24 - 1 and D16 by 65535. F16 uses a 4-bit exponent
+ * biased by 7 and a 12-bit mantissa. Divide the decoded value by 511.9375.
+ * F24 supplies bits 30 through 7 of the float. Return false for formats
+ * with no conversion. */
 bool hle_tex_convert(uint32_t code, const void *src, uint32_t n, void *dst);
 /* The format code converted texels are sent as: A8R8G8B8, or F24S8 for depth,
  * linear when code is (a linear texture's coordinates are in texels). */
