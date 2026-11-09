@@ -49,6 +49,7 @@
 #define NV_CLASS_BLIT       0x9Fu
 #define PGRAPH_INTR_ERROR            (1u << 20)
 #define PGRAPH_NSOURCE_NOTIFICATION  1u
+#define NV_PGRAPH_CTX_SWITCH1        0x40014Cu
 #define NV_PRAMIN                    0x700000u
 #define NV_PRAMIN_SIZE               0x100000u
 
@@ -94,6 +95,8 @@ static struct {
     /* the subchannels' objects: instance (PRAMIN offset) and class */
     uint32_t obj_inst[8];
     uint8_t obj_class[8];
+    bool ctx_loaded;                   /* SET_OBJECT has loaded CTX_SWITCH1. */
+    uint64_t ctx_dropped;               /* Method words skipped while the class is zero. */
     uint32_t sem_inst, sem_offset;      /* Kelvin's semaphore DMA object, offset */
     uint32_t report_inst;               /* its report DMA object (visibility tests) */
     uint64_t reports;
@@ -792,6 +795,12 @@ static inline bool packet_start(void)
     return p->left == p->count || p->get - g_pb.last_get >= 256;
 }
 
+/* The boot value is zero. Check the class only after a successful bind. */
+static bool ctx_off(void)
+{
+    return g_pb.ctx_loaded && !(hle_host_gpu_reg(NV_PGRAPH_CTX_SWITCH1) & 0xFFu);
+}
+
 static int count_method(void *opaque, unsigned subch, uint32_t m, uint32_t v)
 {
     boundary_take();
@@ -813,6 +822,14 @@ static int count_method(void *opaque, unsigned subch, uint32_t m, uint32_t v)
      * every method's count cost ~3% of the decoder (a 64 KB table) */
     if (!(++g_pb.hist_tick & 15)) {
         g_pb.hist[subch][(m & 0x1FFFu) / 4] += 16;
+    }
+    if (m && ctx_off()) {
+        g_pb.ctx_dropped++;
+        if (m == NV_NO_OPERATION && v) {
+            /* Let the report scout advance past the skipped trap. */
+            trap_past(g_pb.p.dma_base + g_pb.p.get);
+        }
+        return HLE_PB_GO;
     }
     if (m == NV_NO_OPERATION && !v) {
         return HLE_PB_GO;                       /* padding (Crimson Sea: 1.3M a second) */
@@ -861,6 +878,11 @@ static int count_method(void *opaque, unsigned subch, uint32_t m, uint32_t v)
         uint32_t inst = ramht_find(v);
         g_pb.obj_inst[subch] = inst;
         g_pb.obj_class[subch] = inst ? (uint8_t)pramin(inst) : 0;
+        /* The first instance word holds the graphics class in bits 0–7. */
+        if (inst) {
+            hle_host_gpu_reg_set(NV_PGRAPH_CTX_SWITCH1, pramin(inst));
+            g_pb.ctx_loaded = true;
+        }
         g_pb.binds++;
         const uint8_t cls = g_pb.obj_class[subch];  /* each class logged once */
         if (!(g_lg.classes[cls >> 5] & (1u << (cls & 31)))) {
@@ -909,7 +931,9 @@ static uint32_t count_run(void *opaque, unsigned subch, uint32_t m, bool noninc,
         return 0;
     }
     publish_get();
-    if (g_pb.obj_class[subch & 7] == 0x97) {
+    if (ctx_off()) {
+        g_pb.ctx_dropped += n;
+    } else if (g_pb.obj_class[subch & 7] == 0x97) {
         hle_pbd_run(m, noninc, w, n);
     }
     g_pb.hist[subch & 7][(m & 0x1FFFu) / 4] += n;    /* debug: a run counts at its first method */
@@ -1544,6 +1568,11 @@ void hle_pb_state_set(const HlePbState *s)
     g_pb.sub_writes = s->sub_writes;
     memcpy(g_pb.obj_inst, s->obj_inst, sizeof(s->obj_inst));
     memcpy(g_pb.obj_class, s->obj_class, sizeof(s->obj_class));
+    /* Recover the guard from the saved bindings. GPU state restores the register. */
+    g_pb.ctx_loaded = false;
+    for (unsigned i = 0; i < 8; i++) {
+        g_pb.ctx_loaded |= s->obj_inst[i] != 0;
+    }
     g_pb.sem_inst = s->sem_inst;
     g_pb.sem_offset = s->sem_offset;
     g_pb.report_inst = s->report_inst;
