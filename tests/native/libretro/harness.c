@@ -368,7 +368,7 @@ static void apply_cheats_of(const char *var)
     unsigned n = 0;
     for (const char *p = all;; n++) {
         const char *bar = strchr(p, '|');
-        char code[512];
+        char code[4096];            /* Halo 2's 60 fps patch needs 1,682 bytes. */
         snprintf(code, sizeof(code), "%.*s", (int)(bar ? (size_t)(bar - p) : strlen(p)), p);
         p_retro_cheat_set(n, true, code);
         if (!bar) {
