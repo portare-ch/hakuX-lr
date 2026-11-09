@@ -10,6 +10,7 @@
 #include "native/core/mmio.h"
 #include "native/core/irq.h"
 #include "native/core/mods.h"
+#include "native/core/online.h"
 #include "native/net/net.h"
 #include "native/state/save.h"
 
@@ -122,6 +123,9 @@ bool nc_core_boot(NcCore *c, int disc_fd)
     memset(c, 0, sizeof(*c));
     c->disc.fd = -1;
     c->xbe.fd = -1;
+    /* Restore Internet access and the video mode's vblank rate on boot. */
+    nc_online_boot();
+    nc_dev_nv2a_vblank_multiply(1);
     /* Some games check for the dashboard during startup. */
     nc_dash_install(nc_io_hdd_root());
     /* NC_RAM_MB=128 (debug kit size): a dev switch for memory investigations. */

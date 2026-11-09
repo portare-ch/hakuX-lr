@@ -46,6 +46,11 @@ class AppPrefs(context: Context) {
     get() = sp.getBoolean(KEY_PREVIOUS_MIGRATED, false)
     set(value) = sp.edit { putBoolean(KEY_PREVIOUS_MIGRATED, value) }
 
+  /** Allow mods and cheats at game start. */
+  var cheats: Boolean
+    get() = sp.getBoolean(KEY_CHEATS, false)
+    set(value) = sp.edit { putBoolean(KEY_CHEATS, value) }
+
   /** Every frame presented at once, no vblank wait (read at game start). */
   var uncapped: Boolean
     get() = sp.getBoolean(NativeCoreActivity.PREF_UNCAP, false)
@@ -218,6 +223,7 @@ class AppPrefs(context: Context) {
     private const val KEY_GAMES_FOLDER = "gamesFolderUri"
     private const val KEY_GAMES_FOLDERS = "gamesFolders"
     private const val KEY_SETUP_COMPLETE = "setup_complete"
+    private const val KEY_CHEATS = "cheats"
     private const val KEY_PREVIOUS_MIGRATED = "previous_version_migrated"
     private const val KEY_SHOW_FPS = "show_fps"
     private const val KEY_CONSOLE_TIMING = "console_timing"

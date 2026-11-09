@@ -158,6 +158,7 @@ class NativeCoreActivity : SDLActivity(), InputManager.InputDeviceListener {
         return
       }
       nativeTakeTwinConsole()?.let(::showTwinConsole)
+      nativeTakeOnlineNotice()?.let(::showOnlineNotice)
       fpsHandler.postDelayed(this, FPS_INTERVAL_MS)
     }
   }
@@ -170,6 +171,13 @@ class NativeCoreActivity : SDLActivity(), InputManager.InputDeviceListener {
    * so its saves stay valid), from the game's start, at once.
    */
   private var twinShown = false
+
+  private fun showOnlineNotice(what: String) {
+    if (AppPrefs(this).networkOn) {
+      val text = if (nativeOnlineCause() == 1) R.string.online_off_uncapped else R.string.online_off
+      Toast.makeText(this, getString(text, what), Toast.LENGTH_LONG).show()
+    }
+  }
 
   private fun showTwinConsole(address: String) {
     if (twinShown) return
@@ -236,7 +244,7 @@ class NativeCoreActivity : SDLActivity(), InputManager.InputDeviceListener {
     }
     /* The app's settings, under this game's overrides. */
     val settings = RunSettings(AppPrefs(this), gameOverrides())
-    /* Every frame presented at once, no vblank wait: on by default. */
+    /* Uncapped timing disables Xbox Live for the session. */
     if (settings.uncapped) {
       args += "uncap"
     }
@@ -275,8 +283,8 @@ class NativeCoreActivity : SDLActivity(), InputManager.InputDeviceListener {
       Network.broadcastAddress(this)?.let { args += "lanbcast=$it" }
       prefs.lanPeers.replace(" ", "").takeIf { it.isNotEmpty() }?.let { args += "lanpeers=$it" }
     }
-    /* The game's mods (their files and XBE patches) and cheats (mods/):
-     * the manifest the core reads as the disc opens. */
+    /* The core uses the manifest for legacy patch rollback even with Cheats off. */
+    args += "cheats=${if (prefs.cheats) 1 else 0}"
     modsArg()?.let { args += it }
     /* The players with a controller plugged in at boot: player 1 and those a
      * connected controller plays as (later ones: syncPads). */
@@ -603,12 +611,13 @@ class NativeCoreActivity : SDLActivity(), InputManager.InputDeviceListener {
     if (discUri == null) return null
     val key = gameKey()
     if (!ModCatalog.has(this, key)) return null
+    val allowed = AppPrefs(this).cheats
     return runCatching { ModRun.write(this, key) }
       .onFailure { Log.e(TAG, "mods: ${it.message}") }
       .getOrNull()
       ?.let { (file, cheats) ->
         runKey = key
-        runCheats = cheats
+        runCheats = if (allowed) cheats else emptyList()
         "mods=${file.absolutePath}"
       }
   }
@@ -1179,6 +1188,14 @@ class NativeCoreActivity : SDLActivity(), InputManager.InputDeviceListener {
     /** A console on the network with this one's identity: its address, once each; null when no new one. */
     @JvmStatic
     external fun nativeTakeTwinConsole(): String?
+
+    /** Consume the pending Xbox Live notice, or return null. */
+    @JvmStatic
+    external fun nativeTakeOnlineNotice(): String?
+
+    /** Return 1 for uncapped timing or 0 for a cheat, patch or mod. */
+    @JvmStatic
+    external fun nativeOnlineCause(): Int
 
     /** A title frame has been on screen. */
     @JvmStatic

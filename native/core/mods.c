@@ -2,6 +2,7 @@
  * hakuX native core — mods and cheats (mods.h).
  */
 #include "native/core/mods.h"
+#include "native/core/online.h"
 
 #include "native/core/cheats.h"
 #include "native/core/memscan.h"
@@ -127,6 +128,8 @@ static unsigned g_nmp;
 static MemPatch *g_saved;
 static unsigned g_nsaved;
 static bool g_have_saved;
+/* Saved modification flag. A value of -1 means the state predates MODS v2. */
+static int g_saved_modified = -1;
 
 static void remember(MemPatch **list, unsigned *count, const char *xbe, uint32_t va, const uint8_t *old,
                      const uint8_t *neu, unsigned n, bool on)
@@ -247,6 +250,7 @@ static void patch_update(NcDisc *disc, const char *xbe, const char *mod, uint32_
         memcpy(p->bytes, neu, nnew);
         remember(&g_mp, &g_nmp, xbe, va, cur, neu, nnew, true);
         nc_log("hakuX-native-mods", "%s: [%s] %08x: %u bytes", mod, xbe, va, nnew);
+        nc_online_modified(NC_ONLINE_CHEATS, "a mod's XBE patch");
     }
 }
 
@@ -301,6 +305,7 @@ static void patch(NcDisc *disc, const char *xbe, const char *mod, const char *li
         } else if (nc_disc_overlay_patch(disc, xbe, off, neu, nnew)) {
             remember(&g_mp, &g_nmp, xbe, va, cur, neu, nnew, true);
             nc_log("hakuX-native-mods", "%s: [%s] %08x: %u bytes", mod, xbe, va, nnew);
+            nc_online_modified(NC_ONLINE_CHEATS, "a mod's XBE patch");
         }
     }
 }
@@ -321,6 +326,11 @@ void nc_mods_xbe_patches(NcDisc *disc, const char *xbe_path)
     const unsigned n = nc_xbe_patch_front_list(on, sizeof(on));
     if (!n) {
         __atomic_store_n(&g_xbe_patch_booted, 0, __ATOMIC_RELEASE);
+        return;
+    }
+    if (!nc_online_cheats()) {
+        __atomic_store_n(&g_xbe_patch_booted, nc_xbe_patch_front_hash(), __ATOMIC_RELEASE);
+        nc_log("hakuX-native-mods", "XBE patches (%s): Cheats are off: none applied", on);
         return;
     }
     const char *rel = !strncasecmp(xbe_path, cd, sizeof(cd) - 1)                     ? xbe_path + sizeof(cd) - 1
@@ -372,6 +382,7 @@ void nc_mods_xbe_patches(NcDisc *disc, const char *xbe_path)
     }
     nc_log("hakuX-native-mods", "XBE patch (cheat %u): %u runs, %u bytes over %s (%08X:%08X)", index, p.nruns, bytes,
            rel, (unsigned)crc, f.size);
+    nc_online_modified(NC_ONLINE_CHEATS, "an XBE patch");
 }
 
 /* The file name of a path (either slash). */
@@ -498,6 +509,11 @@ static unsigned clear_header_page(const char *image_path)
 
 void nc_mods_after_load(NcKernel *k, const char *image_path)
 {
+    /* Restored RAM can contain cheat writes even with Cheats off. */
+    if (g_saved_modified) {
+        nc_online_modified(NC_ONLINE_CHEATS, g_saved_modified > 0 ? "a savestate of a game cheats had changed"
+                                                                   : "a savestate from before the Xbox Live check");
+    }
     if (!image_path[0]) {
         image_path = "\\default.xbe";   /* XeImageFileName's default */
     }
@@ -543,6 +559,9 @@ void nc_mods_after_load(NcKernel *k, const char *image_path)
             *(flip(&g_mp[i], true) ? &done : &kept) += 1;
         }
     }
+    if (done) {
+        nc_online_modified(NC_ONLINE_CHEATS, "a mod's XBE patch");
+    }
     if (done || undone || kept || cleared || freed) {
         nc_log("hakuX-native-mods", "savestate %s: %u XBE patches applied to its memory, %u of %s taken back, "
                "%u left as they were; header page: %u bytes cleared, %u KiB its code allocated freed",
@@ -570,6 +589,12 @@ void nc_mods_install(NcDisc *disc)
     if (!g_manifest[0]) {
         return;
     }
+    /* Keep patch records for restoring stock bytes in pre-MODS states. */
+    const bool rollback = !nc_online_cheats();
+    if (rollback) {
+        nc_log("hakuX-native-mods", "Cheats are off: the game's mods and cheats (%s) are not applied; their patches "
+               "only roll a savestate back", g_manifest);
+    }
     FILE *fp = fopen(g_manifest, "r");
     if (!fp) {
         nc_log("hakuX-native-mods", "no manifest at %s", g_manifest);
@@ -582,16 +607,23 @@ void nc_mods_install(NcDisc *disc)
         line[strcspn(line, "\r\n")] = 0;
         char *s = line;
         const char *kind = field(&s);
+        if (rollback && strcmp(kind, "patch") && strcmp(kind, "patchoff")) {
+            continue;
+        }
         if (!strcmp(kind, "refresh")) {
             const unsigned hz = (unsigned)atoi(s);
             nc_dev_nv2a_vblank_multiply((hz + 30) / 60);
             nc_log("hakuX-native-mods", "vblank at %u Hz for a 60 Hz mode", (hz + 30) / 60 * 60);
+            if ((hz + 30) / 60 != 1) {
+                nc_online_modified(NC_ONLINE_CHEATS, "a faster vblank");
+            }
             continue;
         }
         if (!strcmp(kind, "file")) {
             const char *path = field(&s);
             if (nc_disc_overlay_file(disc, path, s)) {
                 files++;
+                nc_online_modified(NC_ONLINE_CHEATS, "a mod's files");
             } else {
                 nc_log("hakuX-native-mods", "file %s from %s: can't be used", path, s);
             }
@@ -603,7 +635,7 @@ void nc_mods_install(NcDisc *disc)
         }
         if (!strcmp(kind, "patch") || !strcmp(kind, "patchoff")) {
             const char *xbe = field(&s), *mod = field(&s);
-            patch(disc, xbe, mod, s, kind[5] != 'o');
+            patch(disc, xbe, mod, s, !rollback && kind[5] != 'o');
         } else if (!strcmp(kind, "cheat")) {
             const bool on = atoi(field(&s)) != 0, once = atoi(field(&s)) != 0;
             have_cheat = nc_cheat_add(s, on, once) >= 0;
@@ -695,7 +727,9 @@ void nc_mods_poll(void)
     g_vblank = v;
     nc_memscan_poll(g_vm);              /* debug.hakux.memscan */
     static const NcCheatMem mem = {NULL, mem_read, mem_write};
-    nc_cheats_run(&mem);                /* the manifest's and the frontend's */
+    if (nc_online_cheats() && nc_cheats_run(&mem)) {
+        nc_online_modified(NC_ONLINE_CHEATS, "a cheat");
+    }
     for (unsigned i = 0; i < nc_cheat_count(); i++) {
         if (!g_logged[i] && nc_cheat_misses((int)i)) {
             g_logged[i] = true;
@@ -712,6 +746,7 @@ void nc_mods_poll(void)
 
 typedef struct NcModsState {
     uint32_t npatches;
+    uint32_t modified;                  /* MODS v2 */
 } NcModsState;
 
 typedef struct NcModsPatch {
@@ -731,6 +766,7 @@ bool nc_mods_state_save(NcBuf *b)
     for (unsigned i = 0; i < g_nmp; i++) {
         st.npatches += g_mp[i].on;
     }
+    st.modified = nc_online_cheated();
     nc_rec_put(b, &nc_rec_NcModsState, &st);
     for (unsigned i = 0; i < g_nmp; i++) {
         const MemPatch *p = &g_mp[i];
@@ -749,6 +785,7 @@ bool nc_mods_state_load(NcRd *r, unsigned v)
 {
     NcModsState st = {0};
     nc_rec_get(r, &nc_rec_NcModsState, &st, v);
+    g_saved_modified = v >= 2 ? st.modified != 0 : -1;
     for (uint32_t i = 0; !r->fail && i < st.npatches; i++) {
         NcModsPatch rec = {{0}};
         nc_rec_get(r, &nc_rec_NcModsPatch, &rec, v);
@@ -782,6 +819,7 @@ void nc_mods_reset(void)
     memset(g_exec, 0, sizeof(g_exec));
     g_nexec = 0;
     g_vblank = 0;
+    g_saved_modified = -1;
     memset(g_logged, 0, sizeof(g_logged));
     free_patches(&g_mp, &g_nmp);
     free_patches(&g_saved, &g_nsaved);

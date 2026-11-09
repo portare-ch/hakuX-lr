@@ -6,6 +6,7 @@
  * frame pacing and frame repeats update live. Other options apply at boot.
  */
 #include "native/libretro/libretro_int.h"
+#include "native/core/online.h"
 #include "native/hle/hle_native.h"
 #include "native/kernel/kernel.h"
 #include "native/dev/dev.h"
@@ -32,7 +33,7 @@
 
 enum { OPT_SCALE, OPT_CROP, OPT_FORMAT, OPT_LANGUAGE, OPT_REGION, OPT_RUMBLE, OPT_NETWORK, OPT_COMMUNICATOR,
        OPT_MIC_GATE, OPT_RESAMPLER, OPT_PROCESSING, OPT_PRECISION, OPT_PACE,
-       OPT_REPEAT, OPT_COUNT };
+       OPT_REPEAT, OPT_MODS, OPT_COUNT };
 
 /* The language values follow XC_LANGUAGE after auto: english is 1. */
 static struct retro_core_option_v2_definition g_defs[OPT_COUNT + 1] = {
@@ -150,6 +151,14 @@ static struct retro_core_option_v2_definition g_defs[OPT_COUNT + 1] = {
         NULL, NULL,
         {{"disabled", "Off"}, {"enabled", "On"}, {NULL, NULL}},
         "disabled"},
+    [OPT_MODS] = {
+        "hakux_cheats", "Cheats", NULL,
+        "Applies RetroArch's cheats and XBE patches (such as 60 fps patches). Off ignores them all. On, a "
+        "game they change can't use Xbox Live (Insignia) until it restarts: they give an unfair advantage "
+        "or desync real consoles. System link still works." NEXT,
+        NULL, NULL,
+        {{"disabled", "Off"}, {"enabled", "On"}, {NULL, NULL}},
+        "disabled"},
     {NULL},
 };
 
@@ -260,6 +269,7 @@ void nc_lr_options_apply(void)
     const bool rumble = strcmp(g_defs[OPT_RUMBLE].values[g_applied[OPT_RUMBLE]].value, "enabled") == 0;
     nc_lr_input_set_rumble(rumble);
     nc_lr_video_set_repeat(!strcmp(g_defs[OPT_REPEAT].values[g_applied[OPT_REPEAT]].value, "enabled"));
+    nc_online_set_cheats(!strcmp(g_defs[OPT_MODS].values[g_applied[OPT_MODS]].value, "enabled"));
 
     /* PAL60 always: RetroArch runs at 59.94 Hz, and an NTSC title ignores it.
      * No 480p, 720p or 1080i, as before the options. */

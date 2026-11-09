@@ -7,6 +7,7 @@
  *   relaunch         a title's reboot into another of its XBEs
  *   loadstate=FILE   boot into a savestate (native/state)
  *   mods=FILE        the run's mods and cheats (native/core/mods.h)
+ *   cheats=0|1       allow mods and cheats (off by default)
  *   version=NAME     the core's version, recorded in savestates
  *   scale=N          the render scale
  *   asyncpipe=0|1    asynchronous shader compilation (on when absent)

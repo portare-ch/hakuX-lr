@@ -156,7 +156,13 @@
   <string name="settings_export_logs_done">Logs saved as %1$s</string>
   <string name="settings_export_logs_failed">Couldn\'t export the logs</string>
   <string name="settings_uncap">Uncapped frame rate</string>
-  <string name="settings_uncap_desc">Present every frame at once instead of waiting for the display.</string>
+  <string name="settings_uncap_desc">Present every frame at once instead of waiting for the display. Games that count frames run faster, so Xbox Live stays off while it\'s on.</string>
+  <string name="settings_cheats">Cheats</string>
+  <string name="settings_cheats_desc">Apply the games\' mods and cheats (such as 60 fps mods). Off ignores them all. On, a game they change can\'t use Xbox Live (Insignia) until it restarts: they give an unfair advantage or desync real consoles. System link still works.</string>
+  <string name="mods_off_note">Cheats are off in Settings: none of these apply.</string>
+  <string name="mods_online_note">A game with any of these on can\'t use Xbox Live (Insignia) until it restarts.</string>
+  <string name="online_off">Xbox Live is off until the game restarts: %1$s changed it. Turn its cheats and mods off (or Cheats in Settings) and restart the game to play on Insignia.</string>
+  <string name="online_off_uncapped">Xbox Live is off until the game restarts: %1$s makes games that count frames run fast. Turn off Uncapped frame rate (Settings, or this game\'s settings) to play on Insignia.</string>
   <string name="settings_scale">Resolution scale</string>
   <string name="settings_scale_value">%1$dx the game\'s resolution</string>
   <string name="settings_scale_native">1x (native)</string>

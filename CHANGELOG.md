@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Cheats** — Off by default in RetroArch and the Android app. Applied
+  cheats, patches, mods and uncapped frame rates disable Xbox Live until
+  the game restarts. System link remains available.
+
 ## linux-v0.25.1 (Linux, aarch64 and x86-64, and Android)
 
 - **Frame rate** — The core skips unchanged frames by default so FPS

@@ -76,6 +76,9 @@ void nc_net_wait_rx(uint64_t timeout_ns);
 void nc_net_twin(uint32_t ip);
 bool nc_net_take_twin(char *addr, size_t len);
 
+/* Toggle NAT Internet access. ARP and local DHCP remain available. */
+void nc_net_internet(bool on);
+
 /* ---- backends (native/net/nat.c, lan.c, all.c) ---- */
 
 struct pollfd;

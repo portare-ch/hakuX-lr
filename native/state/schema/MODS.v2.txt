@@ -1,0 +1,8 @@
+section MODS
+record NcModsState
+  npatches U32 x1 since 1
+  modified U32 x1 since 2
+record NcModsPatch
+  xbe U8 x128 since 1
+  va U32 x1 since 1
+  n U32 x1 since 1
