@@ -255,10 +255,10 @@ static void test_convert(void)
     HT_EQ_U32(conv1(HLE_XFMT_R6G5B5, 0x8000), 0xFF820000u);         /* L 32: 0x82 */
     HT_EQ_U32(conv1(HLE_XFMT_LIN_R6G5B5, 0x03E0), 0xFF00FF00u);
     HT_EQ_U32(conv1(HLE_XFMT_R6G5B5, 0x0010), 0xFF000084u);         /* U -16: 0x84 */
-    /* V16U16 (u, v, u, v) from their high bytes; L16 is never converted */
     HT_CHECK(!hle_tex_convert(HLE_XFMT_L16, "\0\0", 1, &(uint32_t){ 0 }));
-    HT_EQ_U32(conv1(HLE_XFMT_V16U16, 0x80FF7F00u), 0x807F807Fu);
-    HT_EQ_U32(conv1(HLE_XFMT_LIN_V16U16, 0x0001FFFFu), 0x00FF00FFu);
+    /* R16B16 uses the high bytes of V and U in RGBA order (V, U, U, V). */
+    HT_EQ_U32(conv1(HLE_XFMT_V16U16, 0x80FF7F00u), 0x80807F7Fu);
+    HT_EQ_U32(conv1(HLE_XFMT_LIN_V16U16, 0x0001FFFFu), 0x0000FFFFu);
     /* depth over the shadow compare's range: 2^24 - 1, 65535, 511.9375;
      * F24 as its float (nxdk_pgraph_tests compares one at 0.5e30) */
     HT_CHECK(depth1(HLE_XFMT_D24S8, 0xFFFFFF12u) == 1.0f);

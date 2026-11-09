@@ -353,14 +353,14 @@ static void test_brdf(void)
     HT_CHECK(n > 0 && n == strlen(buf));
     dump("psh_brdf");
     HT_EQ_U32(un, 0);
-    HT_CHECK(strstr(buf, "vec4 t2 = samp3(2u, vec3(t0.g, t1.g, t1.r - t0.r));") != NULL);
+    HT_CHECK(strstr(buf, "vec4 t2 = samp3(2u, vec3(t0.a, t1.a, t1.b - t0.b));") != NULL);
     /* no volume bound: the 2D texture, normalised (no image of another kind) */
     k.vol = 0;
     n = hle_psh_glsl(&k, buf, sizeof(buf), &un);
     HT_CHECK(n > 0 && n == strlen(buf));
     dump("psh_brdf_2d");
     HT_EQ_U32(un, 0);
-    HT_CHECK(strstr(buf, "uSmp[nonuniformEXT(si)]), vec2(t0.g, t1.g)); }") != NULL);
+    HT_CHECK(strstr(buf, "uSmp[nonuniformEXT(si)]), vec2(t0.a, t1.a)); }") != NULL);
     HT_CHECK(strstr(buf, "samp3(2u") == NULL);
     /* stage 3: stages 1 and 2 */
     rs[HLE_PS_TEXMODES] = 1 | 3u << 5 | 3u << 10 | (unsigned)HLE_PST_BRDF << 15;
@@ -368,7 +368,7 @@ static void test_brdf(void)
     k.vol = 8;
     HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), &un) > 0);
     HT_EQ_U32(un, 0);
-    HT_CHECK(strstr(buf, "vec4 t3 = samp3(3u, vec3(t1.g, t2.g, t2.r - t1.r));") != NULL);
+    HT_CHECK(strstr(buf, "vec4 t3 = samp3(3u, vec3(t1.a, t2.a, t2.b - t1.b));") != NULL);
     /* stage 1: not two stages before it */
     rs[HLE_PS_TEXMODES] = 1 | (unsigned)HLE_PST_BRDF << 5;
     hle_psh_key(rs, &k);

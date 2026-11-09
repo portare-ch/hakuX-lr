@@ -874,14 +874,11 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             put(&b, "  vec4 t%u = vec4(0.0);\n  zrz = dot%u;\n  zrw = dot%u;\n", s, s - 1, s);
             break;
         case HLE_PST_BRDF:
-            /* isotropic BRDF (NVIDIA's US6664963): stages s-2 and s-1 hold the
-             * eye's and the light's spherical coordinates, 16-bit unsigned
-             * numbers over 65535: elevation the high half (g: V16U16's V),
-             * azimuth the low (r: U), as Cxbx-Reloaded reads them. The
-             * stage's volume is looked up at (eye elevation, light elevation,
-             * light azimuth - eye azimuth), the last on [-1, 1] (a wrapping
-             * address mode makes it the angle's). Without a volume bound,
-             * the 2D texture at the first two. */
+            /* Isotropic BRDF (NVIDIA US6664963) takes eye and light angles
+             * from stages s-2 and s-1. R16B16 puts elevation in A and
+             * azimuth in B. Sample the volume at (eye elevation, light
+             * elevation, light azimuth - eye azimuth). A 2D lookup uses
+             * both elevations. */
             if (s < 2) {
                 unsup |= 1u << m;
                 put(&b, "  vec4 t%u = samp(%uu, nvproj(vTex%u).xy);\n", s, s, s);
@@ -890,13 +887,13 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             tex_read(ts, sizeof(ts), k, s - 2);
             tex_read(ts2, sizeof(ts2), k, s - 1);
             if ((k->vol >> s) & 1) {
-                put(&b, "  vec4 t%u = samp3(%uu, vec3(%s.g, %s.g, %s.r - %s.r));\n",
+                put(&b, "  vec4 t%u = samp3(%uu, vec3(%s.a, %s.a, %s.b - %s.b));\n",
                     s, s, ts, ts2, ts2, ts);
             } else {
                 put(&b, "  vec4 t%u;\n"
                         "  { uint ti = pc.tex[%u] & 0xFFFFu, si = (pc.tex[%u] >> 16) & 0xFFu;\n"
                         "    t%u = %s(sampler2D(uTex2D[nonuniformEXT(ti)], "
-                        "uSmp[nonuniformEXT(si)]), %svec2(%s.g, %s.g)); }\n",
+                        "uSmp[nonuniformEXT(si)]), %svec2(%s.a, %s.a)); }\n",
                     s, s, s, s, gl ? "GLT2" : "texture", gl ? (snprintf(gls, sizeof(gls), "%uu, ", s), gls) : "",
                     ts, ts2);
             }

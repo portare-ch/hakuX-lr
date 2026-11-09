@@ -167,7 +167,7 @@ bool hle_tex_convert(uint32_t code, const void *src, uint32_t n, void *dst)
     case HLE_XFMT_V16U16: case HLE_XFMT_LIN_V16U16:
         for (uint32_t i = 0; i < n; i++) {
             uint32_t u = s[4 * i + 1], v = s[4 * i + 3];
-            put32(o, i, v << 24 | u << 16 | v << 8 | u);
+            put32(o, i, v << 24 | v << 16 | u << 8 | u);
         }
         return true;
     case HLE_XFMT_D16: case HLE_XFMT_LIN_D16:
