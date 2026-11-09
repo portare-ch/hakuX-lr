@@ -47,6 +47,7 @@ DASH_BACK = (
 
 # A title that reads the console's language (ExQueryNonVolatileSetting, which
 # logs the EEPROM's video flags, AV region and language), then halts.
+# 480p by default; PAL60 only on a PAL console.
 SETTINGS = (
     b'\x83\xec\x0c'                  # sub esp, 12: type, value, result length
     b'\x8d\x44\x24\x08\x50'          # push &result length
@@ -302,19 +303,19 @@ def main():
         run([args.harness, args.core, root / 'settings.iso', 600, root / 'saves'], 0,
             ('options: render scale 2x, overscan cropped, screen normal, language 3 (auto), video region auto',
              'aspect 1.333',
-             'ex: video flags 00400000, AV pack 0, AV region 00400100, language 3', 'guest executed HLT'), env)
+             'ex: video flags 00080000, AV pack 0, AV region 00400100, language 3', 'guest executed HLT'), env)
         env['HARNESS_OPTIONS'] = (f'{OFF};hakux_render_scale=1;hakux_screen_format=widescreen;hakux_language=french;'
                                   'hakux_video_region=ntsc-j')
         run([args.harness, args.core, root / 'settings.iso', 600, root / 'saves'], 0,
             ('options: render scale 1x, overscan cropped, screen widescreen, language 4 (french), video region ntsc-j, '
              'rumble off',
-             'aspect 1.778', 'ex: video flags 00410000, AV pack 0, AV region 00400200, language 4',
+             'aspect 1.778', 'ex: video flags 00090000, AV pack 0, AV region 00400200, language 4',
              'guest executed HLT'), env)
         # A value the core doesn't know is its default.
         env['HARNESS_OPTIONS'] = f'{OFF};hakux_render_scale=9;hakux_video_region=pal;hakux_crop_overscan=disabled'
         run([args.harness, args.core, root / 'settings.iso', 600, root / 'saves'], 0,
             ('options: render scale 2x, overscan shown, screen normal, language 3 (auto), video region pal',
-             'ex: video flags 00400000, AV pack 0, AV region 00800300, language 3'), env)
+             'ex: video flags 00480000, AV pack 0, AV region 00800300, language 3'), env)
         # Changed during the game (the menu), they wait for the next start;
         # the crop, rumble and frame pacing don't. Rumble on asks RetroArch
         # for its interface, which the harness doesn't have.

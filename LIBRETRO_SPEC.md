@@ -351,8 +351,9 @@ Options (`options.c`): only what the emulator backs.
   the whole frame).
 - The console's own settings, as its dashboard keeps them: screen format
   (normal, widescreen, letterbox), language (auto: RetroArch's) and video
-  region (auto: the game's; NTSC-M, NTSC-J, PAL). PAL60 is always set, as
-  RetroArch runs at 59.94 Hz; 480p, 720p and 1080i stay off.
+  region (auto: the game's; NTSC-M, NTSC-J, PAL). 480p is on, as on the
+  component cable; PAL60 is set for PAL consoles, as RetroArch runs at
+  59.94 Hz; 720p and 1080i stay off.
 - The network (`net.c`): the console's cable, off or on. On, the console
   has Xbox Live through Insignia (upstream's NAT backend with Insignia's DNS
   server, or the first address in `insignia-dns.txt` in the save directory)

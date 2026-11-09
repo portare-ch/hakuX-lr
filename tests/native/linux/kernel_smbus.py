@@ -78,28 +78,28 @@ def main():
             fail(f'a new console keeps {settings(first)}, not the front end\'s (2, 0, 0)')
         print('PASS: a new console keeps the front end\'s settings')
         # Check new settings over SMBus and on disk.
-        changed, ino2 = run(1, data, 'lang=3', 'video=00420000', 'tz=60',
-                            markers=('ksmbus: language 3, video 00420000, bias -60',))
-        if settings(changed) != (3, 0x00420000, -60) or ino2 == ino:
+        changed, ino2 = run(1, data, 'lang=3', 'video=000a0000', 'tz=60',
+                            markers=('ksmbus: language 3, video 000a0000, bias -60',))
+        if settings(changed) != (3, 0x000a0000, -60) or ino2 == ino:
             fail(f'eeprom.bin after new settings: {settings(changed)}, written again: {ino2 != ino}')
         print('PASS: the front end\'s new settings are on the SMBus and in eeprom.bin')
         # Reboot with the same settings and check the inode.
-        same, ino3 = run(1, data, 'lang=3', 'video=00420000', 'tz=60')
+        same, ino3 = run(1, data, 'lang=3', 'video=000a0000', 'tz=60')
         if same != changed or ino3 != ino2:
             fail('the same settings wrote eeprom.bin again')
         print('PASS: the same settings leave eeprom.bin alone')
         # Change one setting and check that the file is replaced.
-        one, ino4 = run(1, data, 'lang=4', 'video=00420000', 'tz=60')
-        if settings(one) != (4, 0x00420000, -60) or ino4 == ino3:
+        one, ino4 = run(1, data, 'lang=4', 'video=000a0000', 'tz=60')
+        if settings(one) != (4, 0x000a0000, -60) or ino4 == ino3:
             fail(f'one changed setting: {settings(one)}, written again: {ino4 != ino3}')
         print('PASS: one changed setting is kept')
         # Write the same byte over SMBus and check the inode.
-        unchanged, ino5 = run(2, data, 'lang=4', 'video=00420000', 'tz=60')
+        unchanged, ino5 = run(2, data, 'lang=4', 'video=000a0000', 'tz=60')
         if unchanged != one or ino5 != ino4:
             fail('an unchanged SMBus write wrote eeprom.bin again')
         print('PASS: an unchanged SMBus write leaves eeprom.bin alone')
         # Save a setting after an SMBus write to the encrypted section.
-        saved, _ = run(3, data, 'lang=4', 'video=00420000', 'tz=60')
+        saved, _ = run(3, data, 'lang=4', 'video=000a0000', 'tz=60')
         if saved[0x1C] != 0xA5 or saved[0x90] != 5 or saved[0x00:0x1C] != one[0x00:0x1C]:
             fail(f'after a setting saved: 0x1C {saved[0x1C]:02x} (written a5), language {saved[0x90]}')
         print('PASS: saving a setting leaves the encrypted section written on the SMBus')

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Video** — 480p is on by default in RetroArch, as on a console with
+  the component cable: a 4:3 NTSC console's video flags are `00080000`.
+  PAL60 is set only for PAL consoles.
+
 ## linux-v0.25.2 (Linux, aarch64 and x86-64, and Android)
 
 - **Cheats** — Off by default in RetroArch and the Android app. Applied
