@@ -27,9 +27,9 @@
 #define NC_STATE_V_MM 2
 #define NC_STATE_MIN_MM 1
 #define NC_STATE_H_MM 0x288105c7u
-#define NC_STATE_V_MODS 1
+#define NC_STATE_V_MODS 2
 #define NC_STATE_MIN_MODS 1
-#define NC_STATE_H_MODS 0x0742f082u
+#define NC_STATE_H_MODS 0x5d3f43e5u
 #define NC_STATE_V_NIC 1
 #define NC_STATE_MIN_NIC 1
 #define NC_STATE_H_NIC 0x72d2898eu
@@ -45,9 +45,9 @@
 #define NC_STATE_V_RAM 1
 #define NC_STATE_MIN_RAM 1
 #define NC_STATE_H_RAM 0x27b90541u
-#define NC_STATE_V_THRD 3
+#define NC_STATE_V_THRD 4
 #define NC_STATE_MIN_THRD 1
-#define NC_STATE_H_THRD 0x72645308u
+#define NC_STATE_H_THRD 0x6b02349du
 #define NC_STATE_V_TIMR 2
 #define NC_STATE_MIN_TIMR 1
 #define NC_STATE_H_TIMR 0x1afb13d4u

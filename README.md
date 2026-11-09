@@ -257,22 +257,22 @@ another device. RetroArch save states are not supported.
 
 ## Multiplayer
 
-Choose a network mode under **Quick Menu → Core Options → Network**, then
-close and reopen the game.
+**Quick Menu → Core Options → Network** is on by default and enables
+Xbox Live and system link together. To disconnect, turn it off and reopen
+the game.
 
-- **LAN (system link):** enable it on every device, then use the game's LAN
-  mode. Discovery uses UDP port 3075. For another subnet or a VPN, add peers
-  to `lan-peers.txt` in RetroArch's save directory
+- **System link:** turn the network on on every device, then use the game's
+  system link mode. Discovery uses UDP port 3075. For another subnet or a VPN,
+  add peers to `lan-peers.txt` in RetroArch's save directory
   (`/storage/saves/xbox/` on PortareOS), one `IP` or `IP:PORT` per line.
-- **Xbox Live (Insignia):** register the console with
-  [Insignia](https://insignia.live) using its Setup Assistant, then select this
-  network mode. Account setup needs your own Xbox dashboard files;
-  see the [dashboard setup](native/README.linux.md#the-libretro-core) and
-  [NAT / port forwarding guide](native/README.linux.md#insignia-nat).
-  Dashboard navigation and the complete Insignia setup process have not
-  yet been tested on a device.
-
-XLink Kai is unavailable in RetroArch.
+  Each console gets its own address, so consoles on one network can play
+  system link while signed in to Insignia.
+- **Xbox Live (Insignia)** — Choose **Start Core** to open the bundled
+  dashboard. Under **Xbox Live**, select **Register this console**, then
+  **Create an Insignia account** with the subscription code from
+  [Insignia](https://insignia.live). See
+  [dashboard setup](native/README.linux.md#the-libretro-core) and
+  [NAT and port forwarding](native/README.linux.md#insignia-nat).
 
 ## Troubleshooting
 

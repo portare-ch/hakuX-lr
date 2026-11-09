@@ -46,6 +46,11 @@ class AppPrefs(context: Context) {
     get() = sp.getBoolean(KEY_PREVIOUS_MIGRATED, false)
     set(value) = sp.edit { putBoolean(KEY_PREVIOUS_MIGRATED, value) }
 
+  /** Allow mods and cheats at game start. */
+  var cheats: Boolean
+    get() = sp.getBoolean(KEY_CHEATS, false)
+    set(value) = sp.edit { putBoolean(KEY_CHEATS, value) }
+
   /** Every frame presented at once, no vblank wait (read at game start). */
   var uncapped: Boolean
     get() = sp.getBoolean(NativeCoreActivity.PREF_UNCAP, false)
@@ -137,39 +142,24 @@ class AppPrefs(context: Context) {
     set(value) = sp.edit { putString(KEY_AV_PACK, value) }
 
   /**
-   * The console's network: off, lan (system link with consoles on this network), kai (XLink Kai) or
-   * insignia (the Internet through NAT: Xbox Live via Insignia).
+   * Enables Xbox Live and system link. Defaults to on and treats the legacy
+   * LAN, Kai and Insignia modes as on.
    */
-  var networkMode: String
-    get() = sp.getString(KEY_NETWORK, NET_OFF) ?: NET_OFF
-    set(value) = sp.edit { putString(KEY_NETWORK, value) }
+  var networkOn: Boolean
+    get() = (sp.getString(KEY_NETWORK, NET_ON) ?: NET_ON) != NET_OFF
+    set(value) = sp.edit { putString(KEY_NETWORK, if (value) NET_ON else NET_OFF) }
 
   /** LAN: consoles reached directly as well (another subnet, a VPN): "ip[:port], ...". */
   var lanPeers: String
     get() = sp.getString(KEY_LAN_PEERS, "") ?: ""
     set(value) = sp.edit { putString(KEY_LAN_PEERS, value) }
 
-  /** XLink Kai: the engine's address on this network, "ip[:port]". */
-  var kaiEngine: String
-    get() = sp.getString(KEY_KAI_ENGINE, "") ?: ""
-    set(value) = sp.edit { putString(KEY_KAI_ENGINE, value) }
-
   /** Insignia: the DNS server the console is given, "" Insignia's own (another: insigniaDNS on this network). */
   var insigniaDns: String
     get() = sp.getString(KEY_INSIGNIA_DNS, "") ?: ""
     set(value) = sp.edit { putString(KEY_INSIGNIA_DNS, value) }
 
-  /** Insignia's setup wizard: the user said the Setup Assistant registered this console. */
-  var insigniaRegistered: Boolean
-    get() = sp.getBoolean(KEY_INSIGNIA_REGISTERED, false)
-    set(value) = sp.edit { putBoolean(KEY_INSIGNIA_REGISTERED, value) }
-
-  /** Insignia's setup wizard: the Setup Assistant ISO the user chose (a document URI), "" none. */
-  var insigniaSetupUri: String
-    get() = sp.getString(KEY_INSIGNIA_SETUP_URI, "") ?: ""
-    set(value) = sp.edit { putString(KEY_INSIGNIA_SETUP_URI, value) }
-
-  /** Insignia's setup wizard started the Setup Assistant or the dashboard: the app opens it again after. */
+  /** Reopen the Insignia wizard when the dashboard exits. */
   var insigniaWizardResume: Boolean
     get() = sp.getBoolean(KEY_INSIGNIA_RESUME, false)
     set(value) = sp.edit { putBoolean(KEY_INSIGNIA_RESUME, value) }
@@ -233,6 +223,7 @@ class AppPrefs(context: Context) {
     private const val KEY_GAMES_FOLDER = "gamesFolderUri"
     private const val KEY_GAMES_FOLDERS = "gamesFolders"
     private const val KEY_SETUP_COMPLETE = "setup_complete"
+    private const val KEY_CHEATS = "cheats"
     private const val KEY_PREVIOUS_MIGRATED = "previous_version_migrated"
     private const val KEY_SHOW_FPS = "show_fps"
     private const val KEY_CONSOLE_TIMING = "console_timing"
@@ -257,15 +248,10 @@ class AppPrefs(context: Context) {
     const val AV_SVIDEO = "svideo"
     private const val KEY_NETWORK = "console_network"
     private const val KEY_LAN_PEERS = "network_lan_peers"
-    private const val KEY_KAI_ENGINE = "network_kai_engine"
     private const val KEY_INSIGNIA_DNS = "network_insignia_dns"
-    private const val KEY_INSIGNIA_REGISTERED = "insignia_registered"
-    private const val KEY_INSIGNIA_SETUP_URI = "insignia_setup_uri"
     private const val KEY_INSIGNIA_RESUME = "insignia_wizard_resume"
-    const val NET_OFF = "off"
-    const val NET_LAN = "lan"
-    const val NET_KAI = "kai"
-    const val NET_INSIGNIA = "insignia"
+    private const val NET_OFF = "off"
+    private const val NET_ON = "on"
     /** Insignia's DNS server (insignia.live/connect): the console's primary. */
     const val INSIGNIA_DNS = "46.101.64.175"
     private const val KEY_LANGUAGE = "console_language"

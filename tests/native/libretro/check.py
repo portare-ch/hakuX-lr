@@ -6,11 +6,13 @@ import argparse
 import os
 from pathlib import Path
 import re
+import shutil
 import socket
 import struct
 import subprocess
 import sys
 import tempfile
+import zlib
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'linux'))
 from check import disc, run  # noqa: E402  (the day-one fixtures)
@@ -87,6 +89,8 @@ def chd(path, image, hunk=4096, cd=False, lead=0):
 # Use a test NAT port and an unanswered loopback SSDP endpoint so tests
 # never change the real router's mappings.
 NAT_TEST = 'natport=43080 upnp=127.0.0.1:9'
+# Disable networking for tests that do not exercise it.
+OFF = 'hakux_network=disabled'
 
 
 def cycles(command, env, n, expect=None):
@@ -206,6 +210,7 @@ def main():
     # PortareOS's mode (HAKUX_LR_END_PROCESS) for the runs, whatever the build:
     # the stop's watchdog, and the way before M2 (HAKUX_LR_STOP=0).
     os.environ['HAKUX_LR_END_PROCESS'] = '1'
+    os.environ['HARNESS_OPTIONS'] = OFF
     old = dict(os.environ, HAKUX_LR_STOP='0')
     exports = dynamic_exports(args.core)
     stray = [n for n in exports if not n.startswith('retro_')]
@@ -271,6 +276,24 @@ def main():
              'relaunch: \\Device\\CdRom0\\default.xbe', 'guest executed HLT', 'ending the process'), old)
         if (root / 'saves' / 'relaunch.bin').exists():
             raise SystemExit('FAIL: the relaunch left its launch data page')
+        # Check D: after a direct title update and at both sides of the link limit.
+        part1 = root / 'saves' / 'hdd' / 'Partition1'
+        fit = '\\'.join(f'f{i}' + 'x' * 38 for i in range(3))           # 122 characters
+        long = '\\'.join(f'l{i}' + 'x' * 40 for i in range(6))          # 257 characters
+        for name, folder, markers, absent in (
+                ('update', 'TDATA\\ffff0001\\$u', ('relaunch: \\Device\\Harddisk0\\Partition1\\TDATA\\ffff0001\\$u'
+                                                  '\\default.xbe',), ('link \\??\\D: -> \\Device\\Harddisk0',)),
+                ('fit', fit, (f'link \\??\\D: -> \\Device\\Harddisk0\\Partition1\\{fit}\n',), ()),
+                ('long', long, ('link \\??\\D: not made: its target is too long (286 chars)',),
+                 ('link \\??\\D: -> \\Device\\Harddisk0',))):
+            disc(root / f'{name}.iso', RELAUNCH[:0x1000] + struct.pack('<II', 1, 0) +
+                 f'\\Device\\Harddisk0\\Partition1\\{folder};default.xbe'.encode(), imports=(49, 164))
+            host = part1.joinpath(*folder.split('\\'))
+            host.mkdir(parents=True, exist_ok=True)
+            (host / 'default.xbe').write_bytes(xbe_of(root / f'{name}.iso'))
+            run_without([args.harness, args.core, root / f'{name}.iso', 600, root / 'saves'],
+                        markers + ('guest executed HLT',), absent)
+            shutil.rmtree(part1 / folder.split('\\')[0])
         # The core options reach the console before it boots: the defaults,
         # with RetroArch in German (RETRO_LANGUAGE_GERMAN, XC_LANGUAGE 3),
         # then each set.
@@ -280,7 +303,7 @@ def main():
             ('options: render scale 2x, overscan cropped, screen normal, language 3 (auto), video region auto',
              'aspect 1.333',
              'ex: video flags 00400000, AV pack 0, AV region 00400100, language 3', 'guest executed HLT'), env)
-        env['HARNESS_OPTIONS'] = ('hakux_render_scale=1;hakux_screen_format=widescreen;hakux_language=french;'
+        env['HARNESS_OPTIONS'] = (f'{OFF};hakux_render_scale=1;hakux_screen_format=widescreen;hakux_language=french;'
                                   'hakux_video_region=ntsc-j')
         run([args.harness, args.core, root / 'settings.iso', 600, root / 'saves'], 0,
             ('options: render scale 1x, overscan cropped, screen widescreen, language 4 (french), video region ntsc-j, '
@@ -288,7 +311,7 @@ def main():
              'aspect 1.778', 'ex: video flags 00410000, AV pack 0, AV region 00400200, language 4',
              'guest executed HLT'), env)
         # A value the core doesn't know is its default.
-        env['HARNESS_OPTIONS'] = 'hakux_render_scale=9;hakux_video_region=pal;hakux_crop_overscan=disabled'
+        env['HARNESS_OPTIONS'] = f'{OFF};hakux_render_scale=9;hakux_video_region=pal;hakux_crop_overscan=disabled'
         run([args.harness, args.core, root / 'settings.iso', 600, root / 'saves'], 0,
             ('options: render scale 2x, overscan shown, screen normal, language 3 (auto), video region pal',
              'ex: video flags 00400000, AV pack 0, AV region 00800300, language 3'), env)
@@ -296,7 +319,44 @@ def main():
         # the crop, rumble and frame pacing don't. Rumble on asks RetroArch
         # for its interface, which the harness doesn't have.
         disc(root / 'spin.iso', b'\xeb\xfe')
-        env = dict(os.environ, HARNESS_OPTIONS_LATER='hakux_render_scale=3;hakux_video_region=pal;'
+        # A title that never presents produces no video callbacks.
+        run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
+            ('ran 30 frames: 0 video calls', '0 dupes, 30 without a frame'))
+        # Without a blocking present, the core paces normal calls.
+        # Fast-forward bypasses that wait.
+        def unpaced(throttle=None, calls=30, interval=None):
+            env = dict(os.environ, HARNESS_UNPACED='1')
+            if interval is not None:
+                env = dict(os.environ, HARNESS_INTERVAL_US=str(interval))
+            if throttle is not None:
+                env['HARNESS_THROTTLE'] = str(throttle)
+            r = subprocess.run([str(x) for x in (args.harness, args.core, root / 'spin.iso', calls, root / 'saves')],
+                               env=env, capture_output=True, text=True, timeout=60)
+            took = re.search(rf'ran {calls} frames: .* without a frame, \d+ audio frames in ([\d.]+) s', r.stdout)
+            if r.returncode or not took:
+                print(r.stdout[-4000:], r.stderr[-4000:])
+                raise SystemExit(f'FAIL: retro_run called back to back (throttle {throttle}): exit {r.returncode}')
+            return float(took.group(1))
+        period = 1001 / 60000
+        for name, throttle in (('no throttle state', None), ('unblocked', 6), ('vsync', 5)):
+            took = unpaced(throttle)
+            if took < 29 * period * 0.95:
+                raise SystemExit(f'FAIL: 30 retro_run calls without frames, back to back ({name}): {took} s')
+            print(f'PASS: 30 retro_run calls without frames, back to back ({name}), took {took} s')
+        took = unpaced(2)
+        if took > 10 * period:
+            raise SystemExit(f'FAIL: fast-forward held to the period: 30 calls took {took} s')
+        print(f'PASS: fast-forward not held: 30 calls took {took} s')
+        # Slightly early calls must still span 119 Xbox frame periods.
+        took = unpaced(6, calls=120, interval=16000)
+        if took < 119 * period * 0.997:
+            raise SystemExit(f'FAIL: 120 calls 16 ms apart ran ahead of the Xbox\'s rate: {took} s')
+        print(f'PASS: 120 calls 16 ms apart kept the Xbox\'s rate: {took} s')
+        # Repeat Frames sends a callback even before the first guest frame.
+        run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
+            ('ran 30 frames: 30 video calls', ' 0 without a frame'),
+            dict(os.environ, HARNESS_OPTIONS=f'{OFF};hakux_repeat_frames=enabled'))
+        env = dict(os.environ, HARNESS_OPTIONS_LATER=f'{OFF};hakux_render_scale=3;hakux_video_region=pal;'
                    'hakux_crop_overscan=disabled;hakux_rumble=enabled;hakux_frame_pace=2')
         run([args.harness, args.core, root / 'spin.iso', 60, root / 'saves'], 0,
             ('options: render scale 2x', 'frame pacing off', 'message: Render Scale, Video Region: restart the game to apply',
@@ -317,7 +377,7 @@ def main():
         # freed with the console at each stop.
         run_without([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'],
                     ('communicator off', 'ran 30 frames'), ('has a Communicator',))
-        voice = dict(os.environ, HARNESS_OPTIONS='hakux_communicator=enabled;hakux_mic_sensitivity=high')
+        voice = dict(os.environ, HARNESS_OPTIONS=f'{OFF};hakux_communicator=enabled;hakux_mic_sensitivity=high')
         run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
             ('communicator on (noise gate -46)', "ohci: player 1's controller has a Communicator",
              'communicator 1: noise gate -46', 'ran 30 frames'), voice)
@@ -329,6 +389,7 @@ def main():
             ('ports: 1 0 0 0', 'port 4: none', 'reset at frame 20', 'ohci: 1 controller(s) (players 1)',
              'ran 40 frames'),
             dict(vk, HARNESS_PORTS='1,0,0,0', HARNESS_RESET_AT='20'))
+        mods = dict(vk, HARNESS_OPTIONS=f'{OFF};hakux_cheats=enabled')
         # RetroArch's cheats, applied as the game loads, before the guest
         # boots (context_reset): the title halts once the byte is there and
         # spins without. A code the core can't read is logged once, though
@@ -339,16 +400,68 @@ def main():
              b'\x75\xf7'                       # jne back
              b'\xf4')                          # hlt
         run([args.harness, args.core, root / 'cheat.iso', 600, root / 'saves'], 0,
-            ('cheats: 1 applied', 'guest executed HLT'), dict(vk, HARNESS_CHEATS='w8 0x10E00 0x5A'))
+            ('cheats: 1 applied', 'guest executed HLT'), dict(mods, HARNESS_CHEATS='w8 0x10E00 0x5A'))
+        # Verify that the default ignores cheats and a successful cheat write blocks Xbox Live.
+        run_without([args.harness, args.core, root / 'cheat.iso', 120, root / 'saves'],
+                    ('Cheats are off: RetroArch', 'message: Cheats are off in the core options',
+                     'ran 120 frames'),
+                    ('guest executed HLT', 'online:'), dict(vk, HARNESS_CHEATS='w8 0x10E00 0x5A'))
+        run([args.harness, args.core, root / 'cheat.iso', 600, root / 'saves'], 0,
+            ('online: a cheat changed the game: Xbox Live (the Internet) is off until it boots again',
+             'nat: the Internet is off: only ARP and DHCP pass',
+             'message: Xbox Live is off until the game restarts: a cheat changed it', 'guest executed HLT'),
+            dict(vk, HARNESS_OPTIONS='hakux_network=enabled;hakux_cheats=enabled', NC_NET=NAT_TEST,
+                 HARNESS_CHEATS='w8 0x10E00 0x5A'))
+        run_without([args.harness, args.core, root / 'cheat.iso', 600, root / 'saves'],
+                    ('online: a cheat changed the game', 'guest executed HLT'), ('message: Xbox Live is off',),
+                    dict(mods, HARNESS_CHEATS='w8 0x10E00 0x5A'))
         run_without([args.harness, args.core, root / 'cheat.iso', 60, root / 'saves'], ('ran 60 frames',),
                     ('guest executed HLT',), vk)
         run_counts([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'],
                    {'frame 10: cheats: 2 applied': 1, '"w9 0x100 1": code 1: unknown code; it stays off': 1},
-                   dict(vk, HARNESS_CHEATS='w8 0x100 1|w9 0x100 1', HARNESS_CHEATS_AT='10'))
+                   dict(mods, HARNESS_CHEATS='w8 0x100 1|w9 0x100 1', HARNESS_CHEATS_AT='10'))
         run_counts([args.harness, args.core, root / 'spin.iso', 50, root / 'saves'],
                    {'reset at frame 20': 1, 'reset: the core stopped in': 1,
                     "the frontend's cheat 0: an address isn't mapped (yet)": 2},
-                   dict(vk, HARNESS_CHEATS='w8 0x100 1', HARNESS_RESET_AT='20'))
+                   dict(mods, HARNESS_CHEATS='w8 0x100 1', HARNESS_RESET_AT='20'))
+        # Both the XBE patch and memory cheat must apply for the title to halt.
+        disc(root / 'xbepatch.iso',
+             b'\x80\x3d\x00\x0e\x01\x00\x5a'   # cmp byte [0x10e00], 0x5a
+             b'\x75\xf7'                       # jne back
+             b'\xeb\xfe')                      # jmp $ (at file offset 0x1009)
+        xbe = xbe_of(root / 'xbepatch.iso')
+
+        def patch(crc=zlib.crc32(xbe), size=len(xbe), runs='+00001009:F4F4'):
+            return f'xbe-patch-v1 {crc:08X}:{size:08X}{runs}'
+        poke = 'w8 0x10E00 0x5A'
+        xp = [args.harness, args.core, root / 'xbepatch.iso', 600, root / 'saves']
+        run(xp, 0, ('XBE patch (cheat 1): 1 runs, 2 bytes over default.xbe', 'guest executed HLT'),
+            dict(mods, HARNESS_CHEATS=f'{poke}|{patch()}'))
+        xp60 = xp[:3] + [60] + xp[4:]
+        run_without(xp60, ('ran 60 frames',), ('guest executed HLT',), dict(mods, HARNESS_CHEATS=poke))
+        run_without(xp60, ('XBE patch (cheat 0)', 'ran 60 frames'), ('guest executed HLT',),
+                    dict(mods, HARNESS_CHEATS=patch()))
+        # Mismatched, malformed or conflicting patches leave the XBE unchanged.
+        for codes, marker in ((patch(crc=zlib.crc32(xbe) ^ 1), 'none for default.xbe'),
+                              (patch(size=len(xbe) + 0x1000), 'none for default.xbe'),
+                              (patch(runs='+00000002:F4F4'), 'below offset 4'),
+                              (patch(runs='+00001009:F4+00001009:F4'), 'not after run 1'),
+                              (f'{patch()}|{patch(runs="+00001009:F4")}', 'cheats 1 and 2 both patch default.xbe')):
+            run_without(xp60, (marker, 'ran 60 frames'), ('guest executed HLT', 'XBE patch (cheat'),
+                        dict(mods, HARNESS_CHEATS=f'{poke}|{codes}'))
+        # Enabling a patch after boot requires a restart and shows a reminder.
+        late = dict(mods, HARNESS_CHEATS_LATE='1', HARNESS_READY='stage S0 xbe loaded')
+        run_counts(xp,
+                   {'XBE patches changed since the boot': 1, 'XBE patch (cheat 1)': 1, 'guest executed HLT': 1},
+                   dict(late, HARNESS_CHEATS=f'{poke}|{patch()}', HARNESS_CHEATS_AT='r1', HARNESS_RESET_AT='m5'))
+        # Changing away from the booted set a second time must prompt again.
+        run_counts(xp[:3] + [300] + xp[4:], {'XBE patches changed since the boot': 2, 'cheats off': 1},
+                   dict(late, HARNESS_CHEATS=patch(), HARNESS_CHEATS_AT='r1,m10', HARNESS_CHEATS_OFF_AT='m5'))
+        # Renumbering cheats must not change the patch-set hash.
+        run_counts(xp[:3] + [300] + xp[4:],
+                   {'XBE patches changed since the boot': 0, 'XBE patch (cheat 1)': 1, 'cheats: 1 applied': 1},
+                   dict(mods, HARNESS_CHEATS=f'w8 0x10E04 1|{patch()}', HARNESS_CHEATS2=patch(),
+                        HARNESS_READY='stage S0 xbe loaded', HARNESS_CHEATS2_AT='r5'))
         # M2: the core stops in the process and boots again: 100 games and 20
         # from a CHD, a CPU in a loop that never enters the kernel, the
         # renderer on a device of its own and on the frontend's, a reset, a
@@ -364,8 +477,8 @@ def main():
         # failed backend starts and failed boots must release their resources.
         for network, marker in (
                 ('net=lan lanport=43075 lanbcast=127.0.0.1', 'lan: started'),
-                ('net=kai kai=127.0.0.1:43076', 'kai: started'),
-                (f'net=nat {NAT_TEST}', 'nat: UDP 43080 forwarded')):
+                (f'net=nat {NAT_TEST}', 'nat: DNS 46.101.64.175'),
+                (f'net=on lanport=43078 lanbcast=127.0.0.1 {NAT_TEST}', 'all: started')):
             cycles([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'],
                    dict(os.environ, NC_NET=network), 5, marker)
         # a backend that fails to start (LAN's port taken, without
@@ -377,44 +490,45 @@ def main():
         cycles([args.harness, args.core, root / 'halt.iso', 60, root / 'saves'],
                dict(os.environ, NC_NET='net=lan lanport=43075 lanbcast=127.0.0.1', NC_BOOT_FAIL_AT='disc'),
                5, 'boot: failing after disc')
-        # The Network option: off by default (no cable); LAN on the local
-        # network's broadcast, with the consoles lan-peers.txt in the save
-        # directory names (comments, commas, spaces and lines).
+        # The Network option, the console's cable: on by default. On, the
+        # NAT and the LAN behind one switch (native/net/all.c): Insignia's
+        # DNS server, or the first address insignia-dns.txt in the save
+        # directory names (an insigniaDNS server; NAT gives the console
+        # one), never a word that isn't one; the LAN on the local network's
+        # broadcast, with the consoles lan-peers.txt names (comments, commas,
+        # spaces and lines). The NAT's stack and port forward start with the
+        # console's first frame, which spin.iso never sends (nat-smoke does).
+        run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
+            ('network on', 'network: on (Xbox Live through Insignia and system link)', 'ran 30 frames'),
+            dict(os.environ, HARNESS_OPTIONS='', NC_NET=NAT_TEST))
         run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
             ('network off', 'network off: the NIC has no link', 'console timing on', 'ran 30 frames'))
+        insignia = dict(os.environ, HARNESS_OPTIONS='hakux_network=enabled', NC_NET=NAT_TEST)
         peers = root / 'saves' / 'lan-peers.txt'
         peers.write_text('# other consoles\n127.0.0.1:43077, 10.0.0.5\n\n10.0.0.6  # over a VPN\n')
         run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
-            ('network lan', 'consoles named: 127.0.0.1:43077,10.0.0.5,10.0.0.6', 'lan: UDP port 3075',
-             '3 peers named', 'lan: started', 'ran 30 frames'),
-            dict(os.environ, HARNESS_OPTIONS='hakux_network=lan'))
-        peers.unlink()
-        # Xbox Live (Insignia): NAT with Insignia's DNS server, or the first
-        # address insignia-dns.txt in the save directory names (an
-        # insigniaDNS server; NAT gives the console one), never a word that
-        # isn't one
-        insignia = dict(os.environ, HARNESS_OPTIONS='hakux_network=insignia', NC_NET=NAT_TEST)
-        run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
-            ('network insignia', 'Xbox Live through Insignia (NAT), DNS 46.101.64.175',
-             'nat: libslirp 4.7.0, 10.0.2.0/24, DNS 46.101.64.175', "nat: UDP 43080 forwarded to the console's 3074",
-             'nat: started', 'ran 30 frames'),
+            ('network on', 'network: on (Xbox Live through Insignia and system link), DNS 46.101.64.175',
+             "nat: DNS 46.101.64.175, the stack starts with the console's first frame",
+             'consoles named: 127.0.0.1:43077,10.0.0.5,10.0.0.6', 'lan: UDP port 3075', '3 peers named',
+             'all: started', 'ran 30 frames'),
             insignia)
+        peers.unlink()
         dns = root / 'saves' / 'insignia-dns.txt'
         dns.write_text('# insigniaDNS at home\n192.168.1.20, 192.168.1.21\n192.168.1.22\n')
         run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
-            ('DNS 192.168.1.20 (insignia-dns.txt)', 'nat: libslirp 4.7.0, 10.0.2.0/24, DNS 192.168.1.20',
-             'nat: started', 'ran 30 frames'),
+            ('DNS 192.168.1.20 (insignia-dns.txt)', 'nat: DNS 192.168.1.20',
+             'all: started', 'ran 30 frames'),
             insignia)
         dns.write_text('insignia.example\n')
         run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
-            ('names no IPv4 address (insignia.example)', 'DNS 46.101.64.175', 'nat: started', 'ran 30 frames'),
+            ('names no IPv4 address (insignia.example)', 'DNS 46.101.64.175', 'all: started', 'ran 30 frames'),
             insignia)
         dns.unlink()
         # Log only Insignia accounts from the config area, as the app does.
-        # If none exist, tell game users where to create one.
-        run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
-            ('network: no Insignia account on this console', 'message: No Insignia account on this console yet',
-             'ran 30 frames'), insignia)
+        # None is only logged: with the cable in by default, games don't nag.
+        run_without([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'],
+                    ('network: no Insignia account on this console', 'ran 30 frames'),
+                    ('message: No Insignia account',), insignia)
         config = root / 'saves' / 'hdd' / 'raw-partition0.bin'
         before = config.read_bytes() if config.exists() else None
         area = bytearray((before or b'').ljust(16 * 512, b'\0'))
@@ -429,21 +543,34 @@ def main():
             config.unlink()
         else:
             config.write_bytes(before)
-        # Start Core boots the dashboard from C: with no disc. If missing,
-        # refuse to load and show where to install its files.
+        # Start Core boots the bundle without a disc. Another dashboard is
+        # replaced under its own name; NC_DASH_KEEP=1, for checks that bring
+        # their own XBEs, leaves C: as it is.
         c_drive = root / 'saves' / 'hdd' / 'Partition2'
-        run([args.harness, args.core, '-', 60, root / 'saves'], 3,
-            ("The Xbox dashboard isn't installed: copy its files (xboxdash.xbe and its folders) to", 'load: refused'))
-        (c_drive / 'XBOXDASH.XBE').write_bytes(xbe_of(root / 'halt.iso'))     # case-insensitive lookup
+        shutil.rmtree(c_drive, ignore_errors=True)
+        run([args.harness, args.core, '-', 60, root / 'saves'], 0,
+            ("dash: installed hakuX-lr's dashboard as", 'loaded the dashboard (no content)', 'ran 60 frames',
+             ', 0 dupes,'))
+        if not (c_drive / 'xboxdash.xbe').is_file() or not (c_drive / 'xodash' / 'xonlinedash.xbe').is_file():
+            raise SystemExit('FAIL: Start Core left no xboxdash.xbe or xodash\\xonlinedash.xbe on C:')
+        shutil.rmtree(c_drive)
+        c_drive.mkdir()
+        (c_drive / 'XBOXDASH.XBE').write_bytes(xbe_of(root / 'halt.iso'))     # Check case-insensitive lookup.
+        keep = dict(os.environ, NC_DASH_KEEP='1')
         run([args.harness, args.core, '-', 600, root / 'saves'], 0,
-            ('loaded the dashboard (no content)', 'message: Xbox Live in the dashboard needs Network set to Xbox Live '
-             '(Insignia)', 'guest executed HLT', 'the core asked to shut down', 'unload: the core stopped in'))
-        (c_drive / 'XBOXDASH.XBE').unlink()
+            ('loaded the dashboard (no content)', 'message: Xbox Live in the dashboard needs Network on',
+             'guest executed HLT', 'the core asked to shut down', 'unload: the core stopped in'), keep)
+        run([args.harness, args.core, '-', 60, root / 'saves'], 0,
+            ("dash: replaced another dashboard with hakuX-lr's at", 'Partition2/XBOXDASH.XBE',
+             'loaded the dashboard (no content)', 'ran 60 frames'))
+        if (c_drive / 'xboxdash.xbe').exists() or \
+                (c_drive / 'XBOXDASH.XBE').read_bytes() != (c_drive / 'xodash' / 'xonlinedash.xbe').read_bytes():
+            raise SystemExit("FAIL: another XBOXDASH.XBE wasn't replaced by the bundle under its own name")
+        shutil.rmtree(c_drive)
         # Dashboard users need no prompt to create an Insignia account.
-        (c_drive / 'xboxdash.xbe').write_bytes(xbe_of(root / 'spin.iso'))
         run_without([args.harness, args.core, '-', 30, root / 'saves'],
-                    ('network: Xbox Live through Insignia', 'network: no Insignia account on this console',
-                     'ran 30 frames'), ('No Insignia account', 'needs Network set'), insignia)
+                    ('network: on (Xbox Live through Insignia', 'network: no Insignia account on this console',
+                     'ran 30 frames'), ('No Insignia account', 'needs Network on'), insignia)
         # Reset, video driver rebuild and repeated loads reboot the dashboard
         # without opening a disc.
         vk = dict(os.environ, HARNESS_VULKAN='1')
@@ -454,7 +581,7 @@ def main():
              'again', 'ran 60 frames'), dict(vk, HARNESS_REINIT_AT='20'))
         cycles([args.harness, args.core, '-', 30, root / 'saves'], vk, 5, 'loaded the dashboard (no content)')
         # Switching between a game and the dashboard boots the correct XBE.
-        # The game halts; the dashboard spins.
+        # The game halts; the dashboard runs.
         run([args.harness, args.core, '-', 300, root / 'saves'], 0,
             ('loaded the dashboard (no content)', 'then: ', 'guest executed HLT', 'the core asked to shut down'),
             dict(os.environ, HARNESS_THEN=str(root / 'halt.iso')))
@@ -474,10 +601,10 @@ def main():
                 'relaunch into \\Device\\Harddisk0\\Partition2\\xboxdash.xbe',
                 'relaunch: \\Device\\Harddisk0\\Partition2\\xboxdash.xbe', 'guest executed HLT')
         run([args.harness, args.core, '-', 600, root / 'saves'], 0,
-            hops + ("relaunch: the dashboard boots again in RetroArch's process", 'unload: the core stopped in'))
+            hops + ("relaunch: the dashboard boots again in RetroArch's process", 'unload: the core stopped in'), keep)
         # Restart on -L <core>, using environment variables for harness frames
         # and saves.
-        restart = dict(old, HARNESS_FRAMES='600', HARNESS_SAVES=str(root / 'saves'))
+        restart = dict(old, HARNESS_FRAMES='600', HARNESS_SAVES=str(root / 'saves'), NC_DASH_KEEP='1')
         run([args.harness, args.core, '-', 600, root / 'saves'], 0,
             hops + ('relaunch: starting RetroArch again for the dashboard', 'ending the process'), restart)
         # Both menu-loaded and -L/--menu starts must restart on -L <core>,
@@ -518,30 +645,30 @@ def main():
         sinc = 'resampler: sinc (32-tap Kaiser-windowed, ' + ('NEON)' if os.uname().machine == 'aarch64' else '')
         run_without([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'],
                     ('resampler sinc', sinc, 'ran 30 frames'), ('not in this build',),
-                    dict(os.environ, HARNESS_OPTIONS='hakux_audio_resampler=sinc'))
+                    dict(os.environ, HARNESS_OPTIONS=f'{OFF};hakux_audio_resampler=sinc'))
         run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
             ('resampler linear', 'resampler: linear', 'ran 30 frames'),
-            dict(os.environ, HARNESS_OPTIONS='hakux_audio_resampler=linear'))
+            dict(os.environ, HARNESS_OPTIONS=f'{OFF};hakux_audio_resampler=linear'))
         run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
             (f'audio processing {args.audio_default}',
              full_processing if args.audio_default == 'dsp' else fast_processing, 'ran 30 frames'))
         run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
             ('audio processing fast', fast_processing, 'ran 30 frames'),
-            dict(os.environ, HARNESS_OPTIONS='hakux_audio_processing=fast'))
+            dict(os.environ, HARNESS_OPTIONS=f'{OFF};hakux_audio_processing=fast'))
         run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
             ('audio processing dsp', 'processing: full DSP (GP interpreter, EP interpreter)', 'ran 30 frames'),
-            dict(os.environ, HARNESS_OPTIONS='hakux_audio_processing=dsp', NC_APU_DSP_JIT='0'))
+            dict(os.environ, HARNESS_OPTIONS=f'{OFF};hakux_audio_processing=dsp', NC_APU_DSP_JIT='0'))
         run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
             ('audio processing fast', full_processing, 'ran 30 frames'),
-            dict(os.environ, HARNESS_OPTIONS='hakux_audio_processing=fast', NC_APU_DSP='1'))
+            dict(os.environ, HARNESS_OPTIONS=f'{OFF};hakux_audio_processing=fast', NC_APU_DSP='1'))
         run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
             (f'audio processing {args.audio_default}', fast_processing, 'ran 30 frames'),
             dict(os.environ, NC_APU_DSP='0'))
         run([args.harness, args.core, root / 'spin.iso', 60, root / 'saves'], 0,
             (full_processing, fast_processing,
              'reset at frame 40', 'ran 60 frames'),
-            dict(os.environ, HARNESS_OPTIONS='hakux_audio_processing=dsp',
-                 HARNESS_OPTIONS_LATER='hakux_audio_processing=fast', HARNESS_RESET_AT='40'))
+            dict(os.environ, HARNESS_OPTIONS=f'{OFF};hakux_audio_processing=dsp',
+                 HARNESS_OPTIONS_LATER=f'{OFF};hakux_audio_processing=fast', HARNESS_RESET_AT='40'))
         run([args.harness, args.core, root / 'spin.iso', 60, root / 'saves'], 0,
             ('reset at frame 20', 'reset: the core stopped in', 'ran 60 frames',
              'RetroArch destroyed the context: the core stopped in', 'stop: the front end stopped the console',

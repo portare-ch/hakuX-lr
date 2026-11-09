@@ -8,24 +8,30 @@ if(ANDROID OR NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR
 endif()
 
 find_program(NC_CARGO cargo REQUIRED)
-set(NC_DSP_JIT_SOURCE "${NC_DEPS}/dsp56300")
-if(NOT EXISTS "${NC_DSP_JIT_SOURCE}/Cargo.lock")
+set(NC_DSP_JIT_PIN "${NC_DEPS}/dsp56300")
+if(NOT EXISTS "${NC_DSP_JIT_PIN}/Cargo.lock")
   message(FATAL_ERROR "Missing pinned dsp56300 sources; run tools/native/linux-deps.py")
 endif()
 set(NC_DSP_JIT_BUILD "${CMAKE_BINARY_DIR}/dsp-jit")
+# Patch a build-tree copy without modifying the pinned dependency.
+set(NC_DSP_JIT_SOURCE "${NC_DSP_JIT_BUILD}/src")
+file(GLOB NC_DSP_JIT_PATCHES CONFIGURE_DEPENDS "${NC_REPO}/tools/native/patches/dsp56300/*.patch")
+list(SORT NC_DSP_JIT_PATCHES)
 set(NC_DSP_JIT_LIBRARY "${NC_DSP_JIT_BUILD}/release/libdsp56300_emu_ffi.a")
 set(NC_DSP_JIT_HEADER "${NC_DSP_JIT_BUILD}/include/dsp56300.h")
 set(NC_DSP_JIT_STAMP "${NC_DSP_JIT_BUILD}/built.stamp")
 file(MAKE_DIRECTORY "${NC_DSP_JIT_BUILD}/include")
 file(GLOB_RECURSE NC_DSP_JIT_INPUTS CONFIGURE_DEPENDS
-     "${NC_DSP_JIT_SOURCE}/crates/*.rs"
-     "${NC_DSP_JIT_SOURCE}/crates/*.toml"
-     "${NC_DSP_JIT_SOURCE}/crates/*.c"
-     "${NC_DSP_JIT_SOURCE}/crates/*.h")
+     "${NC_DSP_JIT_PIN}/crates/*.rs"
+     "${NC_DSP_JIT_PIN}/crates/*.toml"
+     "${NC_DSP_JIT_PIN}/crates/*.c"
+     "${NC_DSP_JIT_PIN}/crates/*.h")
 
 add_custom_command(
   OUTPUT "${NC_DSP_JIT_STAMP}"
   BYPRODUCTS "${NC_DSP_JIT_LIBRARY}" "${NC_DSP_JIT_HEADER}"
+  COMMAND python3 "${NC_REPO}/tools/native/dsp-jit-source.py"
+          "${NC_DSP_JIT_PIN}" "${NC_DSP_JIT_SOURCE}" ${NC_DSP_JIT_PATCHES}
   COMMAND "${CMAKE_COMMAND}" -E env "RUSTFLAGS=$ENV{RUSTFLAGS} -C relocation-model=pic"
           "${NC_CARGO}" build --release --locked -p dsp56300-emu-ffi
           --manifest-path "${NC_DSP_JIT_SOURCE}/Cargo.toml"
@@ -35,8 +41,9 @@ add_custom_command(
   COMMAND python3 "${NC_REPO}/tools/native/dsp-jit-licenses.py"
           "${NC_DSP_JIT_SOURCE}" "${NC_DSP_JIT_BUILD}/licenses" --cargo "${NC_CARGO}"
   COMMAND "${CMAKE_COMMAND}" -E touch "${NC_DSP_JIT_STAMP}"
-  DEPENDS "${NC_DSP_JIT_SOURCE}/Cargo.toml" "${NC_DSP_JIT_SOURCE}/Cargo.lock"
-          "${NC_DSP_JIT_SOURCE}/rust-toolchain.toml" ${NC_DSP_JIT_INPUTS}
+  DEPENDS "${NC_DSP_JIT_PIN}/Cargo.toml" "${NC_DSP_JIT_PIN}/Cargo.lock"
+          "${NC_DSP_JIT_PIN}/rust-toolchain.toml" ${NC_DSP_JIT_INPUTS}
+          ${NC_DSP_JIT_PATCHES} "${NC_REPO}/tools/native/dsp-jit-source.py"
           "${NC_REPO}/tools/native/dsp-jit-licenses.py"
   COMMENT "Building the pinned DSP56300 JIT"
   VERBATIM

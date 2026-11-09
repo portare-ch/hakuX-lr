@@ -65,6 +65,18 @@ target_include_directories(xdvdfs-test PRIVATE "${NC_REPO}")
 target_link_libraries(xdvdfs-test PRIVATE hakux_native Threads::Threads)
 add_test(NAME xdvdfs-test COMMAND xdvdfs-test)
 set_tests_properties(xdvdfs-test PROPERTIES TIMEOUT 10)
+# Test contiguous allocation boundaries and lookup limits.
+add_executable(contig-run-test "${NC_REPO}/tests/native/linux/contig_run.c" "${NC_REPO}/native/kernel/contig_run.c")
+target_include_directories(contig-run-test PRIVATE "${NC_REPO}")
+add_test(NAME contig-run-test COMMAND contig-run-test)
+set_tests_properties(contig-run-test PROPERTIES TIMEOUT 10)
+
+add_executable(dash-install-test "${NC_REPO}/tests/native/linux/dash_install.c" "${NC_REPO}/native/core/dash.c"
+  "${NC_REPO}/native/core/dash_blob.c" "${NC_REPO}/native/core/log.c")
+target_include_directories(dash-install-test PRIVATE "${NC_REPO}")
+add_test(NAME dash-install-test COMMAND dash-install-test)
+set_tests_properties(dash-install-test PROPERTIES TIMEOUT 10)
+
 # Alias-table overflow must preserve page ownership and protection.
 add_executable(vm-alias-test "${NC_REPO}/tests/native/linux/vm_alias.c")
 target_include_directories(vm-alias-test PRIVATE "${NC_REPO}")
@@ -76,6 +88,11 @@ add_executable(nat-smoke "${NC_REPO}/tests/native/linux/nat.c")
 target_link_libraries(nat-smoke PRIVATE hakux_native Threads::Threads)
 add_test(NAME nat-smoke COMMAND nat-smoke)
 set_tests_properties(nat-smoke PROPERTIES TIMEOUT 60)
+# LAN duplicate filtering and combined-backend cleanup.
+add_executable(lan-smoke "${NC_REPO}/tests/native/linux/lan.c")
+target_link_libraries(lan-smoke PRIVATE hakux_native Threads::Threads)
+add_test(NAME lan-smoke COMMAND lan-smoke)
+set_tests_properties(lan-smoke PROPERTIES TIMEOUT 30)
 # The USB stack driven as the guest's would: enumeration, input, rumble, and
 # controllers plugged in and pulled out.
 add_executable(usb-smoke "${NC_REPO}/tests/native/usb/usb_test.c" "${NC_REPO}/native/dev/usb.c"
@@ -86,6 +103,12 @@ target_link_libraries(usb-smoke PRIVATE Threads::Threads m)
 add_test(NAME usb-smoke COMMAND usb-smoke)
 set_tests_properties(usb-smoke PROPERTIES TIMEOUT 10)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+# Test the XBE patch converter (IPS/BPS cases require Floating IPS).
+add_test(NAME xbe-to-cht COMMAND "${Python3_EXECUTABLE}" "${NC_REPO}/tools/mods/test_xbe_to_cht.py")
+set_tests_properties(xbe-to-cht PROPERTIES TIMEOUT 30)
+# Convert Android-format mods to RetroArch cheat files.
+add_test(NAME mod-to-cht COMMAND "${Python3_EXECUTABLE}" "${NC_REPO}/tools/mods/test_mod_to_cht.py")
+set_tests_properties(mod-to-cht PROPERTIES TIMEOUT 30)
 if(NC_GUEST_TESTS)
   add_test(NAME linux-boundaries
            COMMAND "${Python3_EXECUTABLE}" "${NC_REPO}/tests/native/linux/check.py" "$<TARGET_FILE_DIR:xboxrun>")
@@ -106,6 +129,10 @@ if(NC_GUEST_TESTS)
            COMMAND "${Python3_EXECUTABLE}" "${NC_REPO}/tests/native/linux/kernel_boot_mem.py" "$<TARGET_FILE_DIR:xboxrun>"
                    "${CMAKE_C_COMPILER}")
   set_tests_properties(kernel-boot-mem PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
+  add_test(NAME kernel-smbus
+           COMMAND "${Python3_EXECUTABLE}" "${NC_REPO}/tests/native/linux/kernel_smbus.py" "$<TARGET_FILE_DIR:xboxrun>"
+                   "${CMAKE_C_COMPILER}")
+  set_tests_properties(kernel-smbus PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
 endif()
 if(TARGET hakux_libretro)
   # The APU made again in one process (a relaunch), its EP's samples through
@@ -141,6 +168,6 @@ if(TARGET hakux_libretro)
              COMMAND "${Python3_EXECUTABLE}" "${NC_REPO}/tests/native/libretro/check.py"
                      "$<TARGET_FILE:libretro-harness>" "$<TARGET_FILE:hakux_libretro>"
                      --audio-default "$<IF:$<BOOL:${HAKUX_DSP_JIT}>,dsp,fast>")
-    set_tests_properties(libretro-smoke PROPERTIES TIMEOUT 120)
+    set_tests_properties(libretro-smoke PROPERTIES TIMEOUT 180)
   endif()
 endif()

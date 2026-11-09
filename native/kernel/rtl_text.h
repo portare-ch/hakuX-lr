@@ -79,6 +79,11 @@ uint32_t nc_rtl_integer_to_char(uint32_t value, uint32_t base, uint32_t length, 
  * dst->len is set even when BUFFER_OVERFLOW (no room for both). */
 uint32_t nc_rtl_integer_to_unicode(uint32_t value, uint32_t base, NcRtlStr *dst);
 
+/* Case-insensitive directory mask matching with FindFirstFile dot rules.
+ * '?' matches one character; '*' matches zero or more.
+ * "*.*" matches all names, and "*." matches names without extensions. */
+bool nc_rtl_name_match(const char *mask, const char *name);
+
 /* RtlMapGenericMask: GENERIC_READ, _WRITE, _EXECUTE and _ALL replaced by
  * map's four masks. */
 uint32_t nc_rtl_map_generic(uint32_t mask, const uint32_t map[4]);

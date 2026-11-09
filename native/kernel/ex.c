@@ -14,6 +14,7 @@
 #include "native/kernel/xc_crypto.h"
 #include "native/net/net.h"
 
+#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -140,6 +141,10 @@ static const NvSetting k_nv[] = {
 
 static uint8_t g_eeprom[EEPROM_SIZE];
 static bool g_eeprom_ready;
+static bool g_eeprom_dirty;             /* pending SMBus writes */
+static uint8_t g_stored[EEPROM_SIZE];   /* last contents of eeprom.bin */
+static bool g_stored_known;
+static bool g_keep_file;                /* preserve an invalid existing file */
 
 /* The app's video settings (nc_kernel_set_video). */
 static int64_t g_video_flags = -1;
@@ -206,6 +211,8 @@ static const uint32_t k_eeprom_keys[][2][5] = {
 };
 static void eeprom_store(void);
 static uint8_t g_sec[0x30];             /* the section decrypted */
+static uint8_t g_sec_sealed[0x1C];      /* last sealed plaintext, 0x14–0x2F */
+static bool g_sec_raw;                  /* preserve raw SMBus changes */
 static bool g_sec_plain;                /* kept in the clear (an image from before) */
 static unsigned g_sec_key;              /* the k_eeprom_keys entry it's under */
 
@@ -259,10 +266,13 @@ static bool sec_decrypt(void)
     return false;
 }
 
+/* Update checksums. Re-encrypt only when the plaintext changes, and never
+ * overwrite encrypted bytes modified through SMBus. */
 static void eeprom_seal(void)
 {
-    if (!g_sec_plain) {
+    if (!g_sec_plain && !g_sec_raw && memcmp(g_sec_sealed, g_sec + 0x14, sizeof(g_sec_sealed))) {
         sec_encrypt();
+        memcpy(g_sec_sealed, g_sec + 0x14, sizeof(g_sec_sealed));
     }
     nc_wr32(g_eeprom + 0x30, eeprom_checksum(g_eeprom + 0x34, 0x2C));
     nc_wr32(g_eeprom + 0x60, eeprom_checksum(g_eeprom + 0x64, 0x5C));
@@ -273,9 +283,7 @@ static void eeprom_path(char *p, size_t len)
     snprintf(p, len, "%s/eeprom.bin", nc_io_hdd_root());
 }
 
-/* The HD key every console had before they got identities of their own
- * (the bytes at 0x36 of the image then): the saves locked to the console,
- * and the ones the app re-signs for it before its first boot, use it. */
+/* Older installs and Android imports made before first boot use this key. */
 static const uint8_t k_legacy_hd_key[16] = {'0', '0', '0', '0', '0', '0', '0', '0', '0', '1',
                                             0x00, 0x50, 0xF2, 0x00, 0x00, 0x01};
 
@@ -317,9 +325,35 @@ static void eeprom_reidentify(void)
     eeprom_store();
 }
 
-/* A new console's EEPROM: English, stereo, no parental limits, the region
- * of the first title it runs, an identity of its own but the HD key all
- * have. */
+/* Check E: for saves in UDATA or downloaded content in TDATA. */
+static bool data_on_disk(void)
+{
+    char p[330];
+    snprintf(p, sizeof(p), "%s/Partition1", nc_io_hdd_root());
+    DIR *d = opendir(p);
+    bool found = false;
+    for (struct dirent *e; d && !found && (e = readdir(d));) {
+        if (strcasecmp(e->d_name, "UDATA") == 0 || strcasecmp(e->d_name, "TDATA") == 0) {
+            char u[600];
+            snprintf(u, sizeof(u), "%s/%s", p, e->d_name);
+            DIR *ud = opendir(u);
+            for (struct dirent *t; ud && !found && (t = readdir(ud));) {
+                found = strcmp(t->d_name, ".") && strcmp(t->d_name, "..");
+            }
+            if (ud) {
+                closedir(ud);
+            }
+        }
+    }
+    if (d) {
+        closedir(d);
+    }
+    return found;
+}
+
+/* Create an EEPROM with the first title's region and a random HDD key.
+ * Use the legacy key if E: already contains title data or a damaged EEPROM
+ * prevents the core from persisting a new key. */
 static void eeprom_create(NcKernel *k)
 {
     const bool pal = k->game_region == 4;
@@ -329,7 +363,20 @@ static void eeprom_create(NcKernel *k)
     nc_wr32(g_eeprom + 0x58, pal ? 0x00800300u : 0x00400100u); /* PAL-I / NTSC-M */
     nc_wr32(g_eeprom + 0x90, 1);                                 /* English */
     nc_wr32(g_eeprom + 0xBC, pal ? 2 : 1);                       /* DVD region */
-    eeprom_identity(k_legacy_hd_key);
+    static const uint8_t zero[16];
+    uint8_t hd_key[16];
+    const bool legacy = g_keep_file || data_on_disk();
+    if (legacy) {
+        memcpy(hd_key, k_legacy_hd_key, sizeof(hd_key));
+    } else {
+        do {
+            arc4random_buf(hd_key, sizeof(hd_key));
+        } while (!memcmp(hd_key, zero, sizeof(zero)));
+    }
+    eeprom_identity(hd_key);
+    nc_log("hakuX-native", "ex: the console's HD key: %s",
+           !legacy ? "a random one of its own" : g_keep_file ? "the old shared one (eeprom.bin can't be kept)"
+                                                           : "the old shared one, which the data on E: uses");
 }
 
 /* An image from before kept everyone's identity: serial 000000000001, MAC
@@ -363,9 +410,12 @@ static void eeprom_renew(void)
     nc_log("hakuX-native", "ex: a new identity for the console, as the app asked (its HD key kept)");
 }
 
-/* The image, whole or not at all: a new file put in the old one's place. */
+/* Atomically replace the EEPROM file only when its contents change. */
 static void eeprom_store(void)
 {
+    if (g_keep_file || (g_stored_known && !memcmp(g_stored, g_eeprom, sizeof(g_eeprom)))) {
+        return;
+    }
     char p[320], tmp[330];
     eeprom_path(p, sizeof(p));
     snprintf(tmp, sizeof(tmp), "%s.new", p);
@@ -378,7 +428,10 @@ static void eeprom_store(void)
     if (!ok || rename(tmp, p) != 0) {
         nc_log("hakuX-native", "ex: can't keep the EEPROM in %s", p);
         unlink(tmp);
+        return;
     }
+    memcpy(g_stored, g_eeprom, sizeof(g_stored));
+    g_stored_known = true;
 }
 
 static uint8_t *eeprom(NcKernel *k)
@@ -392,16 +445,20 @@ static uint8_t *eeprom(NcKernel *k)
             fclose(in);
         }
         if (!have && in) {
-            eeprom_create(k);                   /* the file kept as it is: someone's, maybe a real console's */
+            g_keep_file = true;
+            eeprom_create(k);
             nc_log("hakuX-native", "ex: %s isn't a whole EEPROM: a new one for this run", p);
         } else if (!have) {
-            eeprom_create(k);
-            eeprom_store();
+            eeprom_create(k);                   /* save after applying frontend settings */
             nc_log("hakuX-native", "ex: new console EEPROM in %s", p);
         } else {
+            memcpy(g_stored, g_eeprom, sizeof(g_stored));
+            g_stored_known = true;
             g_sec_plain = !sec_decrypt();
             if (g_sec_plain) {
                 memcpy(g_sec, g_eeprom, sizeof(g_sec));
+            } else {
+                memcpy(g_sec_sealed, g_sec + 0x14, sizeof(g_sec_sealed));
             }
             eeprom_upgrade();
             eeprom_renew();
@@ -431,6 +488,7 @@ static uint8_t *eeprom(NcKernel *k)
         memset(g_eeprom + 0x78, 0, 8);
         memset(g_eeprom + 0x88, 0, 8);
         eeprom_seal();
+        eeprom_store();
         g_eeprom_ready = true;
         nc_log("hakuX-native", "ex: video flags %08x, AV pack %d, AV region %08x, language %u, time zone bias %d min",
                nc_rd32(g_eeprom + 0x94), g_av_pack, nc_rd32(g_eeprom + 0x58), nc_rd32(g_eeprom + 0x90),
@@ -854,6 +912,30 @@ bool nc_kernel_launch_xbe(const uint8_t page[NC_LAUNCH_PAGE], char *out, size_t 
     return m > dev + 1;
 }
 
+bool nc_kernel_launch_dir(const uint8_t page[NC_LAUNCH_PAGE], char *out, size_t n)
+{
+    char xbe[LAUNCH_PATH_LEN], p[LAUNCH_PATH_LEN + 1];
+    if (!nc_kernel_launch_xbe(page, xbe, sizeof(xbe))) {
+        return false;
+    }
+    memcpy(p, page + LAUNCH_PATH_OFF, LAUNCH_PATH_LEN);
+    p[LAUNCH_PATH_LEN] = 0;
+    char *semi = strchr(p, ';');
+    if (!semi) {
+        return false;
+    }
+    while (semi > p + 1 && semi[-1] == '\\') {
+        semi--;
+    }
+    *semi = 0;
+    if ((size_t)snprintf(out, n, "%s", p) >= n) {
+        nc_log("hakuX-native", "relaunch: the launch folder is too long for D: (%zu chars): %s", strlen(p), p);
+        out[0] = 0;
+        return false;
+    }
+    return true;
+}
+
 /* LaunchDataType LDT_LAUNCH_DASHBOARD: LaunchData (+0x400) is LD_LAUNCH_DASHBOARD
  * { dwReason, dwContext, dwParameter1, dwParameter2 }; reason 0 is the main menu. */
 #define LDT_LAUNCH_DASHBOARD 1
@@ -957,7 +1039,10 @@ static uint64_t HalInitiateShutdown(NcKernel *k, NcFrame *f, const uint32_t *a)
 #define SMC_SCRATCH 0x1Bu
 static uint32_t g_smc_scratch;
 
-/* HalReadSMBusValue(Address, Command, ReadWord, DataValue): SMC version, tray, AV pack, scratch. */
+/* SMBus access shares the EEPROM image with ExQueryNonVolatileSetting.
+ * The kernel keeps the decrypted HDD key it loaded at boot. */
+#define SMB_EEPROM 0xA8u
+
 static uint64_t HalReadSMBusValue(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
     static const char version[3] = {'P', '0', '1'};
@@ -971,6 +1056,10 @@ static uint64_t HalReadSMBusValue(NcKernel *k, NcFrame *f, const uint32_t *a)
         case SMC_SCRATCH: v = g_smc_scratch; break;
         default: break;
         }
+    } else if ((a[0] & 0xFE) == SMB_EEPROM) {
+        const uint8_t *e = eeprom(k);
+        const uint8_t o = (uint8_t)a[1];
+        v = e[o] | (a[2] & 0xFF ? (uint32_t)e[(uint8_t)(o + 1)] << 8 : 0);
     }
     if (a[3]) {
         nc_vm_wr32(k->vm, a[3], v);
@@ -978,12 +1067,20 @@ static uint64_t HalReadSMBusValue(NcKernel *k, NcFrame *f, const uint32_t *a)
     return NC_STATUS_SUCCESS;
 }
 
-/* HalWriteSMBusValue(Address, Command, WriteWord, DataValue): the SMC's scratch
- * register keeps what is written to it; the rest is ignored. */
+/* Accept writes to the SMC scratch register and EEPROM. */
 static uint64_t HalWriteSMBusValue(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
     if ((a[0] & 0xFE) == 0x20 && (uint8_t)a[1] == SMC_SCRATCH) {
         g_smc_scratch = a[2] & 0xFF ? a[3] & 0xFFFF : a[3] & 0xFF;
+    } else if ((a[0] & 0xFE) == SMB_EEPROM) {
+        uint8_t *e = eeprom(k);
+        const uint8_t o = (uint8_t)a[1];
+        e[o] = (uint8_t)a[3];
+        if (a[2] & 0xFF) {
+            e[(uint8_t)(o + 1)] = (uint8_t)(a[3] >> 8);
+        }
+        g_sec_raw = g_sec_raw || o < 0x30 || ((a[2] & 0xFF) && o + 1 < 0x30);
+        g_eeprom_dirty = true;
     }
     return NC_STATUS_SUCCESS;
 }
@@ -1085,19 +1182,22 @@ void nc_kernel_title_loaded(NcKernel *k, const NcDisc *disc, const NcDiscFile *x
     if (s) {
         nc_vm_wr32(k->vm, s, av_pack_smc());
     }
-    /* An XBE on the hard disk: D: is the folder it was launched from, as the
-     * launch path's directory part becomes D: on the Xbox (the dashboard's:
-     * C:'s root). A disc's stays the disc's root, and so does a title
-     * update's (E:\TDATA\<title>\$u, booted for the disc's XBE). */
-    if (xbe_fd >= 0 && !strstr(path, "\\$u\\")) {
-        char dir[sizeof(k->image_path)];
+    /* Set D: before XAPI runs. Use the launch-page folder when supplied,
+     * otherwise the XBE's folder. Title updates keep the disc mapping.
+     * If the target exceeds the link limit, the existing mapping stays. */
+    char dir[sizeof(k->launch_dir)];
+    if (strstr(path, "\\$u\\")) {
+        snprintf(dir, sizeof(dir), "%s", "\\Device\\CdRom0");
+    } else if (k->launch_dir[0]) {
+        snprintf(dir, sizeof(dir), "%s", k->launch_dir);
+    } else {
         snprintf(dir, sizeof(dir), "%s", path);
         char *slash = strrchr(dir, '\\');
         if (slash && slash != dir) {
             *slash = 0;
-            nc_io_set_launch_dir(dir);
         }
     }
+    nc_io_set_launch_dir(dir);
     nc_kernel_set_hd_key(k);
 }
 
@@ -1149,9 +1249,22 @@ void nc_ex_register(NcKernel *k)
     nc_kernel_impl(k, "KeInitializeDpc", KeInitializeDpc);
 }
 
+void nc_ex_flush(void)
+{
+    if (g_eeprom_dirty) {
+        eeprom_store();
+        g_eeprom_dirty = false;
+    }
+}
+
 void nc_ex_reset(void)
 {
+    nc_ex_flush();
     memset(g_eeprom, 0, sizeof(g_eeprom));
+    g_stored_known = false;
+    g_keep_file = false;
+    g_sec_raw = false;
+    memset(g_sec_sealed, 0, sizeof(g_sec_sealed));
     g_eeprom_ready = false;     /* the next title reads it again, with the front end's settings */
     g_av_saved = 0;
     g_smc_scratch = 0;

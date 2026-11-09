@@ -44,5 +44,11 @@ Third-party code retains its own license and copyright notices.
   General Public License, version 3 or later; its SGSR is Qualcomm's
   Snapdragon Game Super Resolution 1, BSD 3-Clause
   (licenses/snapdragon-gsr.license.txt).
+- native/dash/hakux-dash.xbe is hakuX-lr's dashboard, an Xbox program
+  built from https://github.com/portare-ch/hakux-lr-dash at the commit
+  native/dash/hakux-dash.json pins. The core embeds it and puts it on the
+  emulated hard disk. It is a separate program under its own licences:
+  MIT, with nxdk's and its other components' permissive licences
+  (licenses/hakux-dash.license.txt).
 - License texts for dependencies are in licenses/. The versions used
   to build the core are pinned in tools/native/linux-deps.json.

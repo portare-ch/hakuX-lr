@@ -495,6 +495,34 @@ static void builtin(DspImage *gp, const uint32_t *frame, size_t words)
  * modulo one: the pinned JIT's inline REP and DO loops address through Rn
  * as it was before a modulo update (its jit_update_rn path), on AArch64 as
  * on x86-64; single steps agree. */
+/* A DO loop ending in BSR must repeat when the subroutine returns to
+ * LA+1. See the downstream dsp56300 patch. */
+static void test_call_at_loop_end(void)
+{
+    Scratch scratch = {0};
+    DSPState *dsp = new_dsp(&scratch);
+    const uint32_t program[] = {
+        CLR_A, MOVE_ONE_X0,
+        0x060480, 0x000005,         /* do #4,$0005 */
+        0x0d1080, 0x00000c,         /* bsr $0010: its extension word at LA */
+        FRAME_COMPLETE_X1, 0x0c0007,
+    };
+    for (unsigned i = 0; i < ARRAY_SIZE(program); i++) dsp_write_memory(dsp, 'P', i, program[i]);
+    dsp_write_memory(dsp, 'P', 0x10, ADD_X0_A);
+    dsp_write_memory(dsp, 'P', 0x11, 0x00000c);    /* rts */
+    run_zero(dsp);
+    check(dsp->core.registers[DSP_REG_A1] == 0x40000 && !(dsp->core.registers[DSP_REG_SR] & (1u << DSP_SR_LF)),
+          "a compiled DO loop ending in a BSR runs all 4 passes");
+    Dsp56300State state = at(dsp, 0);
+    dsp56300_set_state(dsp->jit, &state);
+    for (unsigned i = 0; i < 64 && dsp->core.pc != 6; i++) {
+        dsp_step(dsp);
+    }
+    check(dsp->core.pc == 6 && dsp->core.registers[DSP_REG_A1] == 0x40000,
+          "a stepped DO loop ending in a BSR runs all 4 passes");
+    dsp_destroy(dsp);
+}
+
 static void test_engines_agree(void)
 {
     static DspImage gp;
@@ -533,6 +561,7 @@ int main(int argc, char **argv)
     g_ram = malloc(RAM_SIZE);
     test_apu_and_states();
     test_engines_agree();
+    test_call_at_loop_end();
     free(g_ram);
     g_apu_config.use_dsp = false;
     Scratch scratch = {0};

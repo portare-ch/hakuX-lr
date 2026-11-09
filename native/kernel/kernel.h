@@ -127,7 +127,9 @@ typedef struct NcSeh {
     uint32_t nested;         /* dispatch: the frame a nested raise came from */
     uint32_t target;         /* unwind: TargetFrame */
 } NcSeh;
-#define NC_MAX_SEH 8
+/* Allow nested exception handling without the previous eight-level limit. */
+#define NC_MAX_SEH 64
+#define NC_SEH_V1  8               /* levels stored in THRD v1-v3 */
 
 typedef struct NcThread {
     enum NcThreadState state;
@@ -154,7 +156,14 @@ typedef struct NcThread {
     NcApcChain apc;          /* the chain running (apc.in_apc) */
     NcApcChain apc_outer[NC_MAX_APC_NEST]; /* chains an alertable wait in an APC interrupted */
     unsigned apc_nest;
-    NcSeh seh[NC_MAX_SEH];
+    /* Keep the first eight levels separate for older savestates. */
+    union {
+        NcSeh seh_levels[NC_MAX_SEH];
+        struct {
+            NcSeh seh[NC_SEH_V1];
+            NcSeh seh_more[NC_MAX_SEH - NC_SEH_V1];
+        };
+    };
     unsigned nseh;
     bool fresh;              /* ctx was just set up (an ISR or DPC entry): the
                                 running frame must not be saved over it */
@@ -279,6 +288,7 @@ struct NcKernel {
     bool relaunch;             /* stopped for a quick reboot into another XBE (relaunch.bin) */
     bool quit;                 /* stopped as the title left: to the dashboard, a reboot, a shutdown */
     char image_path[128];      /* XeImageFileName ("" = \Device\CdRom0\default.xbe) */
+    char launch_dir[520];      /* D: from the launch page ("" = use the XBE folder) */
     uint64_t calls;
     unsigned first_ordinal;    /* first kernel call made (0: none yet) */
 };
@@ -291,6 +301,8 @@ void nc_kernel_destroy(NcKernel *k);
 /* nc_kernel_destroy's, one per module. */
 void nc_ke_reset(void);
 void nc_ex_reset(void);
+/* Persist pending SMBus EEPROM writes. */
+void nc_ex_flush(void);
 void nc_mm_reset(void);
 void nc_page_reset(void);
 void nc_timer_reset(void);
@@ -320,9 +332,9 @@ void nc_pool_free(NcKernel *k, uint32_t va, uint32_t size);
 /* mm.c: physical memory held by contiguous allocations and by committed
  * virtual memory (bytes), and the number of contiguous blocks. */
 void nc_mm_usage(NcKernel *k, uint32_t *contig_bytes, uint32_t *virtual_bytes, unsigned *contig_blocks);
-/* mm.c: the end of the contiguous block (MmAllocateContiguousMemory) that
- * holds physical address pa, 0 when none does. */
-uint32_t nc_mm_contig_end(uint32_t pa);
+/* End of the contiguous run containing pa. Adjacent allocations from
+ * the same caller may extend the run up to limit. Returns 0 if absent. */
+uint32_t nc_mm_contig_end(uint32_t pa, uint32_t limit);
 /* mm.c: frees the contiguous blocks that code in [lo, hi) allocated (a mod's
  * buffers once its code is gone); returns their bytes. */
 uint32_t nc_mm_contig_free_callers(NcKernel *k, uint32_t lo, uint32_t hi);
@@ -485,6 +497,9 @@ void nc_kernel_relaunch_file(char *out, size_t n);
  * or a hard disk partition ("\Device\Harddisk0\Partition2\xboxdash.xbe"); false
  * when it names neither. */
 bool nc_kernel_launch_xbe(const uint8_t page[NC_LAUNCH_PAGE], char *out, size_t n);
+/* Read the folder before ';' in the XBE launch path.
+ * Return false if the folder is missing or does not fit in out. */
+bool nc_kernel_launch_dir(const uint8_t page[NC_LAUNCH_PAGE], char *out, size_t n);
 /* The dashboard, booted when a title asks for one of its pages (Xbox Live's
  * account sign-up, its network settings) or by itself (the app's Dashboard). */
 #define NC_DASHBOARD_PATH "\\Device\\Harddisk0\\Partition2\\xboxdash.xbe"
@@ -663,7 +678,7 @@ const char *nc_io_hdd_root(void);
  * names matched as FATX does): its host path in out; false when the path
  * isn't on a partition or names no file. */
 bool nc_io_host_file(const char *xbox_path, char *out, size_t n);
-/* \??\D:, the directory the title was launched from (its XBE's). */
+/* Set the kernel's \??\D: link before the title runs. */
 void nc_io_set_launch_dir(const char *dir);
 /* Console timing: reads take the console's drives' time, their thread waiting (io.c). */
 void nc_io_set_device_time(bool on);

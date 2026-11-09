@@ -1,8 +1,8 @@
 /* Copyright (C) 2026-present PortareOS */
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /* Boot memory regression test (kernel_boot_mem.py, 64 MiB RAM).
- * Check the boot reservation, copied window PDEs without a flush,
- * alias removal after a flush, and zero padding above the stack.
+ * Covers boot reservations, page-directory aliases, stack padding and
+ * more than 4,096 concurrent contiguous allocations.
  * Code: 0x11000; thunks: 0x10f00, in IMPORTS order. Print and halt. */
 .intel_syntax noprefix
 .set THUNK, 0x10f00
@@ -88,6 +88,18 @@ clear:
     cmp dword ptr [eax + FX_SAVE + 0x80], 0
     jne fail
 
+    /* 6. Allocate 5,000 concurrent 4 KiB blocks. */
+    STEP 6
+    mov dword ptr [count], 0
+blocks:
+    push 0x1000
+    call dword ptr [MmAllocateContiguousMemory]
+    test eax, eax
+    jz fail
+    inc dword ptr [count]
+    cmp dword ptr [count], 5000
+    jb blocks
+
     PUSHI passed
     call dword ptr [DbgPrint]
     add esp, 4
@@ -103,5 +115,6 @@ fail:
 step: .long 0
 block: .long 0
 pd: .long 0
+count: .long 0
 passed: .asciz "kbm: all passed"
 failed: .asciz "kbm: failed at step %d"

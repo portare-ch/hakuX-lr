@@ -58,3 +58,13 @@ One entry per section version (tools/native/statelock.py).
 
 - NcThread.priority is the current priority and KTHREAD.BasePriority the base (priority boosts after waits, the Xbox kernel's); v2 states: the priority was the base, copied to KTHREAD.BasePriority as they load
 - upgraded: v1..v2 states load
+
+## THRD v4 (2026-11-08, after 7f7f61c3b5)
+
+- Raised the per-thread exception nesting limit from 8 to 64.
+- Added `NcThread.seh_more` for levels 9–64. Savestates from THRD v1–v3 remain supported.
+
+## MODS v2 (2026-11-09)
+
+- Record whether cheats, patches or mods changed the game. Modified states
+  and states from earlier versions load with Xbox Live disabled.

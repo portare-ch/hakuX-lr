@@ -30,7 +30,9 @@ set(HLE_PURE_SOURCES
   ${REPO_ROOT}/hw/xbox/hle/pb/pusher.c
   ${REPO_ROOT}/hw/xbox/hle/pb/objslot.c
   ${REPO_ROOT}/hw/xbox/hle/pb/wclip.c
+  ${REPO_ROOT}/hw/xbox/hle/pb/blitclip.c
   ${REPO_ROOT}/native/core/cheats.c
+  ${REPO_ROOT}/native/core/xbe_patch.c
   ${NC_DEPS}/root/subprojects/nv2a_vsh_cpu/src/nv2a_vsh_disassembler.c
 )
 add_library(hle_pure STATIC ${HLE_PURE_SOURCES})
@@ -55,6 +57,8 @@ hle_test(test_pageuse)
 hle_test(test_pusher)
 hle_test(test_objslot)
 hle_test(test_wclip)
+hle_test(test_blitclip)
+hle_test(test_kdma)
 hle_test(test_pvideo)
 hle_test(test_fill)
 hle_test(test_xg_swizzle)
@@ -63,6 +67,7 @@ hle_test(test_vsh)
 hle_test(test_ffhw)
 hle_test(test_psh)
 hle_test(test_cheats)
+hle_test(test_xbe_patch)
 hle_test(test_vkcompat)
 hle_test(test_batch_wrap)
 hle_test(test_pace)

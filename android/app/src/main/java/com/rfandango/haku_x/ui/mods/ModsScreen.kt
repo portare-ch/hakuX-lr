@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import com.rfandango.haku_x.R
+import com.rfandango.haku_x.data.AppPrefs
 import com.rfandango.haku_x.data.ModCatalog
 import com.rfandango.haku_x.data.ModChoices
 import com.rfandango.haku_x.ui.common.EmptyText
@@ -35,8 +36,13 @@ fun ModsScreen(gameKey: String, title: String, onBack: () -> Unit) {
     mutableStateMapOf<String, Boolean>().apply { game.cheats.forEach { put(it.name, choices.cheat(it.name)) } }
   }
 
+  val allowed = remember { AppPrefs(context).cheats }
+
   SubScreen(title = stringResource(R.string.mods_title), subtitle = title, onBack = onBack) { padding ->
     Column(Modifier.padding(padding).fillMaxSize().verticalScroll(rememberScrollState())) {
+      if (!game.isEmpty) {
+        Hint(stringResource(if (allowed) R.string.mods_online_note else R.string.mods_off_note))
+      }
       if (game.isEmpty) {
         EmptyText(stringResource(R.string.mods_none))
       }

@@ -4,7 +4,7 @@
  * Devices: \Device\CdRom0 is the title's disc (XDVDFS, read-only);
  * \Device\Harddisk0\PartitionN are host directories (hdd root/PartitionN),
  * matched case-insensitively as FATX does. \??\X: names are symbolic links
- * (IoCreateSymbolicLink); D: starts out at the disc.
+ * (IoCreateSymbolicLink). D: points to the title's launch folder by default.
  *
  * Xbox names are ANSI: OBJECT_ATTRIBUTES { RootDirectory, ObjectName
  * (ANSI_STRING*), Attributes }; FILE_DIRECTORY_INFORMATION carries ANSI
@@ -12,6 +12,7 @@
  * before the call returns; APC completion routines are not delivered yet.
  */
 #include "native/kernel/kernel.h"
+#include "native/kernel/rtl_text.h"
 #include "native/kernel/xc_crypto.h"
 #include "native/core/irq.h"
 #include "native/core/chd.h"
@@ -101,10 +102,9 @@ typedef struct NcFile {
      * listing shifted under it and skipped every other file. */
     struct DirEntry *listing;
     unsigned nlisting;
-    /* Opened without FILE_SYNCHRONOUS_IO_*: a read or write with an event or
-     * APC (on the disc, any) that completes reports STATUS_PENDING, as the
-     * Xbox's DMA disk and DVD transfers do, with its result in the
-     * IoStatusBlock (io_finish); a write only with no_buffering. */
+    /* Asynchronous file I/O may return STATUS_PENDING even without an
+     * event or APC for disc transfers and unbuffered hard disk I/O.
+     * Cached writes can complete immediately. */
     bool async;
     /* The handle may change the file's data or size (its DesiredAccess has
      * FILE_WRITE_DATA / FILE_APPEND_DATA, GENERIC_WRITE / _ALL or
@@ -217,25 +217,6 @@ static void ansi(NcKernel *k, uint32_t str, char *out, size_t cap)
     out[len] = 0;
 }
 
-static bool wildcard(const char *pat, const char *s)
-{
-    if (!*pat) {
-        return !*s;
-    }
-    if (*pat == '*') {
-        for (;; s++) {
-            if (wildcard(pat + 1, s)) {
-                return true;
-            }
-            if (!*s) {
-                return false;
-            }
-        }
-    }
-    return *s && (*pat == '?' || toupper((unsigned char)*pat) == toupper((unsigned char)*s)) &&
-           wildcard(pat + 1, s + 1);
-}
-
 /* ----------------------------------------------------------- namespace */
 
 static int link_find(const char *name)
@@ -250,6 +231,11 @@ static int link_find(const char *name)
 
 static bool link_set(const char *name, const char *target)
 {
+    if (strlen(target) >= sizeof(g_links[0].target)) {
+        nc_log("hakuX-native-io", "link %s not made: its target is too long (%zu chars): %s", name, strlen(target),
+               target);
+        return false;
+    }
     int i = link_find(name);
     for (int j = 0; i < 0 && j < MAX_LINKS; j++) {
         if (!g_links[j].name[0]) {
@@ -1375,18 +1361,12 @@ static void io_moved(NcKernel *k, NcFile *nf, uint32_t byte_offset, uint64_t end
 
 static int partition_root(const NcFile *nf);
 
-/* Ends a read or write: its IoStatusBlock, event and APC, and what it returns.
- * An overlapped request that completes reports STATUS_PENDING (NcFile.async);
- * one that fails up front (end of file) returns the error and, as NT does for
- * a failure before pending, leaves the IoStatusBlock, event and APC alone:
- * XAPI set the OVERLAPPED to STATUS_PENDING, which GetOverlappedResult reads
- * as success. Forza's read-ahead past the end of a file relies on that.
- * The DVD drive pends every transfer, an overlapped one with neither event
- * nor APC too (its completion sets the file object's event): Otogi's stream
- * reader (XDK 5455) counts the bytes only after ERROR_IO_PENDING, through
- * GetOverlappedResult, and took a disc read that succeeded at once as 0 bytes
- * read, a dirty disc. pend: a success may pend (not a read through the cache,
- * disc_cached). */
+/* Complete a read or write and return its guest-visible status.
+ * Failures before pending leave the IoStatusBlock and notifications alone.
+ * A successful asynchronous disc transfer or unbuffered hard disk request
+ * may return STATUS_PENDING without an explicit event or APC. Completion
+ * still updates the IoStatusBlock and signals the file object's event.
+ * Cached I/O may finish in the call; pend controls that distinction. */
 static uint32_t io_finish(NcKernel *k, const NcFile *nf, const uint32_t *a, uint32_t st, uint32_t n, bool pend)
 {
     if (nf->async && st >= 0xC0000000u) {
@@ -1394,7 +1374,8 @@ static uint32_t io_finish(NcKernel *k, const NcFile *nf, const uint32_t *a, uint
     }
     io_status(k, a[4], st, n);
     complete(k, a);
-    return pend && nf->async && (a[1] || a[2] || nf->kind == F_DISC) ? STATUS_PENDING : st;
+    const bool device = nf->kind == F_DISC || (nf->kind == F_HOST && nf->no_buffering);
+    return pend && nf->async && (a[1] || a[2] || device) ? STATUS_PENDING : st;
 }
 
 /* A disc read of part of a sector goes through the file system's cache, which
@@ -2351,7 +2332,7 @@ static uint64_t NtQueryDirectoryFile(NcKernel *k, NcFrame *f, const uint32_t *a)
     const DirEntry *entries = nf->listing;
     const unsigned n = nf->nlisting;
     unsigned i = nf->dir_next;
-    while (i < n && !wildcard(nf->mask, entries[i].name)) {
+    while (i < n && !nc_rtl_name_match(nf->mask, entries[i].name)) {
         i++;
     }
     uint32_t st;
@@ -2618,6 +2599,9 @@ static uint64_t IoCreateSymbolicLink(NcKernel *k, NcFrame *f, const uint32_t *a)
     char name[64], target[256], canon_target[256];
     ansi(k, a[0], name, sizeof(name));
     ansi(k, a[1], target, sizeof(target));
+    if (link_find(name) >= 0) {
+        return STATUS_OBJECT_NAME_COLLISION;
+    }
     if (!canon(target, canon_target, sizeof(canon_target))) {
         return STATUS_OBJECT_PATH_NOT_FOUND;
     }

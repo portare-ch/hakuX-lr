@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # Copyright (C) 2026-present PortareOS
 # SPDX-License-Identifier: GPL-2.0-or-later
-"""Runs kernel_io.s, a guest test of the kernel's queues, I/O completion
-ports, IRPs and drivers, on xboxrun: assembled for i386 by clang and linked
-by ld.lld at the synthetic disc's code address (check.py's disc). Exit 77
-(skipped) when no assembler or linker for i386 is found.
-  kernel_io.py <xboxrun's directory> [clang]"""
+"""Run the kernel I/O guest tests with xboxrun.
+
+Assemble for i386 with clang and ld.lld. Exit 77 if either is unavailable.
+Usage: kernel_io.py <build-dir> [clang]
+"""
 import importlib.util
 import os
 from pathlib import Path
@@ -17,7 +17,7 @@ import tempfile
 HERE = Path(__file__).resolve().parent
 # the kernel ordinals kernel_io.s calls, in its thunk order
 IMPORTS = [8, 111, 117, 136, 254, 191, 227, 223, 212, 65, 59, 86, 87, 83, 81, 72, 74, 247, 85, 62, 108, 99, 362,
-           257, 116, 141, 84, 159, 145, 144, 124, 128]
+           257, 116, 141, 84, 159, 145, 144, 124, 128, 190, 236, 187, 67]
 
 
 def tool(*names):

@@ -2,6 +2,7 @@
  * hakuX native core — boot and run a title.
  */
 #include "native/core/core.h"
+#include "native/core/dash.h"
 #include "native/core/hostctx.h"
 #include "native/dev/dev.h"
 #include "native/dev/usb.h"
@@ -9,6 +10,7 @@
 #include "native/core/mmio.h"
 #include "native/core/irq.h"
 #include "native/core/mods.h"
+#include "native/core/online.h"
 #include "native/net/net.h"
 #include "native/state/save.h"
 
@@ -121,6 +123,11 @@ bool nc_core_boot(NcCore *c, int disc_fd)
     memset(c, 0, sizeof(*c));
     c->disc.fd = -1;
     c->xbe.fd = -1;
+    /* Restore Internet access and the video mode's vblank rate on boot. */
+    nc_online_boot();
+    nc_dev_nv2a_vblank_multiply(1);
+    /* Some games check for the dashboard during startup. */
+    nc_dash_install(nc_io_hdd_root());
     /* NC_RAM_MB=128 (debug kit size): a dev switch for memory investigations. */
     const char *mb = getenv("NC_RAM_MB");
     const uint32_t ram = mb && atoi(mb) == 128 ? 128u << 20 : NC_RAM_RETAIL;
@@ -200,6 +207,7 @@ bool nc_core_boot(NcCore *c, int disc_fd)
         }
         if (have_page && nc_kernel_launch_xbe(page, xbe_path, sizeof(xbe_path))) {
             snprintf(c->kernel.image_path, sizeof(c->kernel.image_path), "%s", xbe_path);
+            nc_kernel_launch_dir(page, c->kernel.launch_dir, sizeof(c->kernel.launch_dir));
             nc_log("hakuX-native-frontier", "relaunch: %s (launch type %u)", c->kernel.image_path,
                    *(const uint32_t *)page);
         } else {
@@ -216,11 +224,14 @@ bool nc_core_boot(NcCore *c, int disc_fd)
         snprintf(xbe_path, sizeof(xbe_path), "%s", update);
         snprintf(c->kernel.image_path, sizeof(c->kernel.image_path), "%s", update);
     }
+    /* Patch new XBE boots; savestates already contain executable code. */
+    if (!g_loadstate[0]) {
+        nc_mods_xbe_patches(disc_fd >= 0 ? &c->disc : NULL, xbe_path);
+    }
     if (!nc_xbe_load(&c->vm, &c->disc, xbe_path, &c->kernel, &c->xbe)) {
         char why[256], host[512];
         if (!strcasecmp(xbe_path, NC_DASHBOARD_PATH) && !nc_io_host_file(xbe_path, host, sizeof(host))) {
-            return boot_failed("The dashboard isn't installed: its files (xboxdash.xbe and its folders) go on "
-                               "the hard disk's C: drive.");
+            return boot_failed("The dashboard couldn't be put on the hard disk's C: drive.");
         }
         const char *name = strrchr(xbe_path, '\\');
         snprintf(why, sizeof(why), "The game's program (%s) can't be loaded: it's damaged, or hakuX doesn't support "
@@ -295,6 +306,7 @@ void nc_core_run(NcCore *c)
     /* a savestate: the thread it was running, or the scheduler first */
     const NcCpuContext *start = g_loaded ? nc_kstate_start_context(&c->kernel) : &g_boot->ctx;
     nc_cpu_run(c->cpu, start ? start : &g_boot->ctx);
+    nc_ex_flush();
     const NcKernel *k = &c->kernel;
     if (k->stop) {
         nc_log("hakuX-native-frontier", "stop: %s", k->stop_reason);

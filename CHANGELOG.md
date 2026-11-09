@@ -2,6 +2,127 @@
 
 ## Unreleased
 
+## linux-v0.25.2 (Linux, aarch64 and x86-64, and Android)
+
+- **Cheats** — Off by default in RetroArch and the Android app. Applied
+  cheats, patches, mods and uncapped frame rates disable Xbox Live until
+  the game restarts. System link remains available.
+
+## linux-v0.25.1 (Linux, aarch64 and x86-64, and Android)
+
+- **Frame rate** — The core skips unchanged frames by default so FPS
+  counters show the game's frame rate. Enable **Repeat Frames** for
+  RetroArch recording, streaming or black-frame insertion.
+
+## linux-v0.25.0 (Linux, aarch64 and x86-64, and Android)
+
+- **Insignia account recovery** (#185) — Under **Xbox Live**, select
+  **Recover an Insignia account** and enter your gamertag and the 16-digit
+  recovery number revealed on Insignia's website. Recovery refreshes the
+  matching account slot or uses a free slot, preserves other accounts, and
+  resumes a failed local save without repeating the recovery request.
+  Recovery and persistence after restart were verified on Linux x86-64.
+
+## linux-v0.24.0 (Linux, aarch64 and x86-64, and Android)
+
+Set up Insignia from the bundled dashboard. In RetroArch, load the core
+and select **Start Core**. On Android, the app's Xbox Live setup wizard
+opens the same dashboard.
+
+- **Insignia** (experimental, #192) — Under **Xbox Live**, select
+  **Register this console**, then **Create an Insignia account** with the
+  subscription code from Insignia. Registration and signup work without
+  Microsoft's dashboard or the separate Setup Assistant. On-console
+  account recovery is still pending.
+- **Dashboard** (#188, #192) — At boot, the core installs the bundled
+  dashboard at `C:\xboxdash.xbe` and `C:\xodash\xonlinedash.xbe`, replacing
+  any dashboard executables at those paths. It keeps other files on C:.
+- **Network** (#84, #192) — One switch enables Xbox Live and system link
+  together and defaults to On. System link consoles negotiate separate
+  IP addresses. Older Android network modes migrate to On, and explicit
+  Off stays off.
+- **Console HDD keys** (#191) — New consoles store a random HDD key in
+  EEPROM. Existing consoles keep their key. First boots with saves or
+  downloadable content already on E: use the legacy key. Android
+  re-signs saves transferred between consoles.
+- **Homebrew and EEPROM** (#186, #187) — Honor NV2A DMA base addresses so
+  nxdk programs such as the dashboard can render. Persist guest EEPROM
+  writes over SMBus, with RetroArch settings taking priority at boot.
+- **Multi-game discs** (#188, #190) — Map `D:` to a game's disc subfolder
+  when it launches from there. The Star Wars - The Clone Wars + Tetris Worlds
+  disc reaches its menu and can launch both games.
+
+Downloads include Linux ARM64 and x86-64 builds and an experimental
+RetroArch core for Android ARM64.
+
+## linux-v0.23.0 (Linux, aarch64 and x86-64, and Android)
+
+A compatibility-focused release with fixes for Xbox audio, rendering,
+memory, file I/O and game loading. It also adds XBE patches through
+RetroArch's Cheats menu.
+
+### Graphics
+
+- **Full-height framebuffers** (#180) — Thrillville and Wallace & Gromit:
+  The Curse of the Were-Rabbit now render their full 640 x 480 images
+  instead of losing the bottom of the frame. Adjacent allocations are
+  treated as one physical run only when they share a caller, preserving
+  the oversized-target guard needed by NBA Inside Drive 2003.
+- **NV2A 2D blits** (#182) — Respect source/destination pitch and GPU tile
+  boundaries, including a partial last row. WWE WrestleMania 21 reaches
+  its main menu with audio instead of corrupting its own push buffer.
+  A separate crash after further menu input remains under investigation.
+
+### Kernel and game compatibility
+
+- **Unbuffered overlapped writes** (#179) — Return `STATUS_PENDING` for
+  asynchronous hard-disk transfers without an explicit event. Sniper
+  Elite now reaches player-name entry; Rogue Trooper reaches its tutorial
+  with sound. Buffered writes retain immediate completion.
+- **More contiguous allocations** (#175) — Raise the limit from 4,096 to
+  32,768 blocks. Wings of War loads its first mission, SNK vs. Capcom:
+  SVC Chaos reaches a fight, and Shrek Super Party reaches its game
+  selection. With the DSP fix below, The Simpsons: Road Rage reaches
+  playable races.
+- **Directory wildcard matching** (#176) — Correct `*.` and `*.*`
+  matching for names without extensions. Trivial Pursuit: Unhinged
+  now finds its language directories and reaches profile selection.
+- **More XBE sections** (#174) — Support up to 1,024 sections instead of
+  256. Spikeout: Battle Street loads and reaches its player-name screen.
+- **Nested exceptions** (#177) — Raise the per-thread exception limit
+  from 8 to 64, fixing XIII's early exception overflow. Older savestates
+  remain supported.
+
+### Audio and stability
+
+- **DSP56300 JIT loop returns** (#178) — Handle subroutine returns at
+  the end of a `DO` loop correctly. Fixes DMA stalls, missing audio and
+  hangs in games including WWE Raw 2, Oddworld: Munch's Oddysee,
+  Project: Snowblind, Genma Onimusha, The Simpsons: Road Rage,
+  RollerCoaster Tycoon and Whiplash. The DSP JIT regression suite
+  passed 1,053 tests on x86-64.
+
+### Patches and tools
+
+- **XBE patches through RetroArch cheats** (#169) — Apply widescreen
+  and other executable patches from `.cht` entries, matched to the
+  original XBE by CRC-32 and size. Use `tools/mods/xbe-to-cht.py`
+  for IPS/BPS or patched-XBE conversion; enable the cheat, apply
+  changes and restart. Ordinary memory cheats remain supported.
+- **Community patch repository** (#173) — Keep Android mods and
+  converted RetroArch patches in
+  [hakux-lr-patches](https://github.com/portare-ch/hakux-lr-patches).
+  The Android app uses the `patches` submodule; initialize it when
+  building the app. Six 60 FPS mods have been converted to `.cht`
+  entries; refresh-rate-dependent 120 FPS mods remain Android-only.
+
+### Testing
+
+The fixes above were tested primarily with RetroArch 1.22.2 on x86-64
+Linux with KVM. Linux CI builds and tests both architectures; the Android
+ARM64 core remains experimental and has not been tested on a device.
+Game progress described above is not a guarantee of full playability.
+
 ## linux-v0.22.0 (Linux, aarch64 and x86-64, and Android)
 
 ### Graphics

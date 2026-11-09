@@ -2,12 +2,11 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Libretro core options (LIBRETRO_SPEC.md section 10).
- * RetroArch handles display filters and aspect ratio. Crop (video.c),
- * rumble (input.c) and frame pacing (the decoder reads it at each swap)
- * update immediately; other options apply at the next boot (the
- * Communicator is plugged into player 1's controller as it boots).
+ * RetroArch handles display filters and aspect ratio. Crop, rumble,
+ * frame pacing and frame repeats update live. Other options apply at boot.
  */
 #include "native/libretro/libretro_int.h"
+#include "native/core/online.h"
 #include "native/hle/hle_native.h"
 #include "native/kernel/kernel.h"
 #include "native/dev/dev.h"
@@ -33,7 +32,8 @@
 #endif
 
 enum { OPT_SCALE, OPT_CROP, OPT_FORMAT, OPT_LANGUAGE, OPT_REGION, OPT_RUMBLE, OPT_NETWORK, OPT_COMMUNICATOR,
-       OPT_MIC_GATE, OPT_RESAMPLER, OPT_PROCESSING, OPT_PRECISION, OPT_PACE, OPT_COUNT };
+       OPT_MIC_GATE, OPT_RESAMPLER, OPT_PROCESSING, OPT_PRECISION, OPT_PACE,
+       OPT_REPEAT, OPT_MODS, OPT_COUNT };
 
 /* The language values follow XC_LANGUAGE after auto: english is 1. */
 static struct retro_core_option_v2_definition g_defs[OPT_COUNT + 1] = {
@@ -84,15 +84,16 @@ static struct retro_core_option_v2_definition g_defs[OPT_COUNT + 1] = {
         "disabled"},
     [OPT_NETWORK] = {
         "hakux_network", "Network", NULL,
-        "LAN enables system link: turn it on on each device; discovery uses UDP port 3075. "
-        "For peers on another subnet or a VPN, add their addresses to lan-peers.txt in the save directory. "
-        "Xbox Live (Insignia) connects to Insignia, the Xbox Live revival, through the Internet; register the "
-        "console with Insignia's Setup Assistant first. If your provider blocks Insignia's DNS server, put the "
-        "address of an insigniaDNS server in insignia-dns.txt in the save directory." NEXT,
+        "Plugs in the console's network cable, as on a home network: Xbox Live through Insignia, the Xbox Live "
+        "revival, and system link with the consoles on this network, at once. For Xbox Live, start the core "
+        "without a game, open Xbox Live in the dashboard, register the console, then create an account there. "
+        "System link: turn the network on on each device; "
+        "discovery uses UDP port 3075. For consoles on another subnet or a VPN, add their addresses to "
+        "lan-peers.txt in the save directory. If your provider blocks Insignia's DNS server, put the address of "
+        "an insigniaDNS server in insignia-dns.txt in the save directory." NEXT,
         NULL, NULL,
-        {{"disabled", "Off (no cable)"}, {"lan", "LAN (system link)"}, {"insignia", "Xbox Live (Insignia)"},
-         {NULL, NULL}},
-        "disabled"},
+        {{"disabled", "Off (no cable)"}, {"enabled", "On"}, {NULL, NULL}},
+        "enabled"},
     [OPT_COMMUNICATOR] = {
         "hakux_communicator", "Xbox Live Communicator", NULL,
         "Plugs a Communicator headset into player 1's controller, for voice chat over Xbox Live (Insignia) or "
@@ -142,6 +143,21 @@ static struct retro_core_option_v2_definition g_defs[OPT_COUNT + 1] = {
         "the GPU; Lowest Latency keeps one, which may lower the frame rate. Off lets the game run ahead.",
         NULL, NULL,
         {{"disabled", "Off"}, {"2", "On"}, {"1", "Lowest Latency"}, {NULL, NULL}},
+        "disabled"},
+    [OPT_REPEAT] = {
+        "hakux_repeat_frames", "Repeat Frames", NULL,
+        "Send the previous frame again when the game has no new one. Enable for RetroArch "
+        "recording, streaming or black-frame insertion. FPS counters include repeats.",
+        NULL, NULL,
+        {{"disabled", "Off"}, {"enabled", "On"}, {NULL, NULL}},
+        "disabled"},
+    [OPT_MODS] = {
+        "hakux_cheats", "Cheats", NULL,
+        "Applies RetroArch's cheats and XBE patches (such as 60 fps patches). Off ignores them all. On, a "
+        "game they change can't use Xbox Live (Insignia) until it restarts: they give an unfair advantage "
+        "or desync real consoles. System link still works." NEXT,
+        NULL, NULL,
+        {{"disabled", "Off"}, {"enabled", "On"}, {NULL, NULL}},
         "disabled"},
     {NULL},
 };
@@ -252,6 +268,8 @@ void nc_lr_options_apply(void)
     nc_lr_video_set_crop(crop);
     const bool rumble = strcmp(g_defs[OPT_RUMBLE].values[g_applied[OPT_RUMBLE]].value, "enabled") == 0;
     nc_lr_input_set_rumble(rumble);
+    nc_lr_video_set_repeat(!strcmp(g_defs[OPT_REPEAT].values[g_applied[OPT_REPEAT]].value, "enabled"));
+    nc_online_set_cheats(!strcmp(g_defs[OPT_MODS].values[g_applied[OPT_MODS]].value, "enabled"));
 
     /* PAL60 always: RetroArch runs at 59.94 Hz, and an NTSC title ignores it.
      * No 480p, 720p or 1080i, as before the options. */
@@ -298,7 +316,7 @@ void nc_lr_options_apply(void)
            "rumble %s, network %s, resampler %s, audio processing %s, frame pacing %s, communicator %s%s%s, combiner %s",
            scale, crop ? "cropped" : "shown", format, language,
            g_defs[OPT_LANGUAGE].values[g_applied[OPT_LANGUAGE]].value, region, rumble ? "on" : "off",
-           strcmp(network, "disabled") ? network : "off", resampler, dsp ? "dsp" : "fast",
+           strcmp(network, "disabled") ? "on" : "off", resampler, dsp ? "dsp" : "fast",
            pace_text(g_applied[OPT_PACE]), communicator ? "on (noise gate " : "off", communicator ? gate : "",
            communicator ? ")" : "", precise ? "accurate" : "fast");
 }
@@ -326,10 +344,15 @@ void nc_lr_options_run(void)
         nc_hle_set_frame_pace(pace_depth(pace));
         nc_log("hakuX-libretro", "options: frame pacing %s", pace_text(pace));
     }
+    const int repeat = value_of(OPT_REPEAT);
+    if (repeat != g_applied[OPT_REPEAT]) {
+        g_applied[OPT_REPEAT] = repeat;
+        nc_lr_video_set_repeat(!strcmp(g_defs[OPT_REPEAT].values[repeat].value, "enabled"));
+    }
     char names[256] = "";
     size_t n = 0;
     for (int i = 0; i < OPT_COUNT; i++) {
-        if (i != OPT_CROP && i != OPT_RUMBLE && i != OPT_PACE && value_of(i) != g_applied[i] &&
+        if (i != OPT_CROP && i != OPT_RUMBLE && i != OPT_PACE && i != OPT_REPEAT && value_of(i) != g_applied[i] &&
             n < sizeof(names)) {
             n += (size_t)snprintf(names + n, sizeof(names) - n, "%s%s", n ? ", " : "", g_defs[i].desc);
         }

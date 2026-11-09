@@ -31,7 +31,12 @@
 #include "native/libretro/libretro_int.h"
 #include "native/core/cheats.h"
 #include "native/core/core.h"
+#include "native/core/dash.h"
 #include "native/core/irq.h"
+#include "native/core/mods.h"
+#include "native/net/net.h"
+#include "native/core/online.h"
+#include "native/core/xbe_patch.h"
 #include "native/dev/dev.h"
 #include "native/hle/hle_native.h"
 #include "native/kernel/kernel.h"
@@ -321,18 +326,17 @@ RETRO_API void retro_reset(void)
     boot_again("reset", false);
 }
 
-/* Find the dashboard on C: (<hdd>/Partition2), ignoring filename case.
- * If missing, tell the user where to install it. */
+/* Install the bundled dashboard if needed before starting without content. */
 static bool dashboard_installed(void)
 {
     char host[512];
     nc_io_set_hdd_root(g_hdd);
+    nc_dash_install(g_hdd);
     if (nc_io_host_file(NC_DASHBOARD_PATH, host, sizeof(host))) {
         return true;
     }
     static char text[PATH_MAX + 128];
-    snprintf(text, sizeof(text), "The Xbox dashboard isn't installed: copy its files (xboxdash.xbe and its folders) "
-             "to %s/Partition2", g_hdd);
+    snprintf(text, sizeof(text), "The dashboard couldn't be put on the hard disk's C: drive (%s/Partition2)", g_hdd);
     message(text, 600);
     nc_log("hakuX-libretro", "%s", text);
     return false;
@@ -774,6 +778,9 @@ void nc_lr_end(const char *why)
     _exit(0);
 }
 
+/* Last pacing slot, or the start time of a late call. Zero after unload. */
+static uint64_t g_last_run_at;
+
 RETRO_API void retro_unload_game(void)
 {
     nc_lr_end("unload");
@@ -784,18 +791,19 @@ RETRO_API void retro_unload_game(void)
     handlers_restore();
     nc_lr_video_reset();
     nc_lr_vk_reset();
+    g_last_run_at = 0;
     cheats_forget();                /* the next game's come from RetroArch again */
     g_game[0] = 0;
     g_dash = false;
     g_armed = false;
 }
 
-/* HAKUX_LR_STATS=1: every 10 s, how long retro_run takes RetroArch's thread
- * (avg, max) and its video part. */
-static void run_stat(uint64_t t0, uint64_t tv, uint64_t t1)
+/* HAKUX_LR_STATS=1 logs call and frame rates plus run and video timings.
+ * The timings exclude the pacing wait. */
+static void run_stat(uint64_t t0, uint64_t tv, uint64_t t1, bool shown)
 {
     static int on = -1;
-    static uint64_t start, n, run_sum, run_max, vid_sum, vid_max;
+    static uint64_t start, n, run_sum, run_max, vid_sum, vid_max, frames;
     if (on < 0) {
         const char *e = getenv("HAKUX_LR_STATS");
         on = e && atoi(e) != 0;
@@ -805,32 +813,60 @@ static void run_stat(uint64_t t0, uint64_t tv, uint64_t t1)
     }
     start = start ? start : t0;
     n++;
+    frames += shown;
     run_sum += t1 - t0;
     run_max = t1 - t0 > run_max ? t1 - t0 : run_max;
     vid_sum += t1 - tv;
     vid_max = t1 - tv > vid_max ? t1 - tv : vid_max;
     if (t1 - start >= 10000000000ull) {
-        nc_log("hakuX-libretro", "stats: %.2f retro_run/s, %.2f ms each (max %.2f), video %.2f ms (max %.2f)",
-               (double)n * 1e9 / (double)(t1 - start), (double)run_sum / (double)n / 1e6, (double)run_max / 1e6,
-               (double)vid_sum / (double)n / 1e6, (double)vid_max / 1e6);
+        nc_log("hakuX-libretro", "stats: %.2f retro_run/s, %.2f frames/s to RetroArch, %.2f ms each (max %.2f), "
+               "video %.2f ms (max %.2f)", (double)n * 1e9 / (double)(t1 - start),
+               (double)frames * 1e9 / (double)(t1 - start), (double)run_sum / (double)n / 1e6,
+               (double)run_max / 1e6, (double)vid_sum / (double)n / 1e6, (double)vid_max / 1e6);
         start = t1;
-        n = run_sum = run_max = vid_sum = vid_max = 0;
+        n = run_sum = run_max = vid_sum = vid_max = frames = 0;
     }
+}
+
+static void xbe_patches_changed(void);
+static void online_notices(void);
+
+/* Skipping a present can remove the frontend's vsync wait. Pace early
+ * calls at the Xbox rate and restart the schedule after a late call.
+ * Fast-forward, frame stepping and rewind bypass the wait. */
+static uint64_t paced(uint64_t now)
+{
+    const uint64_t due = g_last_run_at + NC_LR_FRAME_NS;
+    struct retro_throttle_state t = {RETRO_THROTTLE_NONE, 0.0f};
+    if (!g_last_run_at || now >= due ||
+        (g_env(RETRO_ENVIRONMENT_GET_THROTTLE_STATE, &t) &&
+         (t.mode == RETRO_THROTTLE_FAST_FORWARD || t.mode == RETRO_THROTTLE_FRAME_STEPPING ||
+          t.mode == RETRO_THROTTLE_REWINDING))) {
+        g_last_run_at = now;
+        return now;
+    }
+    const struct timespec ts = {(time_t)(due / 1000000000ull), (long)(due % 1000000000ull)};
+    while (clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, NULL) == EINTR) {
+    }
+    g_last_run_at = due;            /* Keep the deadline across sleep jitter. */
+    return now_ns();
 }
 
 RETRO_API void retro_run(void)
 {
-    const uint64_t now = now_ns();
+    const uint64_t now = paced(now_ns());
     nc_lr_input_run(g_input_poll, g_input_state);
     nc_lr_mic_run();
     nc_dev_nv2a_display_vsync(now);         /* RetroArch's frame tick is the display's vsync */
     gap_tick(now);
     nc_lr_audio_run(g_audio_batch);
     const uint64_t tv = now_ns();
-    nc_lr_video_run(g_video);
-    run_stat(now, tv, now_ns());
+    const bool shown = nc_lr_video_run(g_video);
+    run_stat(now, tv, now_ns(), shown);
     nc_lr_options_run();
     nc_lr_net_run();
+    xbe_patches_changed();
+    online_notices();
 
     /* A title's relaunch (XLaunchNewImage): the same game boots again, into
      * the XBE its launch data page names, in the process. */
@@ -893,25 +929,81 @@ static bool cheat_told(const char *code)
     return false;
 }
 
+static uint64_t g_xbe_told = UINT64_MAX;      /* the patch set told about (none: 0 is the empty set's) */
+/* Defer the ignored-cheat notice until RetroArch has supplied the core options. */
+static bool g_front_on, g_off_told;
+
 static void cheats_forget(void)
 {
     nc_cheat_front_reset();
+    nc_xbe_patch_front_reset();
     g_ncheat_bad = 0;
+    g_xbe_told = UINT64_MAX;
+    g_front_on = g_off_told = false;
 }
 
 RETRO_API void retro_cheat_reset(void)
 {
     nc_cheat_front_reset();
+    nc_xbe_patch_front_reset();
+    g_front_on = false;
 }
 
+/* Route XBE patches separately from memory cheats. */
 RETRO_API void retro_cheat_set(unsigned index, bool enabled, const char *code)
 {
     char err[96];
     code = code ? code : "";
+    g_front_on |= enabled && *code;
+    const bool xbe = nc_xbe_patch_is(code);
+    if (xbe) {
+        nc_cheat_front_set(index, false, NULL, NULL, 0);
+        if (!nc_xbe_patch_front_set(index, enabled, code, err, sizeof(err)) && !cheat_told(code)) {
+            nc_log("hakuX-libretro", "cheat %u: XBE patch \"%.60s%s\": %s; it stays off", index, code,
+                   strlen(code) > 60 ? "..." : "", err);
+        }
+        return;
+    }
+    nc_xbe_patch_front_set(index, false, NULL, NULL, 0);
     if (!nc_cheat_front_set(index, enabled, code, err, sizeof(err)) && !cheat_told(code)) {
-        nc_log("hakuX-libretro", "cheat %u \"%s\": %s; it stays off (mods/README.md has the codes)", index, code,
+        nc_log("hakuX-libretro", "cheat %u \"%s\": %s; it stays off (patches/mods/README.md has the codes)", index, code,
                err);
     }
+}
+
+
+static void online_notices(void)
+{
+    if (g_front_on && !g_off_told && !nc_online_cheats()) {
+        g_off_told = true;
+        message("Cheats are off in the core options: RetroArch's cheats and XBE patches are ignored", 360);
+        nc_log("hakuX-libretro", "Cheats are off: RetroArch's cheats and XBE patches are ignored");
+    }
+    const char *what = nc_online_take_notice();
+    if (what && nc_net_mode() != NC_NET_OFF) {
+        static char text[220];
+        snprintf(text, sizeof(text), "Xbox Live is off until the game restarts: %s changed it. %s", what,
+                 nc_online_cause() == NC_ONLINE_UNCAPPED
+                     ? "Unset HAKUX_HLE_UNCAP to play on Insignia"
+                     : "Turn its cheats and patches off (or the Cheats option) and restart the game to play on Insignia");
+        message(text, 600);
+    }
+}
+
+/* Show one restart reminder per change from the booted patch set. */
+static void xbe_patches_changed(void)
+{
+    const uint64_t now = nc_xbe_patch_front_hash();
+    if (now == nc_mods_xbe_patches_booted()) {
+        g_xbe_told = UINT64_MAX;
+        return;
+    }
+    if (now == g_xbe_told || __atomic_load_n(&g_core_state, __ATOMIC_ACQUIRE) != 2) {
+        return;
+    }
+    g_xbe_told = now;
+    message("XBE patches changed: restart the game (Quick Menu, Restart) to apply them", 360);
+    nc_log("hakuX-libretro", "XBE patches changed since the boot: they apply at the next restart");
 }
 
 RETRO_API void *retro_get_memory_data(unsigned id)

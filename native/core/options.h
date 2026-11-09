@@ -7,6 +7,7 @@
  *   relaunch         a title's reboot into another of its XBEs
  *   loadstate=FILE   boot into a savestate (native/state)
  *   mods=FILE        the run's mods and cheats (native/core/mods.h)
+ *   cheats=0|1       allow mods and cheats (off by default)
  *   version=NAME     the core's version, recorded in savestates
  *   scale=N          the render scale
  *   asyncpipe=0|1    asynchronous shader compilation (on when absent)
@@ -18,8 +19,8 @@
  *   lang=N           its language (XC_LANGUAGE: 1 English ... 9 Portuguese)
  *   clock=MS         its clock's distance from the phone's time
  *   tz=MINUTES       its time zone, east of UTC
- *   net=off|nat|lan|kai  its network (native/net/net.h); with it dns=,
- *                    lanport=, lanbcast=, lanpeers=, kai=
+ *   net=off|on       its network cable (native/net/net.h); with it dns=,
+ *                    lanport=, lanbcast=, lanpeers=
  *
  * The front end's own (the picture's shape and filters, the input, the
  * Vulkan driver) stay with it.

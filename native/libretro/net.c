@@ -1,19 +1,13 @@
 /* Copyright (C) 2026-present PortareOS */
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * hakuX native core — the libretro core's network (native/net), the Network
- * option: off, LAN (system link with the consoles on this network) or Xbox
- * Live through Insignia (NAT with Insignia's DNS server, matching the app's
- * "Xbox Live: Insignia" connection). LAN broadcasts on the default route's
- * interface and reaches consoles listed in lan-peers.txt in the save
- * directory, including peers on another subnet or across a VPN. Use
- * insignia-dns.txt in that directory to select another DNS server, such as
- * insigniaDNS on the local network, if the provider blocks Insignia's server.
- * Insignia accounts are created in the dashboard (no content, core.c).
- * Warn game users if no account exists, and dashboard users if Insignia is
- * disabled. If another console has the same identity (e.g. after copying
- * its hard disk), warn and request a new identity at the next game start,
- * as the app's "New identity" does.
+ * RetroArch's Network option controls the emulated Ethernet cable.
+ * When enabled, NAT provides Insignia access and LAN provides system link.
+ * LAN peers may be configured in lan-peers.txt; insignia-dns.txt selects
+ * an alternative DNS server. Both files live in RetroArch's save directory.
+ *
+ * Report missing Insignia accounts and duplicate console identities.
+ * Account setup is handled by the dashboard.
  */
 #include "native/libretro/libretro_int.h"
 #include "native/kernel/kernel.h"
@@ -201,42 +195,12 @@ static void insignia_status(void)
         return;
     }
     nc_log("hakuX-libretro", "network: no Insignia account on this console");
-    if (nc_lr_dashboard()) {
-        return;
-    }
-    static const struct retro_message msg = {
-        "No Insignia account on this console yet: after registering it with Insignia's Setup Assistant, "
-        "start the core without a game to open the dashboard, then Xbox Live", 600};
-    nc_lr_env(RETRO_ENVIRONMENT_SET_MESSAGE, (void *)&msg);
 }
 
-void nc_lr_net_apply(const char *mode)
+/* Configure LAN broadcast and explicit peers. */
+static void lan_setup(void)
 {
-    g_twin_told = false;
-    if (!strcmp(mode, "insignia")) {
-        char dns[64], arg[80];
-        insignia_dns(dns, sizeof(dns));
-        nc_net_option("net=nat");
-        snprintf(arg, sizeof(arg), "dns=%s", dns);
-        nc_net_option(arg);
-        nc_log("hakuX-libretro", "network: Xbox Live through Insignia (NAT), DNS %s%s", dns,
-               strcmp(dns, INSIGNIA_DNS) ? " (insignia-dns.txt)" : "");
-        insignia_status();
-        return;
-    }
-    if (nc_lr_dashboard()) {
-        /* Dashboard account sign-up and recovery require Insignia networking. */
-        static const struct retro_message msg = {
-            "Xbox Live in the dashboard needs Network set to Xbox Live (Insignia) in the core options", 480};
-        nc_lr_env(RETRO_ENVIRONMENT_SET_MESSAGE, (void *)&msg);
-        nc_log("hakuX-libretro", "network: the dashboard without Insignia (network %s)", mode);
-    }
-    if (strcmp(mode, "lan")) {
-        nc_net_option("net=off");
-        return;
-    }
     char bcast[32], ifname[IF_NAMESIZE + 1], peers[240], arg[256];
-    nc_net_option("net=lan");
     const bool found = lan_bcast(bcast, sizeof(bcast), ifname, sizeof(ifname));
     snprintf(arg, sizeof(arg), "lanbcast=%s", found ? bcast : "255.255.255.255");
     nc_net_option(arg);
@@ -251,9 +215,42 @@ void nc_lr_net_apply(const char *mode)
     }
 }
 
+void nc_lr_net_apply(const char *mode)
+{
+    g_twin_told = false;
+    if (!strcmp(mode, "enabled")) {
+        char dns[64], arg[80];
+        insignia_dns(dns, sizeof(dns));
+        nc_net_option("net=on");
+        snprintf(arg, sizeof(arg), "dns=%s", dns);
+        nc_net_option(arg);
+        nc_log("hakuX-libretro", "network: on (Xbox Live through Insignia and system link), DNS %s%s", dns,
+               strcmp(dns, INSIGNIA_DNS) ? " (insignia-dns.txt)" : "");
+        lan_setup();
+        insignia_status();
+        return;
+    }
+    nc_net_option("net=off");
+    if (nc_lr_dashboard()) {
+        /* Insignia setup in the dashboard requires networking. */
+        static const struct retro_message msg = {"Xbox Live in the dashboard needs Network on in the core options",
+                                                 480};
+        nc_lr_env(RETRO_ENVIRONMENT_SET_MESSAGE, (void *)&msg);
+        nc_log("hakuX-libretro", "network: the dashboard without the network");
+    }
+}
+
 void nc_lr_net_run(void)
 {
     char addr[INET_ADDRSTRLEN];
+    if (nc_net_take_conflict(addr, sizeof(addr))) {
+        static char text[200];
+        snprintf(text, sizeof(text), "Another console on this network uses this one's address (%s): restart the "
+                 "game on one of them for system link", addr);
+        const struct retro_message msg = {text, 600};
+        nc_lr_env(RETRO_ENVIRONMENT_SET_MESSAGE, (void *)&msg);
+        nc_log("hakuX-libretro", "network: %s", text);
+    }
     if (!nc_net_take_twin(addr, sizeof(addr)) || g_twin_told) {
         return;
     }

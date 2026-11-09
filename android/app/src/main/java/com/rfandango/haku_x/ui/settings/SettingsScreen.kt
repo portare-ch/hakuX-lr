@@ -81,6 +81,7 @@ fun SettingsScreen(
   var replacing by remember { mutableStateOf<Uri?>(null) }     /* the folder a pick replaces; null: adds */
   var removing by remember { mutableStateOf<Uri?>(null) }
   var uncapped by remember { mutableStateOf(prefs.uncapped) }
+  var cheats by remember { mutableStateOf(prefs.cheats) }
   var asyncShaders by remember { mutableStateOf(prefs.asyncShaders) }
   var prebuildShaders by remember { mutableStateOf(prefs.prebuildShaders) }
   var consoleTiming by remember { mutableStateOf(prefs.consoleTiming) }
@@ -190,6 +191,13 @@ fun SettingsScreen(
           stringResource(R.string.settings_applies_next_start),
         checked = uncapped,
         onChange = { uncapped = it; prefs.uncapped = it },
+      )
+      SwitchItem(
+        title = stringResource(R.string.settings_cheats),
+        summary = stringResource(R.string.settings_cheats_desc) + " " +
+          stringResource(R.string.settings_applies_next_start),
+        checked = cheats,
+        onChange = { cheats = it; prefs.cheats = it },
       )
       ListItem(
         headlineContent = { Text(stringResource(R.string.settings_aspect)) },

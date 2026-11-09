@@ -55,9 +55,10 @@ otherwise, chosen at run time; `NC_APU_SIMD=sse2|scalar` caps the level.
 Releases include an experimental x86-64 archive; see the
 [installation guide](../README.md#play-on-amd64-x86-64-linux-systems).
 
-The Linux builds (ARM64 and x86-64) enable `HAKUX_DSP_JIT` by default. It builds
-dsp56300 1.0.0 from pinned sources using Cargo's locked dependencies;
-release archives include their license notices and Rust toolchain version.
+ARM64 and x86-64 Linux builds enable `HAKUX_DSP_JIT` by default. The
+pinned dsp56300 sources are patched in the build directory and built with
+Cargo's locked dependencies. Release archives retain license notices and
+Rust toolchain details.
 `-DHAKUX_DSP_JIT=OFF` builds the C interpreter without requiring Rust.
 
 The build produces the core, diagnostic tools, `libretro-harness` and smoke
@@ -139,14 +140,53 @@ The PortareOS build (`HAKUX_LR_END_PROCESS`) exits RetroArch if shutdown
 takes longer than 10 seconds. Set `HAKUX_LR_STOP=0` for the legacy behavior:
 closing a game exits RetroArch, and switching game executables relaunches it.
 
+The **Cheats** core option is off by default. Enable it to apply RetroArch
+cheats and XBE patches. Applied cheats, patches and uncapped frame rates
+disable Xbox Live for the rest of the session. System link remains
+available. To reconnect to Insignia, disable the change that triggered the
+block and restart the game.
+
 Cheats come from RetroArch's **Cheats** menu or a `.cht` file. A cheat's
 code is one or more codes joined by `+`, spaces or newlines: the code lines
-of [mods/README.md](../mods/README.md#cheats-cheatstxt) (`w32 0x0034A5C8 99`,
+of [patches/mods/README.md](../patches/mods/README.md#cheats-cheatstxt) (`w32 0x0034A5C8 99`,
 `if16 0x00ABCDE0 != 0 + w16 [0x00456700]+0x1C 0x00C8 + end`), or
 `AAAAAAAA VVVVVVVV`, which writes the 32-bit hex value V at the hex address
 A. Cheats apply from the next frame, also when applied before the game has
 started, and stay through a reset. A code the core can't read is logged once
 and that cheat stays off.
+
+XBE patches (including widescreen hacks) use RetroArch's Cheats menu.
+An emulator-handled `.cht` entry contains an `xbe-patch-v1` code:
+
+```ini
+cheats = 1
+cheat0_desc = "Widescreen (16:9) [restart]"
+cheat0_handler = 0
+cheat0_code = "xbe-patch-v1 DF0DB6D8:00157000+0004E163:70+0004E18E:70"
+cheat0_enable = false
+```
+
+The code identifies the stock XBE by CRC-32 and size, followed by up
+to 128 sorted, non-overlapping `+OFFSET:BYTES` runs of 1–64 bytes each.
+CRC-32, size and offsets use eight hex digits; offsets start at byte 4 to
+preserve the XBE signature. All matching runs apply together at boot or
+relaunch, including to sections loaded later. Mismatches, invalid codes
+or multiple matching patches leave the XBE unchanged and are logged.
+ISO and CHD copies of the same XBE use the same patch. Memory cheats
+continue to work alongside XBE patches.
+
+Load the `.cht` from **Quick Menu → Cheats**, enable it, select
+**Apply Changes**, then **Restart**. A reminder appears if the enabled
+patches differ from the running game. For widescreen patches, set
+**Screen Format** to **Widescreen** and the aspect ratio to
+**Core provided**. To undo a patch, disable it, apply changes and restart.
+
+Convert an IPS/BPS patch (requires Floating IPS, `flips`) or a
+patched XBE with `tools/mods/xbe-to-cht.py`:
+
+```sh
+python3 tools/mods/xbe-to-cht.py stock.xbe widescreen.ips > "Game (USA).cht"
+```
 
 Core options (`native/libretro/options.c`) apply on the next game start,
 except Crop Overscan, Rumble and Frame Pacing, which update immediately:
@@ -159,7 +199,7 @@ except Crop Overscan, Rumble and Frame Pacing, which update immediately:
 | `hakux_language` | `auto` (RetroArch's), `english`, `japanese`, `german`, `french`, `spanish`, `italian`, `korean`, `chinese`, `portuguese` | `auto` |
 | `hakux_video_region` | `auto` (the game's region), `ntsc-m`, `ntsc-j`, `pal` | `auto` |
 | `hakux_rumble` | `disabled`, `enabled` (controller vibration) | `disabled` |
-| `hakux_network` | `disabled` (no cable), `lan` (system link), `insignia` (Xbox Live through Insignia via NAT) | `disabled` |
+| `hakux_network` | `disabled` (no cable), `lan` (system link), `insignia` (Xbox Live through Insignia via NAT), `all` (both at once) | `disabled` |
 | `hakux_communicator` | `disabled`, `enabled` (an Xbox Live Communicator in player 1's controller; experimental) | `disabled` |
 | `hakux_mic_sensitivity` | `medium`, `low`, `high`, `off` (the Communicator's noise gate: -38, -30 or -46 dBFS, or none) | `medium` |
 | `hakux_audio_resampler` | `sinc` (higher quality, 32-tap filter; NEON on ARM64, AVX2+FMA or SSE2 on x86-64), `linear` (less CPU, softer high frequencies) | `sinc` |
@@ -190,18 +230,25 @@ output, 3 dB down in each channel. Voice with another player is untested.
 `NC_TRACE_MIC=1` logs the gate's decisions, and `NC_MIC_DUMP=<file>` saves the
 microphone's first 60 seconds as raw 16-bit mono.
 
-Insignia mode uses upstream's NAT backend (`native/net/nat.c`, libslirp).
-The console gets 10.0.2.15 via DHCP and uses Insignia's DNS server,
+With **Network** on, the console has upstream's NAT backend
+(`native/net/nat.c`, libslirp) for Xbox Live and the LAN backend for system link
+at once (`native/net/all.c`), as one cable on a home network. DHCP gives the
+console an address from its MAC, 10.0.2.16-215, one no other console on the
+network keeps (`native/net/lan.c`), and Insignia's DNS server,
 46.101.64.175. If your provider blocks that server, put an insigniaDNS
 server's address in `insignia-dns.txt` in the save directory, using the same
-format as `lan-peers.txt`. Only the first address is used. To boot the Xbox
-dashboard, copy your `xboxdash.xbe` and its folders into `hdd/Partition2/`
-under RetroArch's save directory,
-then choose **Load Core → Microsoft - Xbox (hakuX) → Start Core** without
-loading content. Enable **Network → Xbox Live (Insignia)** for its Xbox Live
-pages. Register the console with Insignia's Setup Assistant first.
-Dashboard navigation in real RetroArch and end-to-end Insignia account
-setup and sign-in still need device validation.
+format as `lan-peers.txt`. Only the first address is used.
+
+**Load Core → Microsoft - Xbox (hakuX) → Start Core** opens
+[hakux-lr-dash](https://github.com/portare-ch/hakux-lr-dash) without a game.
+At boot the core installs it at `C:\xboxdash.xbe` and
+`C:\xodash\xonlinedash.xbe`, replacing any dashboard executables at those
+paths. It keeps the other files on C:.
+
+Under **Xbox Live**, select **Register this console**, then
+**Create an Insignia account** with the subscription code Insignia emails
+you. **Network** is on by default. Account recovery from this dashboard is
+still pending.
 
 PAL60 is always enabled; 480p, 720p and 1080i are disabled. Use RetroArch's
 shaders for filters such as FXAA and **Core provided** for the core's 4:3 or
@@ -209,8 +256,14 @@ shaders for filters such as FXAA and **Core provided** for the core's 4:3 or
 
 The remaining design targets are in [LIBRETRO_SPEC.md](../LIBRETRO_SPEC.md).
 
-`HAKUX_LR_STATS=1` logs time spent in `retro_run`. `HAKUX_DISP_STATS=1`
-logs new frames per second, frame age and gaps between frames in any frontend.
+The core skips unchanged frames by default so RetroArch and MangoHud
+show the game's frame rate. Early calls wait for the next Xbox frame
+period. Enable **Repeat Frames** for RetroArch recording, streaming or
+black-frame insertion. FPS counters then include repeats.
+
+`HAKUX_LR_STATS=1` logs time spent in `retro_run` and the frames handed to
+RetroArch each second. `HAKUX_DISP_STATS=1` logs new frames per second, frame
+age and gaps between frames in any frontend.
 
 Frame Pacing (from rfandango/hakuX#14) holds a game whose GPU work falls
 behind its simulation to the render pace, so frames don't queue up as input

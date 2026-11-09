@@ -1,5 +1,5 @@
 /*
- * hakuX native core — mods and cheats for the title (mods/README.md), from
+ * hakuX native core — mods and cheats for the title (patches/mods/README.md), from
  * the manifest the app writes for the run (NativeCoreActivity, "mods=<file>"):
  *
  *   file  <TAB> <disc path> <TAB> <host file>      a disc file replaced or added
@@ -34,6 +34,11 @@ void nc_mods_install(NcDisc *disc);
 /* The core stopped: the patches remembered, the cheats and the per-boot
  * state dropped (the manifest, the front end's, stays). */
 void nc_mods_reset(void);
+/* Apply a uniquely matching patch to the booting disc XBE. Runs are
+ * all-or-nothing; a NULL disc skips patching. */
+void nc_mods_xbe_patches(NcDisc *disc, const char *xbe_path);
+/* Hash of the patch set used at the last boot. */
+uint64_t nc_mods_xbe_patches_booted(void);
 /* The patches of [$u\...] sections (a title update's XBE, a host file) over
  * len bytes read at off of the host file host. */
 void nc_mods_host_patch(const char *host, uint64_t off, void *buf, size_t len);
