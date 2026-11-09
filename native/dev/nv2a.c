@@ -29,6 +29,7 @@
  * level 3. Written from the register map, without the LLE device.
  */
 #include "native/dev/dev.h"
+#include "native/core/online.h"
 #include "hw/xbox/hle/host.h"
 #include "hw/xbox/hle/pb/pbdraw.h"
 #include "hw/xbox/hle/pb/pbmode.h"
@@ -763,6 +764,7 @@ static bool uncapped(void)
 static uint64_t wait_vblank(uint64_t next, uint64_t last)
 {
     if (g_pbmode && uncapped()) {
+        nc_online_modified(NC_ONLINE_UNCAPPED, "an uncapped frame rate");
         for (uint64_t t = now_ns(); t < next; t = now_ns()) {
             if (t - last >= EARLY_GAP_NS && hle_pb_flip_waiting() &&
                 !(ld(NV_PCRTC_INTR_0) & PCRTC_VBLANK)) {

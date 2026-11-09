@@ -116,6 +116,7 @@ add_library(hakux_native STATIC
   core/chd.c
   core/xbe_load.c
   core/mods.c
+  core/online.c
   core/options.c
   core/cheats.c
   core/xbe_patch.c

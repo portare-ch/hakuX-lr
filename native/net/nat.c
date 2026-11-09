@@ -59,11 +59,44 @@ static int64_t now_ns(void)
     return (int64_t)ts.tv_sec * 1000000000 + ts.tv_nsec;
 }
 
+static bool g_internet_off;
+
+void nc_net_internet(bool on)
+{
+    if (__atomic_exchange_n(&g_internet_off, !on, __ATOMIC_ACQ_REL) != !on && !on) {
+        nc_log("hakuX-native-net", "nat: the Internet is off: only ARP and DHCP pass");
+    }
+}
+
+/* Keep ARP and the DHCP exchange with the local server at 10.0.2.2
+ * available while Internet access is blocked. */
+static bool local_frame(const uint8_t *f, size_t len, bool out)
+{
+    static const uint8_t server[4] = {10, 0, 2, 2}, all[4] = {255, 255, 255, 255};
+    if (len < 14) {
+        return false;
+    }
+    const unsigned type = (unsigned)f[12] << 8 | f[13];
+    if (type == 0x0806) {
+        return true;                    /* ARP */
+    }
+    const uint8_t *ip = f + 14;
+    const size_t ihl = len >= 14 + 20 ? (size_t)(ip[0] & 15) * 4 : 0;
+    if (type != 0x0800 || (ip[0] >> 4) != 4 || ihl < 20 || ip[9] != 17 || len < 14 + ihl + 8) {
+        return false;
+    }
+    const unsigned from = (unsigned)ip[ihl] << 8 | ip[ihl + 1], to = (unsigned)ip[ihl + 2] << 8 | ip[ihl + 3];
+    return out ? from == 68 && to == 67 && (!memcmp(ip + 16, server, 4) || !memcmp(ip + 16, all, 4))
+               : from == 67 && to == 68 && !memcmp(ip + 12, server, 4);
+}
+
 /* ------------------------------------------------- libslirp's callbacks */
 
 static slirp_ssize_t cb_send_packet(const void *buf, size_t len, void *opaque)
 {
-    nc_net_deliver(buf, len);
+    if (!__atomic_load_n(&g_internet_off, __ATOMIC_ACQUIRE) || local_frame(buf, len, false)) {
+        nc_net_deliver(buf, len);
+    }
     return (slirp_ssize_t)len;
 }
 
@@ -279,8 +312,12 @@ static void nat_probed(void)
         g_nat.nheld = 0;
         return;
     }
+    /* Recheck access before replaying held frames. */
     for (unsigned i = 0; i < g_nat.nheld; i++) {
-        slirp_input(g_nat.slirp, g_nat.held[i], (int)g_nat.held_len[i]);
+        if (!__atomic_load_n(&g_internet_off, __ATOMIC_ACQUIRE) ||
+            local_frame(g_nat.held[i], g_nat.held_len[i], true)) {
+            slirp_input(g_nat.slirp, g_nat.held[i], (int)g_nat.held_len[i]);
+        }
     }
     g_nat.nheld = 0;
 }
@@ -298,6 +335,9 @@ static bool nat_init(void)
 static void nat_input(const uint8_t *frame, size_t len)
 {
     if (len < 14) {
+        return;
+    }
+    if (__atomic_load_n(&g_internet_off, __ATOMIC_ACQUIRE) && !local_frame(frame, len, true)) {
         return;
     }
     if (!g_nat.slirp && g_nat_shared) {

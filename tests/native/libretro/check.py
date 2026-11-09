@@ -389,6 +389,7 @@ def main():
             ('ports: 1 0 0 0', 'port 4: none', 'reset at frame 20', 'ohci: 1 controller(s) (players 1)',
              'ran 40 frames'),
             dict(vk, HARNESS_PORTS='1,0,0,0', HARNESS_RESET_AT='20'))
+        mods = dict(vk, HARNESS_OPTIONS=f'{OFF};hakux_cheats=enabled')
         # RetroArch's cheats, applied as the game loads, before the guest
         # boots (context_reset): the title halts once the byte is there and
         # spins without. A code the core can't read is logged once, though
@@ -399,16 +400,30 @@ def main():
              b'\x75\xf7'                       # jne back
              b'\xf4')                          # hlt
         run([args.harness, args.core, root / 'cheat.iso', 600, root / 'saves'], 0,
-            ('cheats: 1 applied', 'guest executed HLT'), dict(vk, HARNESS_CHEATS='w8 0x10E00 0x5A'))
+            ('cheats: 1 applied', 'guest executed HLT'), dict(mods, HARNESS_CHEATS='w8 0x10E00 0x5A'))
+        # Verify that the default ignores cheats and a successful cheat write blocks Xbox Live.
+        run_without([args.harness, args.core, root / 'cheat.iso', 120, root / 'saves'],
+                    ('Cheats are off: RetroArch', 'message: Cheats are off in the core options',
+                     'ran 120 frames'),
+                    ('guest executed HLT', 'online:'), dict(vk, HARNESS_CHEATS='w8 0x10E00 0x5A'))
+        run([args.harness, args.core, root / 'cheat.iso', 600, root / 'saves'], 0,
+            ('online: a cheat changed the game: Xbox Live (the Internet) is off until it boots again',
+             'nat: the Internet is off: only ARP and DHCP pass',
+             'message: Xbox Live is off until the game restarts: a cheat changed it', 'guest executed HLT'),
+            dict(vk, HARNESS_OPTIONS='hakux_network=enabled;hakux_cheats=enabled', NC_NET=NAT_TEST,
+                 HARNESS_CHEATS='w8 0x10E00 0x5A'))
+        run_without([args.harness, args.core, root / 'cheat.iso', 600, root / 'saves'],
+                    ('online: a cheat changed the game', 'guest executed HLT'), ('message: Xbox Live is off',),
+                    dict(mods, HARNESS_CHEATS='w8 0x10E00 0x5A'))
         run_without([args.harness, args.core, root / 'cheat.iso', 60, root / 'saves'], ('ran 60 frames',),
                     ('guest executed HLT',), vk)
         run_counts([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'],
                    {'frame 10: cheats: 2 applied': 1, '"w9 0x100 1": code 1: unknown code; it stays off': 1},
-                   dict(vk, HARNESS_CHEATS='w8 0x100 1|w9 0x100 1', HARNESS_CHEATS_AT='10'))
+                   dict(mods, HARNESS_CHEATS='w8 0x100 1|w9 0x100 1', HARNESS_CHEATS_AT='10'))
         run_counts([args.harness, args.core, root / 'spin.iso', 50, root / 'saves'],
                    {'reset at frame 20': 1, 'reset: the core stopped in': 1,
                     "the frontend's cheat 0: an address isn't mapped (yet)": 2},
-                   dict(vk, HARNESS_CHEATS='w8 0x100 1', HARNESS_RESET_AT='20'))
+                   dict(mods, HARNESS_CHEATS='w8 0x100 1', HARNESS_RESET_AT='20'))
         # Both the XBE patch and memory cheat must apply for the title to halt.
         disc(root / 'xbepatch.iso',
              b'\x80\x3d\x00\x0e\x01\x00\x5a'   # cmp byte [0x10e00], 0x5a
@@ -421,11 +436,11 @@ def main():
         poke = 'w8 0x10E00 0x5A'
         xp = [args.harness, args.core, root / 'xbepatch.iso', 600, root / 'saves']
         run(xp, 0, ('XBE patch (cheat 1): 1 runs, 2 bytes over default.xbe', 'guest executed HLT'),
-            dict(vk, HARNESS_CHEATS=f'{poke}|{patch()}'))
+            dict(mods, HARNESS_CHEATS=f'{poke}|{patch()}'))
         xp60 = xp[:3] + [60] + xp[4:]
-        run_without(xp60, ('ran 60 frames',), ('guest executed HLT',), dict(vk, HARNESS_CHEATS=poke))
+        run_without(xp60, ('ran 60 frames',), ('guest executed HLT',), dict(mods, HARNESS_CHEATS=poke))
         run_without(xp60, ('XBE patch (cheat 0)', 'ran 60 frames'), ('guest executed HLT',),
-                    dict(vk, HARNESS_CHEATS=patch()))
+                    dict(mods, HARNESS_CHEATS=patch()))
         # Mismatched, malformed or conflicting patches leave the XBE unchanged.
         for codes, marker in ((patch(crc=zlib.crc32(xbe) ^ 1), 'none for default.xbe'),
                               (patch(size=len(xbe) + 0x1000), 'none for default.xbe'),
@@ -433,9 +448,9 @@ def main():
                               (patch(runs='+00001009:F4+00001009:F4'), 'not after run 1'),
                               (f'{patch()}|{patch(runs="+00001009:F4")}', 'cheats 1 and 2 both patch default.xbe')):
             run_without(xp60, (marker, 'ran 60 frames'), ('guest executed HLT', 'XBE patch (cheat'),
-                        dict(vk, HARNESS_CHEATS=f'{poke}|{codes}'))
+                        dict(mods, HARNESS_CHEATS=f'{poke}|{codes}'))
         # Enabling a patch after boot requires a restart and shows a reminder.
-        late = dict(vk, HARNESS_CHEATS_LATE='1', HARNESS_READY='stage S0 xbe loaded')
+        late = dict(mods, HARNESS_CHEATS_LATE='1', HARNESS_READY='stage S0 xbe loaded')
         run_counts(xp,
                    {'XBE patches changed since the boot': 1, 'XBE patch (cheat 1)': 1, 'guest executed HLT': 1},
                    dict(late, HARNESS_CHEATS=f'{poke}|{patch()}', HARNESS_CHEATS_AT='r1', HARNESS_RESET_AT='m5'))
@@ -445,7 +460,7 @@ def main():
         # Renumbering cheats must not change the patch-set hash.
         run_counts(xp[:3] + [300] + xp[4:],
                    {'XBE patches changed since the boot': 0, 'XBE patch (cheat 1)': 1, 'cheats: 1 applied': 1},
-                   dict(vk, HARNESS_CHEATS=f'w8 0x10E04 1|{patch()}', HARNESS_CHEATS2=patch(),
+                   dict(mods, HARNESS_CHEATS=f'w8 0x10E04 1|{patch()}', HARNESS_CHEATS2=patch(),
                         HARNESS_READY='stage S0 xbe loaded', HARNESS_CHEATS2_AT='r5'))
         # M2: the core stops in the process and boots again: 100 games and 20
         # from a CHD, a CPU in a loop that never enters the kernel, the

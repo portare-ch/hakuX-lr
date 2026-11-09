@@ -140,6 +140,12 @@ The PortareOS build (`HAKUX_LR_END_PROCESS`) exits RetroArch if shutdown
 takes longer than 10 seconds. Set `HAKUX_LR_STOP=0` for the legacy behavior:
 closing a game exits RetroArch, and switching game executables relaunches it.
 
+The **Cheats** core option is off by default. Enable it to apply RetroArch
+cheats and XBE patches. Applied cheats, patches and uncapped frame rates
+disable Xbox Live for the rest of the session. System link remains
+available. To reconnect to Insignia, disable the change that triggered the
+block and restart the game.
+
 Cheats come from RetroArch's **Cheats** menu or a `.cht` file. A cheat's
 code is one or more codes joined by `+`, spaces or newlines: the code lines
 of [patches/mods/README.md](../patches/mods/README.md#cheats-cheatstxt) (`w32 0x0034A5C8 99`,

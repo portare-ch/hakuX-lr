@@ -3,6 +3,7 @@
  * end (native/app/app_main.c) and xboxrun (native/run/xboxrun.c).
  */
 #include "native/core/options.h"
+#include "native/core/online.h"
 #include "native/core/core.h"
 #include "native/core/mods.h"
 #include "native/hle/hle_native.h"
@@ -74,6 +75,9 @@ bool nc_option(NcOptions *o, const char *arg)
         nc_kernel_set_clock(strtoll(v, NULL, 10));  /* none: the phone's time */
     } else if ((v = value(arg, "tz="))) {
         nc_kernel_set_time_zone(atoi(v));           /* none: the phone's zone */
+    } else if ((v = value(arg, "cheats="))) {
+        nc_online_set_cheats(atoi(v) != 0);
+        nc_log("hakuX-app", "Cheats %s", atoi(v) ? "on: Xbox Live off in a game they change" : "off");
     } else {
         return false;
     }

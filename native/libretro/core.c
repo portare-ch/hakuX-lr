@@ -34,6 +34,8 @@
 #include "native/core/dash.h"
 #include "native/core/irq.h"
 #include "native/core/mods.h"
+#include "native/net/net.h"
+#include "native/core/online.h"
 #include "native/core/xbe_patch.h"
 #include "native/dev/dev.h"
 #include "native/hle/hle_native.h"
@@ -827,6 +829,7 @@ static void run_stat(uint64_t t0, uint64_t tv, uint64_t t1, bool shown)
 }
 
 static void xbe_patches_changed(void);
+static void online_notices(void);
 
 /* Skipping a present can remove the frontend's vsync wait. Pace early
  * calls at the Xbox rate and restart the schedule after a late call.
@@ -863,6 +866,7 @@ RETRO_API void retro_run(void)
     nc_lr_options_run();
     nc_lr_net_run();
     xbe_patches_changed();
+    online_notices();
 
     /* A title's relaunch (XLaunchNewImage): the same game boots again, into
      * the XBE its launch data page names, in the process. */
@@ -926,6 +930,8 @@ static bool cheat_told(const char *code)
 }
 
 static uint64_t g_xbe_told = UINT64_MAX;      /* the patch set told about (none: 0 is the empty set's) */
+/* Defer the ignored-cheat notice until RetroArch has supplied the core options. */
+static bool g_front_on, g_off_told;
 
 static void cheats_forget(void)
 {
@@ -933,12 +939,14 @@ static void cheats_forget(void)
     nc_xbe_patch_front_reset();
     g_ncheat_bad = 0;
     g_xbe_told = UINT64_MAX;
+    g_front_on = g_off_told = false;
 }
 
 RETRO_API void retro_cheat_reset(void)
 {
     nc_cheat_front_reset();
     nc_xbe_patch_front_reset();
+    g_front_on = false;
 }
 
 /* Route XBE patches separately from memory cheats. */
@@ -946,6 +954,7 @@ RETRO_API void retro_cheat_set(unsigned index, bool enabled, const char *code)
 {
     char err[96];
     code = code ? code : "";
+    g_front_on |= enabled && *code;
     const bool xbe = nc_xbe_patch_is(code);
     if (xbe) {
         nc_cheat_front_set(index, false, NULL, NULL, 0);
@@ -959,6 +968,25 @@ RETRO_API void retro_cheat_set(unsigned index, bool enabled, const char *code)
     if (!nc_cheat_front_set(index, enabled, code, err, sizeof(err)) && !cheat_told(code)) {
         nc_log("hakuX-libretro", "cheat %u \"%s\": %s; it stays off (patches/mods/README.md has the codes)", index, code,
                err);
+    }
+}
+
+
+static void online_notices(void)
+{
+    if (g_front_on && !g_off_told && !nc_online_cheats()) {
+        g_off_told = true;
+        message("Cheats are off in the core options: RetroArch's cheats and XBE patches are ignored", 360);
+        nc_log("hakuX-libretro", "Cheats are off: RetroArch's cheats and XBE patches are ignored");
+    }
+    const char *what = nc_online_take_notice();
+    if (what && nc_net_mode() != NC_NET_OFF) {
+        static char text[220];
+        snprintf(text, sizeof(text), "Xbox Live is off until the game restarts: %s changed it. %s", what,
+                 nc_online_cause() == NC_ONLINE_UNCAPPED
+                     ? "Unset HAKUX_HLE_UNCAP to play on Insignia"
+                     : "Turn its cheats and patches off (or the Cheats option) and restart the game to play on Insignia");
+        message(text, 600);
     }
 }
 

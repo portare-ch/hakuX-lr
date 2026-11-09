@@ -564,6 +564,28 @@ int main(void)
         got = console_got("unsolicited", 400);
     }
     CHECK(got, "a datagram to %u from a stranger reaches the console's 3074", NATPORT);
+    /* Verify that the block drops traffic in both directions. */
+    nc_net_internet(false);
+    if (ip) {
+        CHECK(console_source_port(ip, "Internet off") == 0, "without the Internet, the console's datagram stays in");
+    }
+    bool in = false;
+    for (int tries = 0; tries < 3 && !in; tries++) {
+        stranger_send(NATPORT, "inbound off");
+        in = console_got("inbound off", 300);
+    }
+    CHECK(!in, "without the Internet, a datagram to %u doesn't reach the console", NATPORT);
+    nc_net_internet(true);
+    if (ip) {
+        CHECK(console_source_port(ip, "Internet on") == NATPORT, "with the Internet back, it leaves from %u",
+              NATPORT);
+    }
+    in = false;
+    for (int tries = 0; tries < 5 && !in; tries++) {
+        stranger_send(NATPORT, "inbound on");
+        in = console_got("inbound on", 400);
+    }
+    CHECK(in, "with the Internet back, a datagram to %u reaches the console", NATPORT);
     CHECK(igd_wait(&g_igd.adds, 1, 5000), "UPnP: AddPortMapping asked");
     CHECK(igd_count(&g_igd.descriptions) >= 1, "UPnP: the router's description read (chunked)");
     CHECK(igd_count(&g_igd.externals) == 1, "UPnP: GetExternalIPAddress asked");

@@ -22,6 +22,7 @@
 #include "native/core/cheats.h"
 #include "native/core/core.h"
 #include "native/core/mods.h"
+#include "native/core/online.h"
 #include "native/core/options.h"
 #include "native/dev/usb.h"
 #include "native/kernel/kernel.h"
@@ -404,6 +405,20 @@ EXPORT JNIEXPORT jstring JNICALL Java_com_rfandango_haku_1x_NativeCoreActivity_n
 {
     char addr[64];
     return nc_net_take_twin(addr, sizeof(addr)) ? (*env)->NewStringUTF(env, addr) : NULL;
+}
+
+/* Consume the pending Xbox Live notice for NativeCoreActivity. */
+EXPORT JNIEXPORT jstring JNICALL Java_com_rfandango_haku_1x_NativeCoreActivity_nativeTakeOnlineNotice(JNIEnv *env,
+                                                                                                 jclass cls)
+{
+    const char *what = nc_online_take_notice();
+    return what ? (*env)->NewStringUTF(env, what) : NULL;
+}
+
+/* Return 1 for uncapped timing or 0 for a cheat, patch or mod. */
+EXPORT JNIEXPORT jint JNICALL Java_com_rfandango_haku_1x_NativeCoreActivity_nativeOnlineCause(JNIEnv *env, jclass cls)
+{
+    return nc_online_cause() == NC_ONLINE_UNCAPPED ? 1 : 0;
 }
 
 /* NativeCoreActivity: the core stopped as the title left (to the dashboard, a
