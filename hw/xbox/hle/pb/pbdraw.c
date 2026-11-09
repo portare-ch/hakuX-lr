@@ -253,6 +253,7 @@ static struct {
     uint64_t cgen;                      /* bumped as consts or cur change */
     uint64_t ffgen;                     /* bumped as a register ff_consts reads changes */
     uint64_t blk_gen, blk_ffgen, blk_value;
+    float blk_psz[2];                   /* cached point size and point params flag */
     uint32_t blk_off;
     bool blk_ok, blk_ff;
     uint64_t blk_reused;
@@ -2257,7 +2258,7 @@ static void ff_consts(float (*c)[4])
     regs_f(c[HLE_FFHW_C_EMISSION], 0x03A8, 3);
     regs_f(c[HLE_FFHW_C_SPECULAR], 0x09E0, 3);              /* SET_SPECULAR_PARAMS 0..2 */
     regs_f(c[HLE_FFHW_C_BACK_SPECULAR], 0x1E28, 3);         /* ... _BACK */
-    c[HLE_FFHW_C_PARAMS][2] = (R(0x043C) & 0x1FF) / 8.0f;
+    c[HLE_FFHW_C_PARAMS][2] = MIN(R(0x043C), 0x1FFu) / 8.0f;
     regs_f(c[HLE_FFHW_C_POINT], 0x0A30, 8);
     for (unsigned i = 0; i < 8; i++) {
         float (*l)[4] = &c[HLE_FFHW_C_LIGHTS + HLE_FFHW_LIGHT_VEC4 * i];
@@ -3487,12 +3488,15 @@ static void emit(HleCmdDraw *d)
      * block. Crimson Sea's 2300 draws a frame copied 3.3 KB each; a
      * fixed-function draw's block (ff_consts) holds while none of the
      * registers it is made of changed (ffgen). */
+    /* The Xbox clamps the 6.3 fixed-point SET_POINT_SIZE to 0x1FF. */
+    const float psz[2] = { MIN(R(0x043C), 0x1FFu) / 8.0f, (float)(R(0x0318) & 1) };
     if (g_pd.blk_ok && g_pd.blk_ff == ff && g_pd.blk_gen == g_pd.cgen &&
-        (!ff || g_pd.blk_ffgen == g_pd.ffgen) && g_pd.blk_value == hle_fe_last_value()) {
+        (!ff || g_pd.blk_ffgen == g_pd.ffgen) && g_pd.blk_value == hle_fe_last_value() &&
+        !memcmp(g_pd.blk_psz, psz, sizeof(psz))) {
         c_off = g_pd.blk_off;
         g_pd.blk_reused++;
     } else {
-        c_off = arena(sizeof(g_pd.consts) + sizeof(g_pd.cur), &cb);
+        c_off = arena(sizeof(g_pd.consts) + sizeof(g_pd.cur) + 16, &cb);
         if (c_off == HLE_ARENA_FULL) {
             skip(SK_EMIT_ARENA);
             return;
@@ -3503,6 +3507,9 @@ static void emit(HleCmdDraw *d)
             memcpy(cb, g_pd.consts, sizeof(g_pd.consts));
         }
         memcpy(cb + sizeof(g_pd.consts), g_pd.cur, sizeof(g_pd.cur));
+        const float vpsz[4] = { psz[0], psz[1], 0.0f, 0.0f };
+        memcpy(cb + sizeof(g_pd.consts) + sizeof(g_pd.cur), vpsz, sizeof(vpsz));
+        memcpy(g_pd.blk_psz, psz, sizeof(psz));
         g_pd.blk_ok = true;
         g_pd.blk_ff = ff;
         g_pd.blk_ffgen = g_pd.ffgen;

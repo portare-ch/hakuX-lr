@@ -44,7 +44,7 @@ static void test_program(void)
     HT_CHECK(strstr(buf, "layout(location = 1) in vec4") == NULL);
     /* registers the arrays do not feed read their current values */
     HT_CHECK(strstr(buf, "vec4 v1 = vcur[1];") != NULL);
-    HT_CHECK(strstr(buf, "{ vec4 c[192]; vec4 vcur[16]; }") != NULL);
+    HT_CHECK(strstr(buf, "{ vec4 c[192]; vec4 vcur[16]; vec4 vpsz; }") != NULL);
     /* paired MAC + ILU: both computed before either writes */
     HT_CHECK(strstr(buf, "vec4 m = v3.xyzw;\n    vec4 i = rcp4((R1.wwww).x);\n"
                          "    oD0.xyzw = m.xyzw;\n    R1.w = i.w;") != NULL);
