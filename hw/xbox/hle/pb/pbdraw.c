@@ -4834,21 +4834,33 @@ uint64_t hle_pbd_copy_begin(uint32_t slo, uint32_t sp, uint32_t dlo, uint32_t dp
     }
     /* A frame buffer the copy reads: the front buffer's path keeps its image,
      * not its memory (coh_display), so its image is read back first, once a
-     * drawing, and the copy waits for that landing. nxdk_pgraph_tests saves
-     * each test's back buffer with an M2MF copy (pbkit++ gpum_copy): from
-     * the memory as it was, most of its pictures were an earlier test's. */
+     * drawing, and the copy waits for that landing. Only the newest drawn
+     * one holding the whole source: an older target over the same memory
+     * (a frame buffer since freed, its memory a texture's now) would put
+     * its old image back over newer bytes. nxdk_pgraph_tests saves each
+     * test's back buffer with an M2MF copy (pbkit++ gpum_copy): from the
+     * memory as it was, most of its pictures were an earlier test's. */
+    PbObj *fb = NULL;
     for (unsigned i = 0; i < g_pd.nobjs; i++) {
         PbObj *o = &g_pd.objs[i];
-        if (!o->d.pitch || !coh_len(o, &len) || !coh_display(o) || past_block(&o->d) ||
-            !(o->d.pa < s1 && o->d.pa + len > s0)) {
-            continue;
+        if (o->d.pitch && coh_len(o, &len) && coh_display(o) && !past_block(&o->d) && o->d.pa <= s0 &&
+            s1 <= o->d.pa + len && (!fb || o->written > fb->written)) {
+            fb = o;
         }
-        if (o->fb_wb_w != o->written) {
-            o->fb_wb_v = writeback_ex(o->id, true);
-            o->fb_wb_w = o->written;
+    }
+    for (unsigned i = 0; fb && i < g_pd.nobjs; i++) {
+        const PbObj *o = &g_pd.objs[i];
+        if (o != fb && coh_len(o, &len) && o->d.pa < s1 && o->d.pa + len > s0 && o->written > fb->written) {
+            fb = NULL;                      /* something newer was drawn over it */
         }
-        if (o->fb_wb_v > done) {
-            v = MAX(v, o->fb_wb_v);
+    }
+    if (fb) {
+        if (fb->fb_wb_w != fb->written) {
+            fb->fb_wb_v = writeback_ex(fb->id, true);
+            fb->fb_wb_w = fb->written;
+        }
+        if (fb->fb_wb_v > done) {
+            v = MAX(v, fb->fb_wb_v);
         }
     }
     for (unsigned i = 0; i < WB_NOTES; i++) {           /* the old paths' writebacks in flight */
