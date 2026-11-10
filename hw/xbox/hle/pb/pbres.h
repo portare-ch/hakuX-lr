@@ -35,7 +35,7 @@ void hle_draw_prim_indices(uint32_t pt, const uint16_t *in, uint32_t n, uint32_t
 
 /* Texels the CPU wrote at pa (linear rows of pitch bytes) into object id's
  * image: rects of source pixels, each to its pts[i] (HLE_OP_UPLOAD). */
-void hle_res_upload(uint32_t id, uint32_t pa, uint32_t pitch, uint32_t n,
+bool hle_res_upload(uint32_t id, uint32_t pa, uint32_t pitch, uint32_t n,
                     const HleRect *rects, const int32_t (*pts)[2]);
 /* A direct readback (HLE_RB_DIRECT) when the GPU can't write guest RAM (not
  * imported: the native core's): hle_res_rb_fb reserves len bytes of arena

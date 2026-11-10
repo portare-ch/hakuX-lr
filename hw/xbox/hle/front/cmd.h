@@ -53,6 +53,7 @@ typedef struct HleCmdZRead {
  * end skips it when dst is newer). */
 typedef struct HleCmdZWrite {
     uint32_t dst, src;          /* object ids */
+    uint32_t stencil_only;     /* import RAM stencil before a depth-only clear */
 } HleCmdZWrite;
 
 /* The video overlay (PVIDEO): on = 0 turns it off; else w x h B8G8R8A8
@@ -233,6 +234,7 @@ typedef struct HleCmdReadback {
      * reaches the value (hle_tl_land). */
     uint32_t arena_off, level, face, w, h;
     uint32_t fb, fb_len;            /* fb 0: none */
+    uint32_t nearest;               /* packed depth/stencil: keep one whole sample */
 } HleCmdReadback;
 #define HLE_RB_DIRECT 0xFFFFFFFFu
 /* arena_off: the subresource packed as above into the landing buffer (the
