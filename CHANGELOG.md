@@ -2,9 +2,28 @@
 
 ## Unreleased
 
-- **Video** — 480p is on by default in RetroArch, as on a console with
-  the component cable: a 4:3 NTSC console's video flags are `00080000`.
-  PAL60 is set only for PAL consoles.
+## linux-v0.26.0 (Linux, aarch64 and x86-64, and Android)
+
+- **Video** (#199) — 480p is enabled by default in RetroArch. PAL60 is
+  enabled for PAL consoles.
+- **Framebuffer and depth copies** (#200, #202, #205, #210) — GPU copies
+  from framebuffers and linear D24S8 or D16 depth buffers can read back
+  the latest rendered data. The NV2A now signals completion for copies
+  that request a notifier. This also lets `nxdk_pgraph_tests` capture
+  rendered frames and depth buffers.
+- **Rendering accuracy** (#204, #206–#210, #212) — Decode more inline
+  vertex attributes and correct R16B16 texture channels, point sizes,
+  spotlight saturation, colour clears and specular output. Skip GPU
+  methods while the active graphics class is zero.
+- **Vulkan pipelines** (#211) — Recycle the pipeline table when it fills
+  and keep pipelines alive until the GPU finishes using them. Retry a
+  pipeline that ran out of memory once the retired pipelines are freed.
+- **ARM64 CPU** (#217, #218) — Update FEX and round single-precision x87
+  arithmetic once. The rounding step keeps the wider exponent range
+  used by the x87 emulation.
+- **Kernel faults** (#181) — Pass faults in kernel calls to the game's
+  exception handlers. This fixes the RetroArch crash during the intro
+  of Rainbow Six: Lockdown. The game can still stop later (#148).
 
 ## linux-v0.25.2 (Linux, aarch64 and x86-64, and Android)
 
