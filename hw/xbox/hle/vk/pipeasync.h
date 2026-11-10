@@ -20,7 +20,8 @@
 #include <volk.h>
 
 /* HLE_PB_UNSUPPORTED: recorded pipeline needs an unavailable device feature. */
-typedef enum { HLE_PB_OK, HLE_PB_FAILED, HLE_PB_COMPILE, HLE_PB_UNSUPPORTED } HlePbResult;
+/* HLE_PB_RETRY: the device was out of memory; tried again once memory is freed (draw.c). */
+typedef enum { HLE_PB_OK, HLE_PB_FAILED, HLE_PB_COMPILE, HLE_PB_UNSUPPORTED, HLE_PB_RETRY } HlePbResult;
 
 /* Builds key's pipeline (tok, nslots: its vertex program's tokens, NULL for
  * none). cache_only: from the SPIR-V on disk and the driver's pipeline cache

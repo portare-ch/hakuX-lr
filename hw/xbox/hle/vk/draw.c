@@ -118,9 +118,11 @@ typedef struct HleVkTex {
 } HleVkTex;
 
 /* A pipeline table entry's state: made (VK_NULL_HANDLE: it failed, not tried
- * again), being built by the workers (its draws skipped), or made by the
- * prebuild and not used yet this session (its first use is recorded). */
-enum { PIPE_READY, PIPE_PENDING, PIPE_PREBUILT };
+ * again), being built by the workers (its draws skipped), made by the
+ * prebuild and not used yet this session (its first use is recorded), or
+ * failed for want of memory (HLE_PB_RETRY: its draws skipped until the
+ * retired pipelines are freed, then built once more, pipe_retry). */
+enum { PIPE_READY, PIPE_PENDING, PIPE_PREBUILT, PIPE_RETRY };
 
 typedef struct HlePipe {
     uint64_t hash;
@@ -178,6 +180,7 @@ static struct {
     uint32_t nsslot;
     HlePipe pipes[HLE_MAX_PIPES];
     uint32_t npipes;
+    uint64_t pipe_trims;                /* the table started again, full (pipes_trim) */
     HleCmdState st;
     bool st_valid;
     /* vertex programs: set 1 = the constant file (dynamic uniform buffer) */
@@ -983,8 +986,31 @@ static uint32_t g_free_slot[HLE_MAX_IMAGES];
 static unsigned g_nfree_slot;
 static uint64_t g_tex_retired;
 
+/* Pipelines the full table retired (pipes_trim), destroyed once the
+ * submissions that may use them completed (after: HLE_SURF_PARKED until the
+ * open recording's is stamped) */
+static struct {
+    VkPipeline p;
+    uint64_t after;
+} *g_pretire;
+static unsigned g_npretire, g_pretire_cap;
+
+static void pipes_reap(uint64_t completed)
+{
+    unsigned j = 0;
+    for (unsigned i = 0; i < g_npretire; i++) {
+        if (g_pretire[i].after == HLE_SURF_PARKED || g_pretire[i].after > completed) {
+            g_pretire[j++] = g_pretire[i];
+        } else {
+            T.vkDestroyPipeline(g_hvk.dev, g_pretire[i].p, NULL);
+        }
+    }
+    g_npretire = j;
+}
+
 void hle_draw_tex_reap(uint64_t completed)
 {
+    pipes_reap(completed);
     unsigned j = 0;
     for (unsigned i = 0; i < g_nretire; i++) {
         if (g_retire[i].after == HLE_SURF_PARKED || g_retire[i].after > completed) {
@@ -1007,6 +1033,11 @@ void hle_draw_tex_reap(uint64_t completed)
 
 void hle_draw_tex_stamp(uint64_t value)
 {
+    for (unsigned i = 0; i < g_npretire; i++) {    /* (the retired pipelines too) */
+        if (g_pretire[i].after == HLE_SURF_PARKED) {
+            g_pretire[i].after = value;
+        }
+    }
     for (unsigned i = 0; i < g_nretire; i++) {
         if (g_retire[i].after == HLE_SURF_PARKED) {
             g_retire[i].after = value;
@@ -2207,6 +2238,64 @@ static void pipe_add(uint64_t h, VkPipeline p, uint8_t state)
 static HlePbResult pipeline_build(const void *key, const uint32_t *tok, uint32_t nslots,
                                   bool cache_only, VkPipeline *out);
 
+/* The table full: every pipeline retired (destroyed once the submissions
+ * that may use them completed: those of the open recording, parked, get its
+ * submission's value at submit, hle_draw_tex_stamp; hle_draw_tex_reap), the
+ * table started again, keys built again as draws use them. Full, a new key's
+ * draws were dropped for the rest of the session: nxdk_pgraph_tests' full
+ * run makes over 8192 pipelines and lost the draws of its last suites
+ * (ZMinMaxControl on). The keys that were made are kept (pipe_gone): built
+ * in place when used again, not by the workers with their draws skipped, as
+ * they drew before. A worker's build for a key dropped here is destroyed
+ * when taken (pipe_collect). */
+#define PIPE_GONE 32768                 /* 4 x HLE_MAX_PIPES, a power of two */
+static uint64_t g_pipe_gone[PIPE_GONE]; /* hashes (| 1: never 0), across trims */
+static unsigned g_ngone;
+static bool pipe_gone(uint64_t h)
+{
+    h |= 1;
+    for (unsigned i = h & (PIPE_GONE - 1); g_pipe_gone[i]; i = (i + 1) & (PIPE_GONE - 1)) {
+        if (g_pipe_gone[i] == h) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void pipes_trim(void)
+{
+    if (g_npretire + g_dr.npipes > g_pretire_cap) {
+        g_pretire_cap = g_npretire + g_dr.npipes;
+        g_pretire = g_realloc(g_pretire, g_pretire_cap * sizeof(*g_pretire));
+    }
+    /* the keys made before are kept across trims (a key retired by an
+     * earlier trim and not used since still drew before); only a set that
+     * would fill past 3/4 starts again, with this table's keys */
+    if (g_ngone + g_dr.npipes > PIPE_GONE / 4 * 3) {
+        memset(g_pipe_gone, 0, sizeof(g_pipe_gone));
+        g_ngone = 0;
+    }
+    for (uint32_t i = 0; i < g_dr.npipes; i++) {
+        const HlePipe *e = &g_dr.pipes[i];
+        if (!e->pipe) {
+            continue;
+        }
+        g_pretire[g_npretire].p = e->pipe;
+        g_pretire[g_npretire++].after = HLE_SURF_PARKED;
+        const uint64_t h = e->hash | 1;
+        unsigned j = h & (PIPE_GONE - 1);
+        while (g_pipe_gone[j] && g_pipe_gone[j] != h) {
+            j = (j + 1) & (PIPE_GONE - 1);
+        }
+        g_ngone += !g_pipe_gone[j];
+        g_pipe_gone[j] = h;
+    }
+    hle_log("hakuX-hle-pipe", "pipeline table full (%u): retired, started again", g_dr.npipes);
+    g_dr.npipes = 0;
+    memset(g_pipe_idx, 0, sizeof(g_pipe_idx));
+    g_dr.pipe_trims++;
+}
+
 /* The workers' finished builds into their pending entries */
 static void pipe_collect(void)
 {
@@ -2222,7 +2311,7 @@ static void pipe_collect(void)
             continue;
         }
         g_dr.pipes[i].pipe = r == HLE_PB_OK ? p : VK_NULL_HANDLE;
-        g_dr.pipes[i].state = PIPE_READY;
+        g_dr.pipes[i].state = r == HLE_PB_RETRY ? PIPE_RETRY : PIPE_READY;
         g_dr.compiles++;
         g_dr.async_built++;
         if (r != HLE_PB_OK) {
@@ -2260,13 +2349,7 @@ static VkPipeline pipeline_new(const PipeKey *k, uint64_t h, const HleVkSurf *ta
                                bool *pending)
 {
     if (g_dr.npipes >= HLE_MAX_PIPES) {
-        static bool s_full;
-        if (!s_full) {
-            s_full = true;
-            hle_log("hakuX-hle-pipe", "pipeline table full (%u): new pipelines' draws are "
-                    "dropped", HLE_MAX_PIPES);
-        }
-        return VK_NULL_HANDLE;
+        pipes_trim();
     }
     uint32_t nslots = 0;
     const uint32_t *tok = k->vsh ? prog_find(k->vsh, &nslots) : NULL;
@@ -2275,7 +2358,7 @@ static VkPipeline pipeline_new(const PipeKey *k, uint64_t h, const HleVkSurf *ta
     if (hle_pipe_async() && !hle_back_capture_armed()) {
         r = pipeline_build(k, tok, nslots, true, &p);       /* the caches only */
         if (r == HLE_PB_COMPILE) {
-            if (target_redrawn(target) && hle_pipe_queue(h, k, k->vsh, tok, nslots)) {
+            if (target_redrawn(target) && !pipe_gone(h) && hle_pipe_queue(h, k, k->vsh, tok, nslots)) {
                 pipe_add(h, VK_NULL_HANDLE, PIPE_PENDING);
                 g_dr.async_queued++;
                 *pending = true;
@@ -2298,7 +2381,35 @@ static VkPipeline pipeline_new(const PipeKey *k, uint64_t h, const HleVkSurf *ta
         g_dr.pipe_fail++;
         p = VK_NULL_HANDLE;
     }
-    pipe_add(h, p, PIPE_READY);             /* failures too: not tried every draw */
+    /* failures too: not tried every draw; out of memory, once more later */
+    pipe_add(h, p, r == HLE_PB_RETRY ? PIPE_RETRY : PIPE_READY);
+    return p;
+}
+
+/* An entry that failed for want of memory (PIPE_RETRY): nothing while
+ * retired pipelines wait to be freed (a trim parks a whole table, and its
+ * replacements are built meanwhile); then built once more, here, a failure
+ * that time final. */
+static VkPipeline pipe_retry(HlePipe *e, const PipeKey *k, uint64_t h)
+{
+    if (g_npretire) {
+        return VK_NULL_HANDLE;
+    }
+    uint32_t nslots = 0;
+    const uint32_t *tok = k->vsh ? prog_find(k->vsh, &nslots) : NULL;
+    VkPipeline p = VK_NULL_HANDLE;
+    uint32_t pa = hle_hitch_enter(HLE_ACT_COMPILE);
+    const HlePbResult r = pipeline_build(k, tok, nslots, false, &p);
+    hle_hitch_leave(pa);
+    g_dr.compiles++;
+    if (r == HLE_PB_OK) {
+        hle_pipe_record(h, k, k->vsh, tok, nslots);
+    } else {
+        g_dr.pipe_fail++;
+        p = VK_NULL_HANDLE;
+    }
+    e->pipe = p;
+    e->state = PIPE_READY;
     return p;
 }
 
@@ -2338,6 +2449,13 @@ static VkPipeline pipeline(const PipeKey *k, HleVkSurf *target, bool *pending)
             hle_pipe_touch(h);
             g_dr.prebuilt_used++;
         }
+        if (e->state == PIPE_RETRY) {
+            p = pipe_retry(e, k, h);
+            g_last.ok = false;          /* (until it is made) */
+            if (!p) {
+                return VK_NULL_HANDLE;
+            }
+        }
         p = e->pipe;
     } else {
         p = pipeline_new(k, h, target, pending);
@@ -2345,10 +2463,12 @@ static VkPipeline pipeline(const PipeKey *k, HleVkSurf *target, bool *pending)
             g_last.ok = false;
             return VK_NULL_HANDLE;
         }
+        i = pipe_lookup(h);
     }
     g_last.key = *k;
     g_last.p = p;
-    g_last.ok = i >= 0 || g_dr.npipes >= HLE_MAX_PIPES || pipe_lookup(h) >= 0;
+    /* A retryable failure must reach pipe_retry(), even for the same key. */
+    g_last.ok = i >= 0 && g_dr.pipes[i].state == PIPE_READY;
     return p;
 }
 
@@ -2615,7 +2735,8 @@ static HlePbResult pipeline_build(const void *key, const uint32_t *tok, uint32_t
                         tok[4 * i + 1], tok[4 * i + 2], tok[4 * i + 3]);
             }
         }
-        return HLE_PB_FAILED;
+        return vr == VK_ERROR_OUT_OF_HOST_MEMORY || vr == VK_ERROR_OUT_OF_DEVICE_MEMORY ? HLE_PB_RETRY
+                                                                                     : HLE_PB_FAILED;
     }
     *out = p;
     return HLE_PB_OK;
@@ -5124,6 +5245,12 @@ void hle_draw_shutdown(void)
     for (uint32_t i = 0; i < g_dr.npipes; i++) {
         DESTROY(vkDestroyPipeline, g_dr.pipes[i].pipe);
     }
+    for (unsigned i = 0; i < g_npretire; i++) {
+        DESTROY(vkDestroyPipeline, g_pretire[i].p);
+    }
+    g_free(g_pretire);
+    g_pretire = NULL;
+    g_npretire = g_pretire_cap = 0;
     DESTROY(vkDestroyDescriptorPool, g_dr.pool);
     DESTROY(vkDestroyDescriptorPool, g_dr.cpool);
     DESTROY(vkDestroyDescriptorPool, g_dr.ppool);
@@ -5186,6 +5313,8 @@ void hle_draw_shutdown(void)
     memset(&g_decl, 0, sizeof(g_decl));
     memset(&g_last, 0, sizeof(g_last));
     memset(g_pipe_idx, 0, sizeof(g_pipe_idx));
+    memset(g_pipe_gone, 0, sizeof(g_pipe_gone));
+    g_ngone = 0;
     g_key_bytes = offsetof(PipeKey, vi);
     memset(g_smp_hot, 0, sizeof(g_smp_hot));
     g_white_done = false;
