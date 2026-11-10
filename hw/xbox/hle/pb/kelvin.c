@@ -332,8 +332,10 @@ void hle_kelvin_state(HleCmdState *st)
             tss(st->tss[s], s);
         }
     }
-    if (W(0x03B8)) {
-        st->spec = R(0x03B8) != 0;
+    if (W(0x03B8) || W(0x0294)) {
+        /* bit 0 SPECULAR_ENABLE, bit 1 LIGHT_CONTROL's
+         * ALPHA_FROM_MATERIAL_SPECULAR */
+        st->spec = (R(0x03B8) != 0) | ((R(0x0294) >> 17) & 1) << 1;
     }
     if (W(0x1D78)) {                    /* SET_ZMIN_MAX_CONTROL: ZCLAMP_EN (bits 4..7) CLAMP */
         st->zclamp = ((R(0x1D78) >> 4) & 0xF) == 1;
