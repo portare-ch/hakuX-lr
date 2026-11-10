@@ -2095,7 +2095,7 @@ static bool readback_packed(const HleCmdReadback *c, VkBuffer buf, VkDeviceSize 
     VkImage img = o->img;
     VkImageLayout il = o->general ? VK_IMAGE_LAYOUT_GENERAL : o->layout;
     if (o->scale > 1) {                         /* the guest gets guest-size texels */
-        img = hle_surf_down(cb, o, il, level, layer, c->w, c->h);
+        img = hle_surf_down(cb, o, il, level, layer, c->w, c->h, false);
         if (!img) {
             return false;
         }
@@ -2167,7 +2167,7 @@ static void cmd_readback(const HleCmdReadback *c)
         if (s->scale > 1 || w != s->d.w || h != s->d.h) {
             /* the guest gets guest-size pixels (or the size asked for:
              * a multisampled display persisted at display size) */
-            img = hle_surf_down(cb, s, il, 0, 0, w, h);
+            img = hle_surf_down(cb, s, il, 0, 0, w, h, c->nearest);
             il = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
         }
         bool fb = !g_hram.zero_copy;
@@ -2378,6 +2378,10 @@ static void cmd_upload(const HleCmdUpload *c)
 
 static void cmd_zread(const HleCmdZRead *c)
 {
+    if (g_back.pend_clear && !g_back.pass_open && g_back.ds == c->src &&
+        (g_back.pend_flags & (HLE_CLEAR_ZBUFFER | HLE_CLEAR_STENCIL))) {
+        close_pass();                   /* the depth buffer's pending clear first (its wgen) */
+    }
     HleVkSurf *s = hle_surf_get(c->src), *d = hle_surf_get(c->dst);
     if (s && d && d->img && d->zr_src == c->src && d->zr_gen == s->wgen &&
         !memcmp(d->zr_map, c->map, 4) && d->layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
@@ -2428,7 +2432,7 @@ static void cmd_zwrite(const HleCmdZWrite *c)
                       !(s->aspect & VK_IMAGE_ASPECT_COLOR_BIT) || s->texel_bytes != 4 ?
                       "not 32-bit colour" :
                       !(d->aspect & VK_IMAGE_ASPECT_DEPTH_BIT) ? "not depth" :
-                      hle_zwrite_pass(cb_get(), g_back.cur, s, d);
+                      hle_zwrite_pass(cb_get(), g_back.cur, s, d, c->stencil_only);
     if (why) {
         if (g_back.st.zread_skips++ < 8) {
             hle_log("hakuX-hle-back", "zwrite %u -> %u skipped: %s", c->src, c->dst, why);

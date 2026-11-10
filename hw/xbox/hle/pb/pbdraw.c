@@ -138,6 +138,8 @@ typedef struct PbObj {
     bool cpu_used;                      /* the CPU wrote its memory (writeback) */
     uint64_t mem_seq;                   /* g_pd.wseq when a texture took its memory as the
                                            title's data: superseded while written <= it */
+    bool zbase;                         /* depth: cleared whole, the CPU's writes before taken */
+    uint64_t zedge[2];                  /* depth: its first and last pages' bytes then */
     /* its memory against its image (coh_*, colour targets) */
     uint64_t synced;                    /* written when the two last matched */
     CohSnap snap;                       /* its memory's write counts then */
@@ -1002,10 +1004,10 @@ static bool obj_written(const PbObj *o)
 }
 
 /* A texture was defined from [pa, pa + len): the memory holds the title's
- * data there, newer than the images of the colour targets over it drawn
- * before (memory D3D reused). Those images are superseded until drawn
- * again: no writeback (savestate, kept memory, front buffer) puts them over
- * the data. The memory's dirty bits can't tell: the definition consumes
+ * data there, newer than the images of the targets over it drawn before
+ * (memory D3D reused). Those images are superseded until drawn again: no
+ * writeback (savestate, kept memory, front buffer) puts them over the data,
+ * nor a depth buffer's readback before a copy from that memory. The memory's dirty bits can't tell: the definition consumes
  * them. Conker
  * draws a 640 x 480 target at boot and later loads its menu's textures into
  * that memory; a savestate wrote the old image back over them, and after a
@@ -1015,7 +1017,7 @@ static void mem_supersedes(uint32_t pa, uint32_t len)
     for (unsigned i = 0; i < g_pd.nobjs; i++) {
         PbObj *o = &g_pd.objs[i];
         const HleFmtInfo *fi = o->id && !o->cube ? hle_fmt_info(o->d.xfmt) : NULL;
-        if (!fi || (fi->flags & HLE_FI_DEPTH) || o->written <= o->mem_seq) {
+        if (!fi || o->written <= o->mem_seq) {
             continue;
         }
         const uint32_t olen = o->d.pitch ? o->d.pitch * o->d.h : o->d.w * o->d.h * (fi->bpp / 8);
@@ -1451,6 +1453,35 @@ static float zfloat_clear(uint32_t v, bool z24)
     return isfinite(f) ? MIN(f * zfloat_scale(z24), 1.0f) : 1.0f;
 }
 
+static bool zsync_stencil(PbObj *o);
+
+/* A linear depth buffer cleared whole: the CPU's writes into its memory
+ * before are older than its image. Its pages' dirty bits taken now (the
+ * first and last page by their bytes, which other data shares), so a later
+ * zread's check (zbase) or a texture over it already made (its edge
+ * hashes) finds only writes after the clear: one before (a title filling
+ * the buffer at allocation), uploaded after the clear, stood for the
+ * buffer at its readback, the conversion skipped as older (cmd_zread). */
+static void zbase(PbObj *o)
+{
+    if (!o->d.pitch || (o->d.xfmt != HLE_XFMT_LIN_D24S8 && o->d.xfmt != HLE_XFMT_LIN_D16) || past_block(&o->d)) {
+        return;
+    }
+    const uint32_t len = o->d.pitch * o->d.h, hi = o->d.pa + len;
+    const uint32_t p0 = o->d.pa & ~4095u, pl = (hi - 1) & ~4095u;
+    if (pl > p0 + 4096) {
+        hle_mem_written(p0 + 4096, pl - p0 - 4096);     /* the inner pages' bits taken */
+    }
+    span_edges_set(o->d.pa, len, o->zedge);
+    o->zbase = true;
+    for (unsigned i = 0; i < g_pd.nzr; i++) {
+        if (g_pd.zr[i].pa == o->d.pa) {
+            const uint32_t bpp = g_pd.zr[i].xfmt == HLE_XFMT_LIN_L16 ? 2 : 4;
+            span_edges_set(o->d.pa, g_pd.zr[i].w * bpp * g_pd.zr[i].h, g_pd.zr[i].edge_hash);
+        }
+    }
+}
+
 static void clear(uint32_t flags)
 {
     sync_rt();
@@ -1459,8 +1490,9 @@ static void clear(uint32_t flags)
     const int32_t ax = (int32_t)MAX(g_pd.aa_x, 1u), ay = (int32_t)MAX(g_pd.aa_y, 1u);
     HleRect r = { (int32_t)(hr & 0xFFFF) * ax, (int32_t)(vr & 0xFFFF) * ay,
                   (int32_t)((hr >> 16) + 1) * ax, (int32_t)((vr >> 16) + 1) * ay };
-    const bool full = (flags & 0xF0) == 0xF0 && R(0x0358) == 0x01010101u && r.x1 <= 0 && r.y1 <= 0 &&
-                      (uint32_t)r.x2 >= g_pd.rt_w && (uint32_t)r.y2 >= g_pd.rt_h;
+    const bool whole = r.x1 <= 0 && r.y1 <= 0 &&
+                       (uint32_t)r.x2 >= g_pd.rt_w && (uint32_t)r.y2 >= g_pd.rt_h;
+    const bool full = whole && (flags & 0xF0) == 0xF0 && R(0x0358) == 0x01010101u;
     rt_first_land(full);
     rt_first_write(full);
     if (!g_pd.rt && !g_pd.ds) {
@@ -1468,6 +1500,8 @@ static void clear(uint32_t flags)
     }
     uint32_t zs = R(NV097_SET_ZSTENCIL_CLEAR_VALUE), zf = (R(NV097_SET_SURFACE_FORMAT) >> 4) & 0xF;
     bool zfloat = R(NV097_SET_CONTROL0) & 0x1000u;
+    const bool depth_only = (flags & HLE_CLEAR_ZBUFFER) && !(flags & HLE_CLEAR_STENCIL) && zf == 2;
+    const bool stencil_ready = whole && depth_only && zsync_stencil(g_pd.ds_obj);
     HleCmdClear *c = begin(HLE_OP_CLEAR, sizeof(*c));
     c->flags = flags & 0xF3;
     c->color = R(NV097_SET_COLOR_CLEAR_VALUE);
@@ -1482,7 +1516,7 @@ static void clear(uint32_t flags)
     } else {
         c->z = zfloat ? zfloat_clear(zs & 0xFFFF, false) : (zs & 0xFFFF) / 65535.0f;
     }
-    if (r.x1 > 0 || r.y1 > 0 || (uint32_t)r.x2 < g_pd.rt_w || (uint32_t)r.y2 < g_pd.rt_h) {
+    if (!whole) {
         c->nrects = 1;
         c->rect[0] = r;
     }
@@ -1498,6 +1532,12 @@ static void clear(uint32_t flags)
     }
     if (c->flags & (HLE_CLEAR_ZBUFFER | HLE_CLEAR_STENCIL)) {
         ds_written();
+    }
+    /* A depth-only clear can reset the RAM baseline once its stencil
+     * is current in the image. */
+    if ((c->flags & HLE_CLEAR_ZBUFFER) && !c->nrects && g_pd.ds_obj &&
+        (!depth_only || stencil_ready)) {
+        zbase(g_pd.ds_obj);
     }
     g_pd.clears++;
 }
@@ -2685,6 +2725,70 @@ static bool tex_evict(bool full)
     return true;
 }
 
+static unsigned zread_view(uint32_t pa, uint32_t w, uint32_t h, uint32_t xfmt, uint32_t bpp, bool *fresh)
+{
+    unsigned i = 0;
+    while (i < g_pd.nzr && !(g_pd.zr[i].pa == pa && g_pd.zr[i].w == w && g_pd.zr[i].h == h &&
+                             g_pd.zr[i].xfmt == xfmt)) {
+        i++;
+    }
+    if (fresh) {
+        *fresh = i == g_pd.nzr;
+    }
+    if (i == g_pd.nzr) {
+        if (g_pd.nzr == MAX_ZREADS) {
+            i = (unsigned)(g_pd.binds % MAX_ZREADS);  /* one replaced */
+            HleCmdObjDestroy *x = begin(HLE_OP_OBJ_DESTROY, sizeof(*x));
+            x->after = 0;
+            x->id = g_pd.zr[i].id;
+            hle_fe_commit();
+        } else {
+            g_pd.nzr++;
+        }
+        g_pd.zr[i].id = g_pd.next_id++;
+        g_pd.zr[i].pa = pa;
+        g_pd.zr[i].w = w;
+        g_pd.zr[i].h = h;
+        g_pd.zr[i].xfmt = xfmt;
+        HleCmdObj *c = begin(HLE_OP_OBJ_CREATE, sizeof(*c));
+        memset(c, 0, sizeof(*c));
+        c->s = (HleSurfDesc){ .id = g_pd.zr[i].id, .xfmt = bpp == 2 ? xfmt : HLE_XFMT_LIN_A8R8G8B8,
+                              .w = w, .h = h, .pa = pa, .pitch = w * bpp, .levels = 1, .faces = 1 };
+        hle_fe_commit();
+        hle_log("hakuX-hle-pb", "depth view %08x (%ux%u)", pa, w, h);
+    }
+    return i;
+}
+
+/* Import RAM stencil before a whole depth-only clear. Letting zread upload
+ * the packed words later would replace the depth the clear just wrote. */
+static bool zsync_stencil(PbObj *o)
+{
+    if (!o || o->d.xfmt != HLE_XFMT_LIN_D24S8 || o->d.pitch != o->d.w * 4 ||
+        o->d.w > g_pd.rt_w || o->d.h > g_pd.rt_h || past_block(&o->d)) {
+        return false;
+    }
+    const uint32_t pa = o->d.pa, w = o->d.w, h = o->d.h, pitch = o->d.pitch;
+    const uint32_t len = pitch * h;
+    coh_pend_wait(pa, len);
+    if (span_written(pa, len, o->zbase ? o->zedge : o->edge_hash)) {
+        const unsigned i = zread_view(pa, w, h, HLE_XFMT_LIN_A8R8G8B8, 4, NULL);
+        const HleRect r = { 0, 0, (int32_t)w, (int32_t)h };
+        const int32_t pt[1][2] = { { 0, 0 } };
+        if (!hle_res_upload(g_pd.zr[i].id, pa, pitch, 1, &r, pt)) {
+            hle_mem_mark_written(pa, len);
+            return false;
+        }
+        g_pd.zr[i].src = o->id;
+        HleCmdZWrite *z = begin(HLE_OP_ZWRITE, sizeof(*z));
+        z->dst = o->id;
+        z->src = g_pd.zr[i].id;
+        z->stencil_only = true;
+        hle_fe_commit();
+    }
+    return true;
+}
+
 /* A 32-bit linear colour texture (w x h at pa, channels from the depth
  * word's bytes as map says) over a D24S8 target's memory reads the target's
  * depth words, as the NV2A's memory holds them (Conker's glow mask: its
@@ -2695,8 +2799,10 @@ static bool tex_evict(bool full)
  * HLE_ZREAD_HALVES): Midtown Madness 3 reads its depth buffer as 1280 x 480
  * L16, the words' upper halves its depth's top 16 bits, into the alpha its
  * sky dome blends in by (DST_ALPHA); read from memory the GPU never wrote,
- * the alpha stayed 0 and the sky was the clear colour. */
-static uint32_t zread(uint32_t pa, uint32_t w, uint32_t h, const uint8_t map[4], uint32_t xfmt)
+ * the alpha stayed 0 and the sky was the clear colour. want: that target
+ * (a copy's readback picks the newest drawn), else the one bound last. */
+static uint32_t zread(uint32_t pa, uint32_t w, uint32_t h, const uint8_t map[4], uint32_t xfmt,
+                      const PbObj *want)
 {
     const bool halves = map[0] == HLE_ZREAD_HALVES;
     const uint32_t bpp = halves ? 2 : 4;
@@ -2705,7 +2811,7 @@ static uint32_t zread(uint32_t pa, uint32_t w, uint32_t h, const uint8_t map[4],
         const PbObj *o = &g_pd.objs[i];
         if (o->d.pa == pa && o->d.w * (halves ? 2 : 1) == w && o->d.h == h &&
             (o->d.xfmt == HLE_XFMT_D24S8 || o->d.xfmt == HLE_XFMT_LIN_D24S8) &&
-            (!src || o->bound > src->bound)) {
+            (!want || o == want) && (!src || o->bound > src->bound)) {
             src = o;
         }
     }
@@ -2723,7 +2829,9 @@ static uint32_t zread(uint32_t pa, uint32_t w, uint32_t h, const uint8_t map[4],
      * buffer and shimmers it from there; the depth's bytes came out as
      * green / yellow / red contour bands. That target's texels are read in
      * the texture's byte order (tex_order: Mercenaries' sky) */
-    for (unsigned k = 0; k < g_pd.nobjs; k++) {
+    /* Copy readback already checked overlapping writers. A later bind
+     * alone only matters to the texture lookup. */
+    for (unsigned k = 0; !want && k < g_pd.nobjs; k++) {
         const PbObj *o = &g_pd.objs[k];
         const HleFmtInfo *oi = o->d.pa == pa && !o->cube &&
                                (o->bound > src->bound || o->written > src->written) ?
@@ -2732,34 +2840,8 @@ static uint32_t zread(uint32_t pa, uint32_t w, uint32_t h, const uint8_t map[4],
             return 0;
         }
     }
-    unsigned i = 0;
-    while (i < g_pd.nzr && !(g_pd.zr[i].pa == pa && g_pd.zr[i].w == w && g_pd.zr[i].h == h &&
-                             g_pd.zr[i].xfmt == xfmt)) {
-        i++;
-    }
-    const bool fresh = i == g_pd.nzr;
-    if (fresh) {
-        if (g_pd.nzr == MAX_ZREADS) {
-            i = (unsigned)(g_pd.binds % MAX_ZREADS);  /* one replaced */
-            HleCmdObjDestroy *x = begin(HLE_OP_OBJ_DESTROY, sizeof(*x));
-            x->after = 0;
-            x->id = g_pd.zr[i].id;
-            hle_fe_commit();
-        } else {
-            g_pd.nzr++;
-        }
-        g_pd.zr[i].id = g_pd.next_id++;
-        g_pd.zr[i].pa = pa;
-        g_pd.zr[i].w = w;
-        g_pd.zr[i].h = h;
-        g_pd.zr[i].xfmt = xfmt;
-        HleCmdObj *c = begin(HLE_OP_OBJ_CREATE, sizeof(*c));
-        memset(c, 0, sizeof(*c));
-        c->s = (HleSurfDesc){ .id = g_pd.zr[i].id, .xfmt = halves ? xfmt : HLE_XFMT_LIN_A8R8G8B8,
-                              .w = w, .h = h, .pa = pa, .pitch = w * bpp, .levels = 1, .faces = 1 };
-        hle_fe_commit();
-        hle_log("hakuX-hle-pb", "texture %08x (%ux%u) reads depth target %u", pa, w, h, src->id);
-    }
+    bool fresh;
+    const unsigned i = zread_view(pa, w, h, xfmt, bpp, &fresh);
     /* What the CPU wrote into the memory since is the memory's now: its rows
      * go into the texture's image, and the back end converts the depth image
      * again only once the depth buffer is written after them (cmd_zread).
@@ -2768,7 +2850,9 @@ static uint32_t zread(uint32_t pa, uint32_t w, uint32_t h, const uint8_t map[4],
      * depth image instead, they were 0xFFFFFF00, a yellow screen) */
     {
         const uint32_t len = w * bpp * h;
-        if (fresh ? hle_mem_written(pa, len) : span_written(pa, len, g_pd.zr[i].edge_hash)) {
+        const bool cpu = !fresh ? span_written(pa, len, g_pd.zr[i].edge_hash) :
+                         src->zbase ? span_written(pa, len, src->zedge) : hle_mem_written(pa, len);
+        if (cpu) {
             const HleRect r = { 0, 0, (int32_t)w, (int32_t)h };
             const int32_t pt[1][2] = { { 0, 0 } };
             hle_res_upload(g_pd.zr[i].id, pa, w * bpp, 1, &r, pt);
@@ -2919,8 +3003,8 @@ static uint32_t texture(unsigned s, bool *unset, bool *lin)
                (MAX(pitch, 64u) / 64 - 1) << HLE_SIZE_PITCH_SHIFT;
         static const uint8_t k_halves[4] = { HLE_ZREAD_HALVES, 0, 0, 0 };
         uint8_t map[4];
-        uint32_t zid = hle_res_zread_map(code, map) ? zread(pa, rect >> 16, rect & 0xFFFF, map, code) :
-                       code == HLE_XFMT_LIN_L16 ? zread(pa, rect >> 16, rect & 0xFFFF, k_halves, code) : 0;
+        uint32_t zid = hle_res_zread_map(code, map) ? zread(pa, rect >> 16, rect & 0xFFFF, map, code, NULL) :
+                       code == HLE_XFMT_LIN_L16 ? zread(pa, rect >> 16, rect & 0xFFFF, k_halves, code, NULL) : 0;
         if (zid) {
             return zid;
         }
@@ -4981,6 +5065,74 @@ uint64_t hle_pbd_copy_begin(uint32_t slo, uint32_t sp, uint32_t dlo, uint32_t dp
             coh_wait(fb->fb_wb_v);
             coh_adopt();
             done = hle_tl_completed();      /* (its writeback note is landed now) */
+        }
+    }
+    /* A linear 24-bit depth buffer the copy reads: its image's bits, as the
+     * NV2A's memory holds them (zread's colour view, read back), landed in
+     * its memory first and waited for, the copy made after. nxdk_pgraph_tests
+     * saves its Z buffer that way (the _ZB pictures): from the memory as it
+     * was, they were whatever the CPU last left there. Not a swizzled or a
+     * 16-bit one (zread makes neither). */
+    PbObj *zb = NULL;
+    for (unsigned i = 0; i < g_pd.nobjs; i++) {
+        PbObj *o = &g_pd.objs[i];
+        const uint32_t zlen = o->d.pitch * o->d.h;
+        if (o->d.xfmt == HLE_XFMT_LIN_D24S8 && o->d.pitch && o->d.pitch == o->d.w * 4 && !past_block(&o->d) &&
+            o->d.pa <= s0 && s1 <= o->d.pa + zlen && (!zb || o->written > zb->written)) {
+            zb = o;                         /* the newest drawn one holding the source */
+        }
+    }
+    if (zb && obj_superseded(zb)) {
+        zb = NULL;                          /* a texture defined there since: the title's data */
+    }
+    for (unsigned i = 0; zb && i < g_pd.nobjs; i++) {
+        const PbObj *o = &g_pd.objs[i];
+        uint32_t olen;
+        const uint32_t zlen = zb->d.pitch * zb->d.h;
+        const HleFmtInfo *oi = o != zb && !o->cube ? hle_fmt_info(o->d.xfmt) : NULL;
+        olen = oi ? (o->d.pitch ? o->d.pitch * o->d.h : o->d.w * o->d.h * (oi->bpp / 8)) : 0;
+        if (olen && o->d.pa < zb->d.pa + zlen && o->d.pa + olen > zb->d.pa && o->written > zb->written) {
+            zb = NULL;                      /* drawn over since: the readback would put the old one back */
+        }
+    }
+    if (zb) {
+        PbObj *o = zb;
+        const uint32_t zlen = o->d.pitch * o->d.h;
+        if (o->fb_wb_w != o->written) {
+            uint8_t map[4];
+            const uint32_t zid = hle_res_zread_map(HLE_XFMT_LIN_A8R8G8B8, map) ?
+                                 zread(o->d.pa, o->d.w, o->d.h, map, HLE_XFMT_LIN_A8R8G8B8, o) : 0;
+            o->fb_wb_v = 0;
+            const bool direct = hle_res_ram_direct();
+            if (zid && (direct || hle_tl_land_room(2))) {
+                const uint32_t fbuf = hle_res_rb_fb(zlen);
+                if (direct) {
+                    coh_pend_wait_inplace(o->d.pa, zlen);
+                }
+                if (direct || fbuf) {
+                    HleCmdReadback *rb = begin(HLE_OP_READBACK, sizeof(*rb));
+                    rb->surf = zid;
+                    rb->pa = o->d.pa;
+                    rb->pitch = o->d.pitch;
+                    rb->arena_off = HLE_RB_DIRECT;
+                    rb->nearest = true;
+                    const uint64_t zv = hle_fe_last_value() + 1;
+                    hle_res_rb_land(rb, fbuf, zlen, zv);
+                    hle_barrier_arm_landing(o->d.pa, zlen, zv);
+                    hle_fe_commit();
+                    wb_note(o->d.pa, zlen, zv);
+                    o->fb_wb_v = zv;
+                    o->fb_wb_w = o->written;
+                }
+            }
+        }
+        if (o->fb_wb_v > done) {
+            if (o->fb_wb_v > hle_fe_last_value()) {
+                kick();
+            }
+            coh_wait(o->fb_wb_v);
+            coh_adopt();
+            done = hle_tl_completed();
         }
     }
     for (unsigned i = 0; i < WB_NOTES; i++) {           /* the old paths' writebacks in flight */

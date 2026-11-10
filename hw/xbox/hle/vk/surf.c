@@ -540,7 +540,7 @@ VkImage hle_surf_scratch(VkFormat fmt, uint32_t w, uint32_t h)
 }
 
 VkImage hle_surf_down(VkCommandBuffer cb, HleVkSurf *o, VkImageLayout layout,
-                      uint32_t level, uint32_t layer, uint32_t w, uint32_t h)
+                      uint32_t level, uint32_t layer, uint32_t w, uint32_t h, bool nearest)
 {
     VkFormatProperties fp;
     vkGetPhysicalDeviceFormatProperties(g_hvk.phys, o->fmt, &fp);
@@ -550,7 +550,7 @@ VkImage hle_surf_down(VkCommandBuffer cb, HleVkSurf *o, VkImageLayout layout,
     if (!d) {
         return VK_NULL_HANDLE;
     }
-    bool lin = fp.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+    bool lin = !nearest && (fp.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT);
     hle_img_barrier(cb, d, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
     VkImageBlit2 r = {

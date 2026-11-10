@@ -135,7 +135,8 @@ bool hle_display_pass(VkCommandBuffer cb, unsigned slot, const uint8_t ramp[3][2
  * NULL = done, else why not. */
 /* HLE_OP_ZWRITE: colour surface src's words as depth surface dst's depth
  * (outside a render pass); NULL, or why it was skipped. */
-const char *hle_zwrite_pass(VkCommandBuffer cb, unsigned slot, HleVkSurf *src, HleVkSurf *dst);
+const char *hle_zwrite_pass(VkCommandBuffer cb, unsigned slot, HleVkSurf *src, HleVkSurf *dst,
+                            bool stencil_only);
 const char *hle_zread_pass(VkCommandBuffer cb, unsigned slot, HleVkSurf *src, HleVkSurf *dst,
                            const uint8_t map[4]);
 /* Depth buffer s's depth-aspect view (VK_NULL_HANDLE: none). */
@@ -145,7 +146,7 @@ bool hle_surf_read_pending(HleVkSurf *s, uint32_t rt_id);
  * layout, blitted down to w x h (guest size) into a scratch image left in
  * TRANSFER_SRC_OPTIMAL. VK_NULL_HANDLE = the format cannot be blitted. */
 VkImage hle_surf_down(VkCommandBuffer cb, HleVkSurf *o, VkImageLayout layout,
-                      uint32_t level, uint32_t layer, uint32_t w, uint32_t h);
+                      uint32_t level, uint32_t layer, uint32_t w, uint32_t h, bool nearest);
 /* A w x h scratch image of fmt (transfer source and destination) for texels
  * on their way up; VK_NULL_HANDLE = none (the format cannot be blitted). */
 VkImage hle_surf_scratch(VkFormat fmt, uint32_t w, uint32_t h);

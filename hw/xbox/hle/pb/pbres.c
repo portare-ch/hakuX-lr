@@ -601,10 +601,11 @@ void hle_draw_prim_indices(uint32_t pt, const uint16_t *in, uint32_t n, uint32_t
 
 /* ---- render targets ---------------------------------------------------------------- */
 
-void hle_res_upload(uint32_t id, uint32_t pa, uint32_t pitch, uint32_t n,
+bool hle_res_upload(uint32_t id, uint32_t pa, uint32_t pitch, uint32_t n,
                     const HleRect *rects, const int32_t (*pts)[2])
 {
     uint32_t lo = UINT32_MAX, hi = 0, i = 0;
+    bool queued = true;
     while (i < n) {
         const uint32_t i0 = i, i1 = MIN(n, i0 + HLE_CMD_MAX_RECTS);
         uint32_t clo = UINT32_MAX, chi = 0;
@@ -624,6 +625,7 @@ void hle_res_upload(uint32_t id, uint32_t pa, uint32_t pitch, uint32_t n,
             const uint8_t *src = hle_pa_ptr(clo, chi - clo);
             uint32_t off = src ? hle_draw_arena_alloc(chi - clo, &dst) : HLE_ARENA_FULL;
             if (off == HLE_ARENA_FULL) {
+                queued = false;
                 continue;                       /* cmd_upload would skip it too */
             }
             memcpy(dst, src, chi - clo);
@@ -649,6 +651,7 @@ void hle_res_upload(uint32_t id, uint32_t pa, uint32_t pitch, uint32_t n,
     if (hi > lo) {          /* the GPU reads it at the submission: CPU writes wait */
         hle_barrier_arm(lo, hi - lo, hle_fe_last_value() + 1);
     }
+    return queued;
 }
 
 uint32_t hle_res_rb_fb(uint32_t len)

@@ -42,10 +42,12 @@ static const char k_fs[] =
      * grid over the whole frame */
     "  bool halves = pc.map.x == 5u;\n"
     "  ivec2 q = halves ? ivec2(p.x >> 1, p.y) : p;\n"
-    /* clamped: 1.0 * 16777215 + 0.5 rounds to 2^24 in fp32, and d << 8 would
-     * wrap the far plane to 0 (Mercenaries' sky dome, depth-tested against
-     * its copied scene depth, then failed wherever the scene was empty) */
-    "  uint d = min(uint(clamp(texelFetch(zt, q, 0).r, 0.0, 1.0) * 16777215.0 + 0.5),\n"
+    /* rounded, not + 0.5 and truncated: above 2^23 the addition rounds an
+     * odd depth up in fp32 (0x8FFFFF -> 0x900000); clamped, as d << 8 would
+     * wrap a far plane past 2^24 - 1 to 0 (Mercenaries' sky dome,
+     * depth-tested against its copied scene depth, then failed wherever the
+     * scene was empty) */
+    "  uint d = min(uint(round(clamp(texelFetch(zt, q, 0).r, 0.0, 1.0) * 16777215.0)),\n"
     "               16777215u);\n"
     "  uint w = d << 8 | (texelFetch(st, q, 0).r & 0xFFu);\n"
     "  if (halves) {\n"
@@ -339,15 +341,19 @@ static VkDescriptorSet slot_set(unsigned slot)
     return g_zr.used < ZR_PER_SLOT ? g_zr.set[slot][g_zr.used++] : VK_NULL_HANDLE;
 }
 
-const char *hle_zwrite_pass(VkCommandBuffer cb, unsigned slot, HleVkSurf *src, HleVkSurf *dst)
+const char *hle_zwrite_pass(VkCommandBuffer cb, unsigned slot, HleVkSurf *src, HleVkSurf *dst,
+                            bool stencil_only)
 {
     if (!init()) {
         return "setup failed";
     }
     bool stencil = (dst->aspect & VK_IMAGE_ASPECT_STENCIL_BIT) != 0;
-    VkPipeline p = zw_pipe_for(dst->fmt, stencil, false);
+    if (stencil_only && !stencil) {
+        return "no stencil";
+    }
+    VkPipeline p = stencil_only ? VK_NULL_HANDLE : zw_pipe_for(dst->fmt, stencil, false);
     VkPipeline pb = stencil ? zw_pipe_for(dst->fmt, true, true) : VK_NULL_HANDLE;
-    if (!p || (stencil && !pb)) {
+    if ((!stencil_only && !p) || (stencil && !pb)) {
         return "no pipeline";
     }
     VkDescriptorSet set = slot_set(slot);
@@ -385,14 +391,18 @@ const char *hle_zwrite_pass(VkCommandBuffer cb, unsigned slot, HleVkSurf *src, H
     T.vkCmdBeginRendering(cb, &ri);
     VkViewport vp = { 0, 0, (float)fw, (float)fh, 0.0f, 1.0f };
     VkRect2D sc = { { 0, 0 }, { fw, fh } };
-    T.vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, p);
+    T.vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, p ? p : pb);
     hle_draw_state_lost();
     T.vkCmdSetViewport(cb, 0, 1, &vp);
     T.vkCmdSetScissor(cb, 0, 1, &sc);
     T.vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g_zr.pl, 0, 1, &set, 0, NULL);
-    T.vkCmdDraw(cb, 3, 1, 0, 0);
+    if (p) {
+        T.vkCmdDraw(cb, 3, 1, 0, 0);
+    }
     if (stencil) {
-        T.vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pb);
+        if (p) {
+            T.vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pb);
+        }
         for (uint32_t bit = 0; bit < 8; bit++) {
             const uint32_t pcv[4] = { bit, 0, 0, 0 };
             T.vkCmdSetStencilWriteMask(cb, VK_STENCIL_FACE_FRONT_AND_BACK, 1u << bit);
