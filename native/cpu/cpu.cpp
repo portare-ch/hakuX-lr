@@ -328,7 +328,7 @@ extern "C" NcCpu* nc_cpu_create(const NcCpuConfig* cfg, uint32_t fs_base) {
   auto* Cpu = new NcCpu {};
   Cpu->Sys.Cfg = *cfg;
   Cpu->X87Watch = !x87_full && !x87_pc_off;
-  Cpu->CTX = FEXCore::Context::Context::CreateNewContext(FEX::FetchHostFeatures());
+  Cpu->CTX = FEXCore::Context::Context::CreateNewContext(FEX::FetchHostFeatures(false)); // a 32-bit guest
   Cpu->CTX->SetSignalDelegator(&Cpu->Sig);
   Cpu->CTX->SetSyscallHandler(&Cpu->Sys);
   Cpu->CTX->SetGuestMemoryBase(reinterpret_cast<uint64_t>(cfg->membase));
