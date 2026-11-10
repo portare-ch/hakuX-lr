@@ -1,7 +1,7 @@
 [submodule "external/fex"]
 	path = external/fex
 	url = https://github.com/portare-ch/FEX.git
-	branch = hakuX-upstream
+	branch = x87-pc-exact
 [submodule "patches"]
 	path = patches
 	url = https://github.com/portare-ch/hakux-lr-patches.git
