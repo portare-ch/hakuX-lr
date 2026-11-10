@@ -2400,7 +2400,7 @@ static void cmd_zread(const HleCmdZRead *c)
     const char *why = !s || !d ? "no surface" :
                       !hle_surf_ensure(s) || !hle_surf_ensure(d) ? "no image" :
                       s->layout == VK_IMAGE_LAYOUT_UNDEFINED ? "depth never rendered" :
-                      !(s->aspect & VK_IMAGE_ASPECT_STENCIL_BIT) ? "no stencil" :
+                      !(s->aspect & VK_IMAGE_ASPECT_STENCIL_BIT) && c->map[0] != HLE_ZREAD_D16 ? "no stencil" :
                       !(d->aspect & VK_IMAGE_ASPECT_COLOR_BIT) ? "not colour" :
                       hle_zread_pass(cb_get(), g_back.cur, s, d, c->map);
     if (why) {
