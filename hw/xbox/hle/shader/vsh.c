@@ -316,9 +316,13 @@ static void tail(Buf *bp, const HleVshKey *k, bool fogw)
 {
     Buf b = *bp;
     /* specular off (NV2A SPECULAR_ENABLE clear): the pixel stage sees
-     * (0, 0, 0, 1) whatever the program wrote */
-    const char *d1 = k->spec_off ? "vec4(0.0, 0.0, 0.0, 1.0)" : "clamp(oD1, 0.0, 1.0)";
-    const char *b1 = k->spec_off ? "vec4(0.0, 0.0, 0.0, 1.0)" : "clamp(oB1, 0.0, 1.0)";
+     * (0, 0, 0, 1) whatever the program wrote; on, its alpha 1 unless
+     * LIGHT_CONTROL takes it from the material specular (the NV2A tests'
+     * Lighting control, VS_*_LightOff: opaque meshes) */
+    const char *d1 = k->spec_off ? "vec4(0.0, 0.0, 0.0, 1.0)" :
+                     k->spec_a1 ? "vec4(clamp(oD1.rgb, 0.0, 1.0), 1.0)" : "clamp(oD1, 0.0, 1.0)";
+    const char *b1 = k->spec_off ? "vec4(0.0, 0.0, 0.0, 1.0)" :
+                     k->spec_a1 ? "vec4(clamp(oB1.rgb, 0.0, 1.0), 1.0)" : "clamp(oB1, 0.0, 1.0)";
     put(&b, "  vDiffuse = clamp(oD0, 0.0, 1.0);\n"
             "  vSpecular = %s;\n"
             "  vBack0 = clamp(oB0, 0.0, 1.0);\n"

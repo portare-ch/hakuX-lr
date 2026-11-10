@@ -36,6 +36,9 @@ typedef struct HleVshKey {
                                    no oFog: distance 0, else factor 1) */
     uint8_t zclamp;             /* depth clamped, not clipped (the pipeline's: in the
                                    padding, the key's size is the pipeline record's) */
+    uint8_t spec_a1;            /* oD1 / oB1 alpha read as 1 (LIGHT_CONTROL's alpha
+                                   not from the material specular; in the padding too:
+                                   recorded keys keep their bytes' meaning) */
 } HleVshKey;
 
 /* Parses nslots 4-dword instructions (stopping at the FINAL one) and writes

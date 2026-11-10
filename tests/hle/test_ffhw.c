@@ -135,6 +135,26 @@ static void test_two_side(void)
     HT_CHECK(strstr(buf, "oB0 = v7;\n    oB1 = v8;") != NULL);
 }
 
+static void test_lit_specular_disabled(void)
+{
+    /* ControlFlags_FF on Xbox: highlights remain in diffuse, and a combiner
+     * reading specular alone gets opaque black regardless of LIGHT_CONTROL. */
+    HleFfhwKey k = { .magic = HLE_FFHW_MAGIC, .lighting = 1, .separate_spec = 1,
+                     .alpha_mat_spec = 1, .light = { 1 } };
+    HleVshKey vk = { .in_mask = 0x1F, .spec_off = 1 };
+    uint32_t tok[HLE_FFHW_SLOTS * 4];
+    for (unsigned two_side = 0; two_side < 2; two_side++) {
+        k.two_side = two_side;
+        memcpy(tok, &k, sizeof(k));
+        HT_CHECK(hle_ffhw_glsl(tok, HLE_FFHW_SLOTS, &vk, buf, sizeof(buf)) > 0);
+        HT_CHECK(strstr(buf, "oD0.rgb += oD1.rgb;") != NULL);
+        HT_CHECK((strstr(buf, "oB0.rgb += oB1.rgb;") != NULL) == (two_side != 0));
+        HT_CHECK(strstr(buf, "vSpecular = vec4(0.0, 0.0, 0.0, 1.0);") != NULL);
+        HT_CHECK(strstr(buf, "vBack1 = vec4(0.0, 0.0, 0.0, 1.0);") != NULL);
+        dump(two_side ? "ffhw_specular_disabled_two_side" : "ffhw_specular_disabled");
+    }
+}
+
 static void test_not_a_key(void)
 {
     uint32_t tok[12] = { 0 };
@@ -219,6 +239,7 @@ int main(void)
     HT_RUN(test_unlit);
     HT_RUN(test_lit_skinned);
     HT_RUN(test_two_side);
+    HT_RUN(test_lit_specular_disabled);
     HT_RUN(test_not_a_key);
     HT_RUN(test_curve);
     HT_RUN(test_saturated);

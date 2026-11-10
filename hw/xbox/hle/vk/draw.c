@@ -4482,7 +4482,8 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         k.vk.int_mask = ints;
         k.vk.cmp_mask = cmps;
         k.vk.flat = s->rs[RS_SHADEMODE] == 0x1D00;
-        k.vk.spec_off = !s->spec;
+        k.vk.spec_off = !(s->spec & 1);
+        k.vk.spec_a1 = (s->spec & 3) == 1;
         k.vk.fog_table = s->rs[RS_FOGENABLE] && (s->rs[RS_FOGTABLEMODE] & 3) != 0;
     }
     if (!s->psh) {

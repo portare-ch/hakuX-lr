@@ -258,9 +258,11 @@ typedef struct HleCmdState {
     uint32_t fvf;               /* vertex shader handle or FVF */
     uint32_t xs, ys;            /* render target multisample scale (XYZRHW mapping) */
     uint32_t psh;               /* a pixel shader is set: rs[0..56] is its program */
-    uint32_t spec;              /* vertex programs: oD1 / oB1 reach the pixel stage
-                                   (NV2A SPECULAR_ENABLE: SPECULARENABLE or device
-                                   flag 0x40, 5659 0x1c7390), else (0, 0, 0, 1) */
+    uint32_t spec;              /* vertex programs, bit 0: oD1 / oB1 reach the pixel
+                                   stage (NV2A SPECULAR_ENABLE: SPECULARENABLE or
+                                   device flag 0x40, 5659 0x1c7390), else (0, 0, 0,
+                                   1); bit 1: LIGHT_CONTROL ALPHA_FROM_MATERIAL_
+                                   SPECULAR, else their alpha 1 */
     uint32_t aa;                /* 1: the NV2A antialiases the target (device flags
                                    rt_ms_bit, the multisample types): it scales screen
                                    positions by xs/ys and D3D's are logical pixels;

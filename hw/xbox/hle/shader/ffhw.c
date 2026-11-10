@@ -271,6 +271,14 @@ size_t hle_ffhw_glsl(const uint32_t *tokens, unsigned nslots, const HleVshKey *v
                            : "    oB0 = v7;\n    oB1 = v8;\n");
     }
     if (!k.specular) {
+        /* With specular output disabled, the NV2A adds the highlights to
+         * diffuse and exports opaque black as specular (ControlFlags_FF). */
+        if (k.lighting) {
+            put(&b, "    oD0.rgb += oD1.rgb;\n");
+        }
+        if (lit2) {
+            put(&b, "    oB0.rgb += oB1.rgb;\n");
+        }
         put(&b, "    oD1 = vec4(0.0, 0.0, 0.0, 1.0);\n    oB1 = vec4(0.0, 0.0, 0.0, 1.0);\n");
     } else {
         if (!k.separate_spec) {
