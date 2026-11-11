@@ -1207,11 +1207,35 @@ static void hooks_patch(NcCpu *cpu, uint32_t va, uint32_t len)
 
 /* ------------------------------------------------------------ RSQRT prototype */
 
+/* The site's patch at its physical address, whatever maps it now: the
+ * INT3 back to the original byte while that page still holds the INT3 and
+ * the rest of the instruction (within the page). An unmap removes the
+ * mapping before the invalidation reaches us, so the virtual address no
+ * longer leads there; a page reused for anything else is left alone. */
+static void rsqrt_unpatch_phys(NcCpu *cpu, const RsqrtSite *s)
+{
+    if (s->pa >= cpu->vm->ram_size || !s->len) {
+        return;
+    }
+    uint32_t n = s->len;
+    if (n > NC_PAGE - s->pa % NC_PAGE) {
+        n = NC_PAGE - s->pa % NC_PAGE;      /* the next page isn't this one's neighbour */
+    }
+    if (n > cpu->vm->ram_size - s->pa) {
+        n = cpu->vm->ram_size - s->pa;
+    }
+    uint8_t *p = cpu->vm->phys + s->pa;
+    if (p[0] == 0xCC && !memcmp(p + 1, s->bytes + 1, n - 1u)) {
+        p[0] = s->bytes[0];
+    }
+}
+
 /* An armed site whose page has moved: the contiguous allocator relocates
  * mapped pages, copying them (mm: "pages relocated"), and our INT3 moves
  * with the code. The site follows its page when the new page still holds
- * the INT3 and the rest of the instruction; anything else at that address
- * is a replacement mapping's, left alone. */
+ * the INT3 and the rest of the instruction, and the old page's copy loses
+ * its INT3; anything else at that address is a replacement mapping's, left
+ * alone. */
 static void rsqrt_follow(NcCpu *cpu, RsqrtSite *s)
 {
     const uint32_t pa = nc_vm_phys(cpu->vm, s->eip);
@@ -1220,8 +1244,25 @@ static void rsqrt_follow(NcCpu *cpu, RsqrtSite *s)
     }
     uint8_t cur[15];
     if (guest_read(cpu, s->eip, cur, s->len) && cur[0] == 0xCC && !memcmp(cur + 1, s->bytes + 1, s->len - 1u)) {
+        rsqrt_unpatch_phys(cpu, s);
         s->pa = pa;
     }
+}
+
+/* Disarm a site, its INT3 removed: through the mapping when it still leads
+ * to the site's page, else at the page itself (unmapped, or another page
+ * mapped there now). */
+static void rsqrt_disarm(NcCpu *cpu, RsqrtSite *s)
+{
+    uint8_t b;
+    if (s->armed) {
+        if (nc_vm_phys(cpu->vm, s->eip) == s->pa && guest_read(cpu, s->eip, &b, 1) && b == 0xCC) {
+            guest_write(cpu, s->eip, s->bytes, 1);
+        } else if (nc_vm_phys(cpu->vm, s->eip) != s->pa) {
+            rsqrt_unpatch_phys(cpu, s);
+        }
+    }
+    s->armed = false;
 }
 
 static bool rsqrt_decode_site(NcCpu *cpu, RsqrtSite *s, uint8_t bytes[15], NcRsqrtInsn *in)
@@ -1245,13 +1286,8 @@ static void rsqrt_restore(NcCpu *cpu)
 {
     for (unsigned i = 0; i < cpu->nrsqrt; i++) {
         RsqrtSite *s = &cpu->rsqrt_sites[i];
-        uint8_t b;
         rsqrt_follow(cpu, s);
-        if (s->armed && nc_vm_phys(cpu->vm, s->eip) == s->pa &&
-            guest_read(cpu, s->eip, &b, 1) && b == 0xCC) {
-            guest_write(cpu, s->eip, s->bytes, 1);
-        }
-        s->armed = false;
+        rsqrt_disarm(cpu, s);
     }
 }
 
@@ -1268,13 +1304,9 @@ static void rsqrt_patch(NcCpu *cpu, uint32_t va, uint32_t len)
         uint8_t bytes[15];
         NcRsqrtInsn in;
         if (!rsqrt_decode_site(cpu, s, bytes, &in)) {
-            /* A replaced instruction may still hold our first byte. */
-            uint8_t b;
-            if (s->armed && nc_vm_phys(cpu->vm, s->eip) == s->pa &&
-                guest_read(cpu, s->eip, &b, 1) && b == 0xCC) {
-                guest_write(cpu, s->eip, s->bytes, 1);
-            }
-            s->armed = false;
+            /* A replaced instruction may still hold our first byte, and an
+             * unmapped page does at its physical address. */
+            rsqrt_disarm(cpu, s);
             continue; /* not loaded yet, or not a supported RSQRT instruction */
         }
         bool overlap = false;
@@ -1303,7 +1335,7 @@ static bool rsqrt_trap(NcCpu *cpu, uint32_t at)
         }
         rsqrt_follow(cpu, s);
         if (nc_vm_phys(cpu->vm, at) != s->pa) {
-            s->armed = false;
+            rsqrt_disarm(cpu, s);
             return false; /* a replacement mapping's own INT3 */
         }
         NcFrame *f = &cpu->frame;

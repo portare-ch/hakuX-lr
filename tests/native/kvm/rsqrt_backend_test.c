@@ -118,6 +118,33 @@ int main(void)
     rsqrt_patch(cpu, CODE, sizeof(scalar));
     check(cpu->rsqrt_sites[0].armed, "replacement RSQRT can be patched again");
     rsqrt_restore(cpu);
+
+    /* The contiguous allocator relocates a patched page, copying it: the
+     * copy's INT3 is still the site's, the old copy loses it. */
+    rsqrt_patch(cpu, CODE, sizeof(scalar));
+    memcpy(vm.phys + 2 * NC_PAGE, vm.phys, NC_PAGE);
+    vm.pte[CODE / NC_PAGE] = 2 * NC_PAGE | NC_PTE_VALID;
+    check(rsqrt_trap(cpu, CODE) && cpu->frame.rip == CODE + sizeof(scalar),
+          "a relocated page's INT3 is handled as the site's");
+    check(vm.phys[0] == 0xF3, "the relocated page's old copy loses the INT3");
+    rsqrt_restore(cpu);
+    check(vm.phys[2 * NC_PAGE] == 0xF3, "the relocated patch is restored on teardown");
+    vm.pte[CODE / NC_PAGE] = NC_PTE_VALID;
+
+    /* An unmap removes the mapping before the invalidation reaches the
+     * backend: the patch is removed at its physical page, and the page
+     * mapped back is patched again. */
+    rsqrt_patch(cpu, CODE, sizeof(scalar));
+    vm.pte[CODE / NC_PAGE] = 0;
+    vm.vprot[CODE / NC_PAGE] = 0;
+    rsqrt_patch(cpu, CODE, NC_PAGE);
+    check(vm.phys[0] == 0xF3 && !cpu->rsqrt_sites[0].armed, "an unmapped site's INT3 is removed at its physical page");
+    vm.pte[CODE / NC_PAGE] = NC_PTE_VALID;
+    vm.vprot[CODE / NC_PAGE] = PROT_READ | PROT_WRITE;
+    rsqrt_patch(cpu, CODE, NC_PAGE);
+    check(cpu->rsqrt_sites[0].armed && vm.phys[0] == 0xCC, "the page mapped back is patched again");
+    check(rsqrt_trap(cpu, CODE) && cpu->frame.rip == CODE + sizeof(scalar), "and its trap is handled");
+    rsqrt_restore(cpu);
     cpu->nhooks = 1;
     cpu->hooks[0].eip = CODE;
     hooks_patch(cpu, CODE, 1);
