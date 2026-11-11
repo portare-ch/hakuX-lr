@@ -1207,8 +1207,26 @@ static void hooks_patch(NcCpu *cpu, uint32_t va, uint32_t len)
 
 /* ------------------------------------------------------------ RSQRT prototype */
 
+/* An armed site whose page has moved: the contiguous allocator relocates
+ * mapped pages, copying them (mm: "pages relocated"), and our INT3 moves
+ * with the code. The site follows its page when the new page still holds
+ * the INT3 and the rest of the instruction; anything else at that address
+ * is a replacement mapping's, left alone. */
+static void rsqrt_follow(NcCpu *cpu, RsqrtSite *s)
+{
+    const uint32_t pa = nc_vm_phys(cpu->vm, s->eip);
+    if (!s->armed || pa == s->pa || pa == UINT32_MAX) {
+        return;
+    }
+    uint8_t cur[15];
+    if (guest_read(cpu, s->eip, cur, s->len) && cur[0] == 0xCC && !memcmp(cur + 1, s->bytes + 1, s->len - 1u)) {
+        s->pa = pa;
+    }
+}
+
 static bool rsqrt_decode_site(NcCpu *cpu, RsqrtSite *s, uint8_t bytes[15], NcRsqrtInsn *in)
 {
+    rsqrt_follow(cpu, s);
     unsigned n = 0;
     while (n < 15 && guest_read(cpu, s->eip + n, bytes + n, 1)) {
         n++;
@@ -1228,6 +1246,7 @@ static void rsqrt_restore(NcCpu *cpu)
     for (unsigned i = 0; i < cpu->nrsqrt; i++) {
         RsqrtSite *s = &cpu->rsqrt_sites[i];
         uint8_t b;
+        rsqrt_follow(cpu, s);
         if (s->armed && nc_vm_phys(cpu->vm, s->eip) == s->pa &&
             guest_read(cpu, s->eip, &b, 1) && b == 0xCC) {
             guest_write(cpu, s->eip, s->bytes, 1);
@@ -1282,6 +1301,7 @@ static bool rsqrt_trap(NcCpu *cpu, uint32_t at)
         if (!s->armed || s->eip != at) {
             continue;
         }
+        rsqrt_follow(cpu, s);
         if (nc_vm_phys(cpu->vm, at) != s->pa) {
             s->armed = false;
             return false; /* a replacement mapping's own INT3 */
