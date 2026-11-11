@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **AMD CPU testing** — Add an opt-in KVM prototype for Intel-compatible
+  `RSQRTSS`/`RSQRTPS` results at explicitly selected guest addresses
+  (`NC_KVM_RSQRT_SITES`). Corrections are generated on the AMD host;
+  Intel continues to execute the original instructions.
+
 ## linux-v0.26.0 (Linux, aarch64 and x86-64, and Android)
 
 - **Video** (#199) — 480p is enabled by default in RetroArch. PAL60 is

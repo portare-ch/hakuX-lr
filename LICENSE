@@ -16,6 +16,10 @@ A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 Third-party code retains its own license and copyright notices.
 
+- native/cpu/intel_rsqrt_table.inc contains the Intel approximation tables
+  from Bochs cpu/sse_rcp.cc (Stanislav Shwartsman), used under LGPL-2.1-or-later
+  (licenses/LGPL-2.1.txt). The source, revision and transformation are recorded
+  in the file. The surrounding KVM correction code is original hakuX-lr code.
 
 - The MCPX APU (native/dev/apu) is xemu's device, ported to the native core.
   Each of its files keeps the license its header states:

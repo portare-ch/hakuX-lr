@@ -28,7 +28,9 @@
  */
 #include "native/cpu/cpu.h"
 #include "native/core/vm.h"
+#include "native/cpu/kvm_rsqrt.h"
 
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/kvm.h>
@@ -104,6 +106,14 @@ typedef struct Hook {
 } Hook;
 #define MAX_HOOKS 64
 
+typedef struct RsqrtSite {
+    uint32_t eip, pa;
+    uint8_t bytes[15];
+    unsigned len;
+    bool armed;
+} RsqrtSite;
+#define MAX_RSQRT_SITES 64
+
 struct NcCpu {
     NcCpuConfig cfg;
     NcVm *vm;
@@ -134,7 +144,14 @@ struct NcCpu {
     Hook hooks[MAX_HOOKS];
     unsigned nhooks;
     uint32_t stepping;     /* a hook's EIP run once with TF set (nc_frame_bypass_hook), 0 none */
+    NcRsqrt rsqrt;
+    RsqrtSite rsqrt_sites[MAX_RSQRT_SITES];
+    unsigned nrsqrt;
+    uint64_t rsqrt_hits;
 };
+
+static void rsqrt_patch(NcCpu *cpu, uint32_t va, uint32_t len);
+static void rsqrt_restore(NcCpu *cpu);
 
 static NcCpu *g_cpu; /* the one CPU, for nc_vm_prot_hook */
 static struct sigaction g_prev_kick; /* the kick signal's handler before, given back */
@@ -429,6 +446,53 @@ static bool refuse(NcCpu *cpu, const char *why)
     return false;
 }
 
+/* Explicit instruction addresses make this an A/B prototype: never scan
+ * mixed code/data for matching bytes. Actual host CPUID, not cfg.cpuid's
+ * emulated Pentium III. Intel pays neither patch nor per-instruction cost. */
+static bool rsqrt_config(NcCpu *cpu)
+{
+    const char *p = getenv("NC_KVM_RSQRT_SITES");
+    if (!p || !*p || !nc_rsqrt_host_amd()) {
+        return true;
+    }
+    for (;;) {
+        while (isspace((unsigned char)*p)) {
+            p++;
+        }
+        if (!isxdigit((unsigned char)*p) || cpu->nrsqrt == MAX_RSQRT_SITES) {
+            return false;
+        }
+        char *end;
+        errno = 0;
+        const unsigned long at = strtoul(p, &end, 16);
+        if (errno || at < 0x10000u || at > UINT32_MAX - 14u) {
+            return false;
+        }
+        for (unsigned i = 0; i < cpu->nrsqrt; i++) {
+            if (cpu->rsqrt_sites[i].eip == at) {
+                return false;
+            }
+        }
+        cpu->rsqrt_sites[cpu->nrsqrt++].eip = (uint32_t)at;
+        p = end;
+        while (isspace((unsigned char)*p)) {
+            p++;
+        }
+        if (!*p) {
+            break;
+        }
+        if (*p++ != ',') {
+            return false;
+        }
+    }
+    if (!nc_rsqrt_init(&cpu->rsqrt)) {
+        return false;
+    }
+    nc_log("hakuX-native-kvm", "experimental Intel RSQRT: %u AMD-only sites, %u host XOR corrections",
+           cpu->nrsqrt, cpu->rsqrt.ndelta);
+    return true;
+}
+
 NcCpu *nc_cpu_create(const NcCpuConfig *cfg, uint32_t fs_base)
 {
     if (!cfg->vm || !cfg->fault || !cfg->mmio || !cfg->port_in || !cfg->port_out || !cfg->cpuid) {
@@ -444,6 +508,9 @@ NcCpu *nc_cpu_create(const NcCpuConfig *cfg, uint32_t fs_base)
     cpu->fs_base = fs_base;
     cpu->kvm = cpu->vmfd = cpu->vcpu = -1;
     cpu->frame.cpu = cpu;
+    if (!rsqrt_config(cpu)) {
+        return refuse(cpu, "invalid NC_KVM_RSQRT_SITES or unsupported host RSQRT profile"), NULL;
+    }
     errno = 0;
     cpu->kvm = open("/dev/kvm", O_RDWR | O_CLOEXEC);
     if (cpu->kvm < 0) {
@@ -557,6 +624,12 @@ void nc_cpu_destroy(NcCpu *cpu)
     if (!cpu) {
         return;
     }
+    rsqrt_restore(cpu);
+    if (cpu->rsqrt.index) {
+        nc_log("hakuX-native-kvm", "RSQRT: %llu corrected instructions",
+               (unsigned long long)cpu->rsqrt_hits);
+    }
+    nc_rsqrt_destroy(&cpu->rsqrt);
     if (g_cpu == cpu) {
         nc_vm_prot_hook = g_prev_hook;
         g_prev_hook = NULL;
@@ -1132,6 +1205,144 @@ static void hooks_patch(NcCpu *cpu, uint32_t va, uint32_t len)
     }
 }
 
+/* ------------------------------------------------------------ RSQRT prototype */
+
+static bool rsqrt_decode_site(NcCpu *cpu, RsqrtSite *s, uint8_t bytes[15], NcRsqrtInsn *in)
+{
+    unsigned n = 0;
+    while (n < 15 && guest_read(cpu, s->eip + n, bytes + n, 1)) {
+        n++;
+    }
+    if (s->armed && n && bytes[0] == 0xCC && nc_vm_phys(cpu->vm, s->eip) == s->pa) {
+        bytes[0] = s->bytes[0];
+    }
+    uint32_t regs[8];
+    for (unsigned i = 0; i < 8; i++) {
+        regs[i] = nc_frame_gpr(&cpu->frame, (int)i);
+    }
+    return nc_rsqrt_decode(bytes, n, regs, cpu->fs_base, in);
+}
+
+static void rsqrt_restore(NcCpu *cpu)
+{
+    for (unsigned i = 0; i < cpu->nrsqrt; i++) {
+        RsqrtSite *s = &cpu->rsqrt_sites[i];
+        uint8_t b;
+        if (s->armed && nc_vm_phys(cpu->vm, s->eip) == s->pa &&
+            guest_read(cpu, s->eip, &b, 1) && b == 0xCC) {
+            guest_write(cpu, s->eip, s->bytes, 1);
+        }
+        s->armed = false;
+    }
+}
+
+static void rsqrt_patch(NcCpu *cpu, uint32_t va, uint32_t len)
+{
+    if (!cpu->rsqrt.index) {
+        return;
+    }
+    for (unsigned i = 0; i < cpu->nrsqrt; i++) {
+        RsqrtSite *s = &cpu->rsqrt_sites[i];
+        if ((uint64_t)s->eip + 15 <= va || s->eip >= (uint64_t)va + len || hook_at(cpu, s->eip) >= 0) {
+            continue;
+        }
+        uint8_t bytes[15];
+        NcRsqrtInsn in;
+        if (!rsqrt_decode_site(cpu, s, bytes, &in)) {
+            /* A replaced instruction may still hold our first byte. */
+            uint8_t b;
+            if (s->armed && nc_vm_phys(cpu->vm, s->eip) == s->pa &&
+                guest_read(cpu, s->eip, &b, 1) && b == 0xCC) {
+                guest_write(cpu, s->eip, s->bytes, 1);
+            }
+            s->armed = false;
+            continue; /* not loaded yet, or not a supported RSQRT instruction */
+        }
+        bool overlap = false;
+        for (unsigned j = 0; j < cpu->nrsqrt; j++) {
+            const RsqrtSite *other = &cpu->rsqrt_sites[j];
+            overlap |= j != i && other->armed && s->eip < other->eip + other->len &&
+                       other->eip < s->eip + in.len;
+        }
+        if (overlap) {
+            continue;
+        }
+        s->len = in.len;
+        memcpy(s->bytes, bytes, in.len);
+        s->pa = nc_vm_phys(cpu->vm, s->eip);
+        const uint8_t cc = 0xCC;
+        s->armed = guest_write(cpu, s->eip, &cc, 1);
+    }
+}
+
+static bool rsqrt_trap(NcCpu *cpu, uint32_t at)
+{
+    for (unsigned i = 0; i < cpu->nrsqrt; i++) {
+        RsqrtSite *s = &cpu->rsqrt_sites[i];
+        if (!s->armed || s->eip != at) {
+            continue;
+        }
+        if (nc_vm_phys(cpu->vm, at) != s->pa) {
+            s->armed = false;
+            return false; /* a replacement mapping's own INT3 */
+        }
+        NcFrame *f = &cpu->frame;
+        f->rip = at;
+        uint8_t bytes[15];
+        NcRsqrtInsn in;
+        if (!rsqrt_decode_site(cpu, s, bytes, &in) || in.len != s->len ||
+            memcmp(bytes, s->bytes, s->len)) {
+            /* Changed code: let it execute from its original first byte. */
+            guest_write(cpu, at, s->bytes, 1);
+            s->armed = false;
+            return true;
+        }
+        uint32_t input[4];
+        const unsigned count = in.scalar ? 1 : 4;
+        if (in.mem) {
+            if ((!in.scalar && (in.address & 15)) || (uint64_t)in.address + count * 4 > (1ull << 32)) {
+                fatal(cpu, "RSQRT source violates the guest's alignment or segment limit");
+            }
+            nc_vm_will_read(in.address, count * 4);
+            for (unsigned j = 0; j < count * 4; j++) {
+                const uint32_t va = in.address + j;
+                if (!(cpu->vm->vprot[va / NC_PAGE] & PROT_READ) ||
+                    nc_vm_phys(cpu->vm, va) >= cpu->vm->ram_size) {
+                    if (cpu->cfg.mmio_window && cpu->cfg.mmio_window(va & ~(NC_PAGE - 1))) {
+                        fatal(cpu, "RSQRT prototype requires a RAM source, not MMIO");
+                    }
+                    const char *why = NULL;
+                    const int fault = cpu->cfg.fault(cpu->cfg.opaque, f, va, false, &why);
+                    if (fault != 1 && fault != 2) {
+                        nc_log("hakuX-native-kvm", "RSQRT source at %08x, eip %08x: %s", va, at,
+                               why ? why : "not readable guest RAM");
+                        abort();
+                    }
+                    return true; /* retry the instruction, or the fault handler's new frame */
+                }
+            }
+            if (!guest_read(cpu, in.address, input, count * 4)) {
+                fatal(cpu, "reading an RSQRT source");
+            }
+        }
+        frame_fpu(f);
+        if (!in.mem) {
+            memcpy(input, f->fpu.xmm[in.src], count * 4);
+        }
+        for (unsigned j = 0; j < count; j++) {
+            const uint32_t result = nc_rsqrt_correct(&cpu->rsqrt, input[j]);
+            memcpy(f->fpu.xmm[in.dst] + 4 * j, &result, 4);
+        }
+        /* RSQRT raises no numeric exceptions. Scalar upper lanes, MXCSR,
+         * x87/MMX state, GPRs and EFLAGS remain the guest's. */
+        f->fpu_dirty = true;
+        f->rip = at + in.len;
+        cpu->rsqrt_hits++;
+        return true;
+    }
+    return false;
+}
+
 /* ------------------------------------------------------------ running */
 
 static bool sysop(NcCpu *cpu, enum NcSysOp op, unsigned size)
@@ -1281,6 +1492,9 @@ static RunState stub_exit(NcCpu *cpu)
         abort();
     case 3: {
         /* EIP is past the INT3 (CC) or INT 3 (CD 03) */
+        if (rsqrt_trap(cpu, eip - 1)) {
+            return RUN_ON;
+        }
         const int h = hook_at(cpu, eip - 1);
         if (h >= 0) {
             f->rip = eip - 1;
@@ -1368,7 +1582,9 @@ void nc_cpu_run(NcCpu *cpu, const NcCpuContext *c)
     sigemptyset(&unblock);
     sigaddset(&unblock, KICK_SIGNAL);
     pthread_sigmask(SIG_UNBLOCK, &unblock, NULL);
+    rsqrt_restore(cpu);
     hooks_refresh(cpu);
+    rsqrt_patch(cpu, 0, UINT32_MAX);
     load_context(cpu, c);
     __atomic_store_n(&cpu->running, true, __ATOMIC_RELEASE);
     for (;;) {
@@ -1452,10 +1668,12 @@ void nc_cpu_invalidate(NcCpu *cpu, uint32_t va, uint32_t len)
         return;
     }
     if (va == 0 && len >= 0xFFFFF000u) {
+        rsqrt_restore(cpu);
         hooks_refresh(cpu); /* everything: the hook set may have changed */
     } else if (cpu->nhooks) {
         hooks_patch(cpu, va, len);
     }
+    rsqrt_patch(cpu, va, len);
 }
 
 bool nc_cpu_x87_single_check(NcCpu *cpu) { return false; }
