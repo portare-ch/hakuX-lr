@@ -3,6 +3,21 @@
 set(NC_GUEST_TESTS ON)
 set(NC_LIBRETRO_GUEST_TESTS ON)
 if(HAKUX_CPU STREQUAL "kvm")
+  # Lookup and operand decoder checks also run without /dev/kvm.
+  add_executable(kvm-rsqrt-test "${NC_REPO}/tests/native/kvm/rsqrt_test.c"
+    "${NC_REPO}/native/cpu/kvm_rsqrt.c")
+  target_include_directories(kvm-rsqrt-test PRIVATE "${NC_REPO}")
+  add_test(NAME kvm-rsqrt-test COMMAND kvm-rsqrt-test)
+  set_tests_properties(kvm-rsqrt-test PROPERTIES TIMEOUT 30)
+  add_executable(kvm-rsqrt-backend-test "${NC_REPO}/tests/native/kvm/rsqrt_backend_test.c"
+    "${NC_REPO}/native/cpu/kvm_rsqrt.c")
+  target_include_directories(kvm-rsqrt-backend-test PRIVATE "${NC_REPO}")
+  target_compile_definitions(kvm-rsqrt-backend-test PRIVATE _GNU_SOURCE)
+  target_compile_options(kvm-rsqrt-backend-test PRIVATE -ffunction-sections -fdata-sections)
+  target_link_options(kvm-rsqrt-backend-test PRIVATE -Wl,--gc-sections)
+  target_link_libraries(kvm-rsqrt-backend-test PRIVATE Threads::Threads)
+  add_test(NAME kvm-rsqrt-backend-test COMMAND kvm-rsqrt-backend-test)
+  set_tests_properties(kvm-rsqrt-backend-test PROPERTIES TIMEOUT 30)
   # The KVM backend's own checks (#56): privilege, exits, thread switches,
   # interrupts, the TSC, hooks.
   add_executable(kvm-smoke "${NC_REPO}/tests/native/kvm/kvm_smoke.c" "${NC_APU_OUT_NULL}")
