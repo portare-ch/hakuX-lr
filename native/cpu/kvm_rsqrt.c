@@ -124,6 +124,11 @@ uint32_t nc_rsqrt_intel(uint32_t bits)
     return (exponent << 23) | ((uint32_t)intel_rsqrt_mantissa[(bits >> 13) & 2047u] << 11);
 }
 
+const uint16_t *nc_rsqrt_intel_mantissa(void)
+{
+    return intel_rsqrt_mantissa;
+}
+
 bool nc_rsqrt_init(NcRsqrt *r)
 {
     memset(r, 0, sizeof(*r));

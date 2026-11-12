@@ -67,6 +67,13 @@ int main(void)
         cpu->rsqrt_sites = calloc(2, sizeof(*cpu->rsqrt_sites));
     }
     cpu->nrsqrt = 2;
+    /* the guest's site table, as its #BP handler searches it */
+    cpu->sys = calloc(1, SYS_SIZE);
+    if (!cpu->sys) {
+        return 1;
+    }
+    cpu->rsqrt_inguest = true;
+    const uint8_t *guest = lin(cpu, LIN_RSQ_SITES);
     cpu->rsqrt_sites[0].eip = CODE;
     cpu->rsqrt_sites[1].eip = CODE + 0x40;
     cpu->frame.fpu_valid = true;
@@ -85,6 +92,11 @@ int main(void)
     rsqrt_patch(cpu, CODE, NC_PAGE);
     check(vm.phys[0] == 0xCC && vm.phys[0x40] == 0xCC && vm.phys[0x20] == 0xF3,
           "only explicitly selected instruction addresses patched");
+    check(nc_rd32(guest) == 2 && nc_rd32(guest + 4) == CODE &&
+          nc_rd32(guest + 8) == ((LIN_RSQ_RTN + (64 + 1) * RSQ_RTN_SIZE) | 4u << 16) &&
+          nc_rd32(guest + 12) == CODE + 0x40 &&
+          nc_rd32(guest + 16) == ((LIN_RSQ_RTN + (2 * 8 + 1) * RSQ_RTN_SIZE) | 3u << 16),
+          "the guest's table holds both register forms, ascending, each with its form's routine and length");
     check(rsqrt_trap(cpu, CODE) && cpu->frame.rip == CODE + sizeof(scalar),
           "scalar trap advances past the original instruction");
     memcpy(before.xmm[0], expected, 4);
@@ -98,6 +110,7 @@ int main(void)
     rsqrt_restore(cpu);
     check(!memcmp(vm.phys, scalar, sizeof(scalar)) && !memcmp(vm.phys + 0x40, packed, sizeof(packed)),
           "original instruction bytes restored");
+    check(nc_rd32(guest) == 0, "restored sites leave the guest's table");
     /* Memory form, including a source page fault and retry with no
      * destination state committed before the memory becomes readable. */
     const uint8_t memory[] = {0xF3, 0x0F, 0x52, 0x05, 0, 0, 2, 0};
@@ -107,6 +120,7 @@ int main(void)
     vm.vprot[DATA / NC_PAGE] = 0;
     before = cpu->frame.fpu;
     rsqrt_patch(cpu, CODE, sizeof(memory));
+    check(cpu->rsqrt_sites[0].armed && nc_rd32(guest) == 0, "a memory form stays out of the guest's table");
     check(rsqrt_trap(cpu, CODE) && faults == 1 && cpu->frame.rip == CODE &&
           !memcmp(&before, &cpu->frame.fpu, sizeof(before)), "unmapped source faults without committing SSE state");
     check(rsqrt_trap(cpu, CODE) && cpu->frame.rip == CODE + sizeof(memory), "memory source retried after mapping");
@@ -156,6 +170,7 @@ int main(void)
 
     nc_rsqrt_destroy(&cpu->rsqrt);
     free(cpu->rsqrt_sites);
+    free(cpu->sys);
     free(vm.phys);
     free(vm.vprot);
     free(vm.pte);

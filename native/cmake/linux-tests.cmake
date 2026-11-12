@@ -25,12 +25,23 @@ if(HAKUX_CPU STREQUAL "kvm")
   target_link_libraries(kvm-rsqrt-backend-test PRIVATE Threads::Threads)
   add_test(NAME kvm-rsqrt-backend-test COMMAND kvm-rsqrt-backend-test)
   set_tests_properties(kvm-rsqrt-backend-test PROPERTIES TIMEOUT 30)
+  add_executable(kvm-rsqrt-lane-test "${NC_REPO}/tests/native/kvm/rsqrt_lane_test.c"
+    "${NC_REPO}/native/cpu/kvm_rsqrt.c")
+  target_include_directories(kvm-rsqrt-lane-test PRIVATE "${NC_REPO}")
+  add_test(NAME kvm-rsqrt-lane-test COMMAND kvm-rsqrt-lane-test)
+  set_tests_properties(kvm-rsqrt-lane-test PROPERTIES TIMEOUT 30)
+  # In-guest RSQRT prototype: a timed guest loop on each path (not a test).
+  add_executable(kvm-rsqrt-bench "${NC_REPO}/tests/native/kvm/rsqrt_bench.c" "${NC_APU_OUT_NULL}")
+  target_link_libraries(kvm-rsqrt-bench PRIVATE hakux_native)
   # The KVM backend's own checks (#56): privilege, exits, thread switches,
   # interrupts, the TSC, hooks.
   add_executable(kvm-smoke "${NC_REPO}/tests/native/kvm/kvm_smoke.c" "${NC_APU_OUT_NULL}")
   target_link_libraries(kvm-smoke PRIVATE hakux_native Threads::Threads)
   add_test(NAME kvm-smoke COMMAND kvm-smoke)
   set_tests_properties(kvm-smoke PROPERTIES TIMEOUT 30)
+  # the same with RSQRT corrected through the host, not in the guest
+  add_test(NAME kvm-smoke-rsqrt-host COMMAND kvm-smoke)
+  set_tests_properties(kvm-smoke-rsqrt-host PROPERTIES TIMEOUT 30 ENVIRONMENT "NC_KVM_RSQRT_INGUEST=0")
 endif()
 add_executable(linux-smoke "${NC_REPO}/tests/native/linux/smoke.c" "${NC_APU_OUT_NULL}")
 target_link_libraries(linux-smoke PRIVATE hakux_native)
