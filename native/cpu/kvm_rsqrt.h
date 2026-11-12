@@ -28,6 +28,8 @@ bool nc_rsqrt_decode(const uint8_t *code, unsigned size, const uint32_t regs[8],
 bool nc_rsqrt_host_amd(void);
 uint32_t nc_rsqrt_native(uint32_t bits);
 uint32_t nc_rsqrt_intel(uint32_t bits);
+/* nc_rsqrt_intel's 2048 mantissas (u16), for the in-guest routine */
+const uint16_t *nc_rsqrt_intel_mantissa(void);
 bool nc_rsqrt_init(NcRsqrt *r);
 void nc_rsqrt_destroy(NcRsqrt *r);
 uint32_t nc_rsqrt_correct(const NcRsqrt *r, uint32_t bits);

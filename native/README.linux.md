@@ -85,16 +85,21 @@ NC_KVM_RSQRT_SITES=0x00123456,0x001234AB retroarch -L hakux_libretro.so Game.iso
 Those example addresses are placeholders. Each address must point to the
 start of a `RSQRTSS` or `RSQRTPS` instruction, including its prefixes.
 
-The startup log reports the scan's result and the correction count. Every
-corrected guest instruction causes a KVM exit, so titles that use the
-instructions heavily run slower; measure frame times before relying on it.
+The startup log reports the scan's result. Instructions with a register
+source are corrected inside the guest, by a handler the backend installs
+for the breakpoint each one is replaced with (about 75 ns each).
+Instructions with a memory source cause a KVM exit instead (about 5.5 µs
+each), as all do with `NC_KVM_RSQRT_INGUEST=0`.
 
 `kvm-rsqrt-test` checks the lookup and operand decoder without `/dev/kvm`;
 `kvm-rsqrt-test --exhaustive` compares all 2^32 input bit patterns with the
 Intel reference. `kvm-rsqrt-backend-test` exercises the patch/trap path with
-synthetic RAM, `kvm-rsqrt-scan-test` runs the scan and its instruction
+synthetic RAM, `kvm-rsqrt-lane-test` runs the guest handler's arithmetic
+against the Intel reference (`--exhaustive` for all inputs),
+`kvm-rsqrt-scan-test` runs the scan and its instruction
 decoder on a synthetic XBE, and `kvm-smoke` runs scalar and packed
-instructions under KVM. The standalone checks can also be built directly:
+instructions under KVM (`kvm-smoke-rsqrt-host` with the exit path).
+`kvm-rsqrt-bench ss|ps N` times a guest loop on either path. The standalone checks can also be built directly:
 
 ```sh
 cc -O2 -I. tests/native/kvm/rsqrt_test.c native/cpu/kvm_rsqrt.c -o /tmp/rsqrt-test
