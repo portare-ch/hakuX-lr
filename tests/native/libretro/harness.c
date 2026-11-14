@@ -469,6 +469,29 @@ static long status_kib(const char *key)
     return v;
 }
 
+/* Anonymous memory mapped writable and executable, in KiB: a code pool. The
+ * core's own are gone with it; lavapipe leaves its 10 MiB one behind each
+ * time the driver is unloaded (check.py's cycles). */
+static long exec_pool_kib(void)
+{
+    FILE *f = fopen("/proc/self/maps", "r");
+    char line[512];
+    unsigned long long total = 0;
+    while (f && fgets(line, sizeof(line), f)) {
+        unsigned long long a, b;
+        char perms[8];
+        int path = 0;
+        if (sscanf(line, "%llx-%llx %7s %*s %*s %*s %n", &a, &b, perms, &path) == 3 && perms[1] == 'w' &&
+            perms[2] == 'x' && (!path || line[path] == '\n' || !line[path])) {
+            total += b - a;
+        }
+    }
+    if (f) {
+        fclose(f);
+    }
+    return (long)(total >> 10);
+}
+
 /* The [heap] mapping (brk), in KiB. glibc gives it back only from its top,
  * so it stays at its high-water mark, which depends on how the threads'
  * allocations interleave: counted apart from the other mappings, and what
@@ -789,9 +812,9 @@ int main(int argc, char **argv)
                 name_threads(c + 1);
             }
             printf("cycle %d: %ld threads, %ld descriptors, VmSize %ld KiB, VmRSS %ld KiB, heap %ld KiB, "
-                   "malloc %ld KiB, signals caught %s, %s\n",
+                   "malloc %ld KiB, code pools %ld KiB, signals caught %s, %s\n",
                    c + 1, threads, count_dir("/proc/self/fd"), status_kib("VmSize:"), status_kib("VmRSS:"),
-                   heap_kib(), malloc_kib(), caught_signals(),
+                   heap_kib(), malloc_kib(), exec_pool_kib(), caught_signals(),
                    core_mapped() ? "the core still mapped" : "the core unloaded");
             fflush(stdout);
             if (getenv("HARNESS_MAPS")) {   /* debug: the mappings after each cycle, to a file */
