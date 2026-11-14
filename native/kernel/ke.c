@@ -1787,8 +1787,13 @@ static uint64_t KeSetBasePriorityThread(NcKernel *k, NcFrame *f, const uint32_t 
     }
     const int old = nc_ke_base_priority(k, t);
     int inc = (int32_t)a[1];
-    int p = inc >= 16 ? 15 : inc <= -16 ? 1 : BASE_PRIORITY + inc;
-    p = p < 1 ? 1 : p > 31 ? 31 : p;
+    /* A title's process is in the variable priority class, and NT keeps a
+     * base set by increment inside it: 1 to 15, never the real-time
+     * priorities from 16 up. A thread given +14 otherwise ran at 22, above
+     * every boosted thread of the title, and one that never waits starved
+     * the rest (Angelic Concert's idle-time counter: a black screen). */
+    int p = inc >= 16 ? LOW_REALTIME_PRIORITY - 1 : inc <= -16 ? 1 : BASE_PRIORITY + inc;
+    p = p < 1 ? 1 : p >= LOW_REALTIME_PRIORITY ? LOW_REALTIME_PRIORITY - 1 : p;
     int now = p;
     if (p < LOW_REALTIME_PRIORITY && t->priority < LOW_REALTIME_PRIORITY) {
         now = t->priority - (int8_t)*kt_byte(k, t, KT_PRIORITY_DEC) + p - old;
