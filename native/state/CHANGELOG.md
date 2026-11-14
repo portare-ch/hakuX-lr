@@ -68,3 +68,8 @@ One entry per section version (tools/native/statelock.py).
 
 - Record whether cheats, patches or mods changed the game. Modified states
   and states from earlier versions load with Xbox Live disabled.
+
+## FILE v4 (2026-11-14, after 9d23fc01a7)
+
+- NcFile.share_has, share_lets: the access each open of a hard disk file has and lets others have, checked at each open as NT's share access (v3 states: their open files take no part)
+- upgraded: v1..v3 states load
