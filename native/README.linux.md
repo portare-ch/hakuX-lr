@@ -63,9 +63,20 @@ Rust toolchain details.
 
 ### Experimental Intel RSQRT results on AMD
 
-For A/B testing, `NC_KVM_RSQRT_SITES` selects up to 64 guest instruction
-addresses, separated by commas and written in hexadecimal. For example,
-with addresses obtained from the particular XBE being tested:
+AMD CPUs return different low bits from `RSQRTSS` and `RSQRTPS` than the
+Xbox's Pentium III. On an AMD host the KVM backend scans the booted XBE for
+those instructions and corrects each one to the Intel result. Intel hosts
+are unaffected and skip the scan.
+
+The scan (`native/cpu/kvm_rsqrt_scan.c`) decodes only code that control flow
+reaches, starting from the entry point and from pointers to code, and never
+matches bytes in mixed code and data. A site is used only when a linear
+sweep of the section decodes the same instruction at the same address.
+Instructions in functions that nothing refers to are left uncorrected.
+
+`NC_KVM_RSQRT=0` turns the correction off. For A/B testing,
+`NC_KVM_RSQRT_SITES` replaces the scan with explicit guest instruction
+addresses, separated by commas and written in hexadecimal:
 
 ```sh
 NC_KVM_RSQRT_SITES=0x00123456,0x001234AB retroarch -L hakux_libretro.so Game.iso
@@ -73,45 +84,29 @@ NC_KVM_RSQRT_SITES=0x00123456,0x001234AB retroarch -L hakux_libretro.so Game.iso
 
 Those example addresses are placeholders. Each address must point to the
 start of a `RSQRTSS` or `RSQRTPS` instruction, including its prefixes.
-The backend checks the real host's CPUID and installs patches only on AMD.
-Leave the variable unset for native results. Intel runs native instructions
-with either setting.
 
-The prototype replaces the first byte at each selected address with an
-`INT3` and computes the result when the instruction traps. It supports
-register and RAM operands, 32-bit and 16-bit addressing, and FS overrides.
-Scalar upper lanes and guest flags are preserved. Original bytes are
-restored when the CPU is destroyed; section reloads and code invalidation
-refresh the selected patches. Code that modifies itself must notify the
-core through its existing invalidation path. Sites owned by HLE hooks take
-precedence. MMIO sources are outside this prototype.
-
-The Intel reference uses Bochs' approximation tables, independently matching
-Fabian Giesen's published Intel measurements. At CPU creation, AMD's native
-results are compared with that reference to build a 2 MiB XOR index and a
-small correction palette. Both ends of every input bucket are checked.
-This generates the corrections on the actual host rather than assuming
-identical tables across all Zen generations. It targets known Intel results;
-exhaustive Coppermine equivalence is not established.
-
-The startup log reports the selected sites and correction count; the shutdown
-log reports how many instructions were corrected. Every corrected guest
-instruction causes a KVM exit, so measure frame times and visible behaviour
-before using it beyond a test. The option is off by default.
+The startup log reports the scan's result and the correction count. Every
+corrected guest instruction causes a KVM exit, so titles that use the
+instructions heavily run slower; measure frame times before relying on it.
 
 `kvm-rsqrt-test` checks the lookup and operand decoder without `/dev/kvm`;
 `kvm-rsqrt-test --exhaustive` compares all 2^32 input bit patterns with the
 Intel reference. `kvm-rsqrt-backend-test` exercises the patch/trap path with
-synthetic RAM, and `kvm-smoke` runs scalar and packed instructions under KVM.
-The two standalone checks can also be built directly:
+synthetic RAM, `kvm-rsqrt-scan-test` runs the scan and its instruction
+decoder on a synthetic XBE, and `kvm-smoke` runs scalar and packed
+instructions under KVM. The standalone checks can also be built directly:
 
 ```sh
 cc -O2 -I. tests/native/kvm/rsqrt_test.c native/cpu/kvm_rsqrt.c -o /tmp/rsqrt-test
 /tmp/rsqrt-test --exhaustive
 cc -O2 -D_GNU_SOURCE -ffunction-sections -fdata-sections -I. \
   tests/native/kvm/rsqrt_backend_test.c native/cpu/kvm_rsqrt.c \
+  native/cpu/kvm_rsqrt_scan.c native/cpu/x86_decode.c \
   -Wl,--gc-sections -pthread -o /tmp/rsqrt-backend-test
 /tmp/rsqrt-backend-test
+cc -O2 -I. tests/native/kvm/rsqrt_scan_test.c native/cpu/kvm_rsqrt_scan.c \
+  native/cpu/x86_decode.c -o /tmp/rsqrt-scan-test
+/tmp/rsqrt-scan-test
 ```
 
 References: [Intel measurements](https://gist.github.com/rygorous/ba9a5bfbfc3555d7242b8a47c522b093),

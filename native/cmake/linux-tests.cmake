@@ -9,8 +9,15 @@ if(HAKUX_CPU STREQUAL "kvm")
   target_include_directories(kvm-rsqrt-test PRIVATE "${NC_REPO}")
   add_test(NAME kvm-rsqrt-test COMMAND kvm-rsqrt-test)
   set_tests_properties(kvm-rsqrt-test PROPERTIES TIMEOUT 30)
+  # The site scan and its instruction decoder, on a synthetic XBE.
+  add_executable(kvm-rsqrt-scan-test "${NC_REPO}/tests/native/kvm/rsqrt_scan_test.c"
+    "${NC_REPO}/native/cpu/kvm_rsqrt_scan.c" "${NC_REPO}/native/cpu/x86_decode.c")
+  target_include_directories(kvm-rsqrt-scan-test PRIVATE "${NC_REPO}")
+  add_test(NAME kvm-rsqrt-scan-test COMMAND kvm-rsqrt-scan-test)
+  set_tests_properties(kvm-rsqrt-scan-test PROPERTIES TIMEOUT 30)
   add_executable(kvm-rsqrt-backend-test "${NC_REPO}/tests/native/kvm/rsqrt_backend_test.c"
-    "${NC_REPO}/native/cpu/kvm_rsqrt.c")
+    "${NC_REPO}/native/cpu/kvm_rsqrt.c" "${NC_REPO}/native/cpu/kvm_rsqrt_scan.c"
+    "${NC_REPO}/native/cpu/x86_decode.c")
   target_include_directories(kvm-rsqrt-backend-test PRIVATE "${NC_REPO}")
   target_compile_definitions(kvm-rsqrt-backend-test PRIVATE _GNU_SOURCE)
   target_compile_options(kvm-rsqrt-backend-test PRIVATE -ffunction-sections -fdata-sections)

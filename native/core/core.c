@@ -364,6 +364,20 @@ static bool kvm_mmio(uint32_t addr, unsigned bytes, bool store, uint64_t *v)
     }
 }
 
+/* The booted XBE's file, as loaded (a title update's, the mods' patches). */
+static uint8_t *kvm_title_image(void *opaque, uint32_t *size)
+{
+    const NcCore *c = g_cpu_core;
+    const uint32_t n = c->xbe.file.size;
+    uint8_t *image = n ? malloc(n) : NULL;
+    if (image && !nc_xbe_read(&c->disc, &c->xbe, 0, image, n)) {
+        free(image);
+        image = NULL;
+    }
+    *size = n;
+    return image;
+}
+
 void nc_core_cpu_backend(NcCore *c, NcCpuConfig *cfg)
 {
     g_cpu_core = c;
@@ -375,6 +389,7 @@ void nc_core_cpu_backend(NcCore *c, NcCpuConfig *cfg)
     cfg->port_out = nc_port_out;
     cfg->cpuid = nc_kernel_cpuid;
     cfg->hook_list = nc_hle_hook_list;
+    cfg->title_image = kvm_title_image;
 }
 
 /* Hooked guest addresses: the HLE GPU's functions and device-access sites. */

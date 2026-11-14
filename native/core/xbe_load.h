@@ -31,6 +31,8 @@ typedef struct NcXbe {
  * disk partition ("\Device\Harddisk0\Partition2\xboxdash.xbe": the host
  * file, kept open for XeLoadSection). */
 bool nc_xbe_load(NcVm *vm, const NcDisc *disc, const char *path, const NcKernel *k, NcXbe *out);
+/* len bytes at off of a loaded XBE: from its host file, or the disc. */
+bool nc_xbe_read(const NcDisc *disc, const NcXbe *x, uint64_t off, void *buf, size_t len);
 /* len bytes at off of the booted XBE's host file (fd, nc_xbe_load's), the
  * mods' patches of it over them ([$u\...]: a title update's). */
 bool nc_xbe_host_read(int fd, uint64_t off, void *buf, size_t len);
