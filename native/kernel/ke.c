@@ -578,7 +578,13 @@ uint64_t nc_ke_check_waits(NcKernel *k)
     uint64_t earliest = 0;
     for (unsigned i = 0; i < NC_MAX_THREADS; i++) {
         NcThread *t = &k->threads[i];
-        if (t->state != NC_T_WAITING) {
+        /* A suspended thread isn't in its wait: NT's suspend is an APC that
+         * takes the thread out of it, and the wait starts again once the
+         * thread is resumed (resume checks the waits). Until then a signal
+         * goes to the other waiters or stays with the object. Given to the
+         * suspended thread, a mutant or a lock was held by a thread that
+         * couldn't run to release it. */
+        if (t->state != NC_T_WAITING || t->suspend) {
             continue;
         }
         int idx = satisfied(k, t, &t->wait);
@@ -1516,7 +1522,7 @@ static uint64_t KeSetEventBoostPriority(NcKernel *k, NcFrame *f, const uint32_t 
 {
     for (unsigned i = 0; i < k->threads_hi; i++) {
         NcThread *t = &k->threads[i];
-        if (t->state != NC_T_WAITING || t->wait.wait_all) {
+        if (t->state != NC_T_WAITING || t->suspend || t->wait.wait_all) {
             continue;
         }
         for (unsigned j = 0; j < t->wait.count; j++) {
