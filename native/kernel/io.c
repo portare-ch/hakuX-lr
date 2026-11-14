@@ -2082,6 +2082,18 @@ static uint64_t NtSetInformationFile(NcKernel *k, NcFrame *f, const uint32_t *a)
         } else if (rename(nf->host, host) != 0) {
             st = STATUS_ACCESS_DENIED;
         } else {
+            /* Every open of the file follows it to its new name, not this
+             * handle's alone: the opens of a file are found by its name
+             * (their sharing, a delete pending), and one left under the old
+             * name was counted for whatever file has that name next, and
+             * no longer for this one. */
+            for (int i = 0; i < MAX_FILES && !nf->is_dir; i++) {
+                NcFile *o = &g_files[i];
+                if (o != nf && o->used && o->kind == F_HOST && !o->is_dir && !strcmp(o->host, nf->host)) {
+                    snprintf(o->host, sizeof(o->host), "%s", host);
+                    snprintf(o->path, sizeof(o->path), "%s", path);
+                }
+            }
             snprintf(nf->host, sizeof(nf->host), "%s", host);
             snprintf(nf->path, sizeof(nf->path), "%s", path);
         }
