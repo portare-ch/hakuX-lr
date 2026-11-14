@@ -19,6 +19,6 @@ if grep -q '^HAKUX_DSP_JIT:BOOL=ON$' "$build/CMakeCache.txt"; then
     cmake --build "$build" --target apu-jit-smoke -j "${JOBS:-4}"
 fi
 if grep -q '^HAKUX_CPU:STRING=kvm$' "$build/CMakeCache.txt"; then
-    cmake --build "$build" --target kvm-smoke -j "${JOBS:-4}"
+    cmake --build "$build" --target kvm-smoke kvm-rsqrt-test kvm-rsqrt-backend-test -j "${JOBS:-4}"
 fi
 ctest --test-dir "$build" --output-on-failure

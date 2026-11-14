@@ -19,6 +19,7 @@
 #include "native/core/core.h"
 #include "native/core/mmio.h"
 #include "native/hle/hle_native.h"
+#include "native/cpu/kvm_rsqrt.h"
 
 #include <pthread.h>
 #include <signal.h>
@@ -241,7 +242,11 @@ int main(void)
     cfg.port_in = port_in;
     cfg.port_out = port_out;
     cfg.hook_list = hook_list;
+    /* Known instruction boundaries in the synthetic RSQRT program below.
+     * Intel must ignore these; AMD alone installs the corrections. */
+    setenv("NC_KVM_RSQRT_SITES", "10a0e,10a19", 1);
     cpu = core.cpu = nc_cpu_create(&cfg, core.kernel.kpcr_va);
+    unsetenv("NC_KVM_RSQRT_SITES");
     if (!cpu) {
         printf("FAIL: a KVM guest CPU (needs /dev/kvm with TSC scaling and UMIP)\n");
         return 1;
@@ -451,7 +456,37 @@ int main(void)
     run_at(CODE + 0x980);
     check(nreports == 1 && reports[0] == 2, "x87 state, TOP included, through a savestate's export and import");
 
+    /* Scalar upper lanes, packed lanes and MXCSR through actual KVM exits. */
+    const uint8_t rsqrt[] = {
+        0x0F, 0x10, 0x05, 0x00, 0x03, 0x02, 0x00, /* movups xmm0, [0x20300] */
+        0x0F, 0x10, 0x0D, 0x40, 0x03, 0x02, 0x00, /* movups xmm1, [0x20340] */
+        0xF3, 0x0F, 0x52, 0xC1,                   /* rsqrtss xmm0, xmm1 */
+        0x0F, 0x11, 0x05, 0x60, 0x03, 0x02, 0x00, /* movups [0x20360], xmm0 */
+        0x0F, 0x52, 0xD1,                         /* rsqrtps xmm2, xmm1 */
+        0x0F, 0x11, 0x15, 0x80, 0x03, 0x02, 0x00, /* movups [0x20380], xmm2 */
+        0x0F, 0xAE, 0x1D, 0x90, 0x03, 0x02, 0x00, /* stmxcsr [0x20390] */
+        0xF4,
+    };
+    const uint32_t inputs[] = {0x3F800000, 0x40800000, 0x3E800000, 0x41800000};
+    const uint32_t expected[] = {0x3F7FF000, 0x3EFFF000, 0x3FFFF000, 0x3E7FF000};
+    uint8_t scalar_expected[16];
+    memcpy(scalar_expected, nc_vm_host(&core.vm, DATA + 0x300), 16);
+    nc_wr32(scalar_expected, expected[0]);
+    memcpy(nc_vm_host(&core.vm, DATA + 0x340), inputs, sizeof(inputs));
+    put(CODE + 0xA00, rsqrt, sizeof(rsqrt));
+    run_at(CODE + 0xA00);
+    check(!memcmp(nc_vm_host(&core.vm, DATA + 0x360), scalar_expected, 16),
+          "RSQRTSS: Intel result and unchanged upper lanes");
+    check(!memcmp(nc_vm_host(&core.vm, DATA + 0x380), expected, sizeof(expected)),
+          "RSQRTPS: all four Intel results");
+    check(nc_vm_rd32(&core.vm, DATA + 0x390) == 0x1F80, "RSQRT leaves guest MXCSR unchanged");
+    check(*(uint8_t *)nc_vm_host(&core.vm, CODE + 0xA0E) == (nc_rsqrt_host_amd() ? 0xCC : 0xF3),
+          "RSQRT patching uses actual AMD host CPUID only");
+
     nc_cpu_destroy(cpu);
+    check(*(uint8_t *)nc_vm_host(&core.vm, CODE + 0xA0E) == 0xF3 &&
+          *(uint8_t *)nc_vm_host(&core.vm, CODE + 0xA19) == 0x0F,
+          "RSQRT original bytes restored on CPU destruction");
     struct sigaction kick;
     sigaction(SIGRTMIN + 3, NULL, &kick);
     check(kick.sa_handler == SIG_DFL, "the kick signal's handler given back on destroy");

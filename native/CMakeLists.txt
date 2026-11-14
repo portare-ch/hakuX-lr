@@ -174,7 +174,7 @@ if(HAKUX_CPU STREQUAL "fex")
   target_sources(hakux_native PRIVATE cpu/cpu.cpp)
   target_link_libraries(hakux_native PUBLIC nc_fex)
 else()
-  target_sources(hakux_native PRIVATE cpu/cpu_kvm.c)
+  target_sources(hakux_native PRIVATE cpu/cpu_kvm.c cpu/kvm_rsqrt.c)
 endif()
 target_include_directories(hakux_native PUBLIC "${NC_REPO}")
 # Rebuild the embedded dashboard when the pinned XBE changes.
