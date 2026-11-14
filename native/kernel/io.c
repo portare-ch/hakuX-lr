@@ -427,7 +427,13 @@ static uint32_t file_handle(NcKernel *k, NcFile *nf)
     }
     *(uint16_t *)nc_vm_host(k->vm, obj) = 5; /* IO_TYPE_FILE */
     nc_ke_init_event(k, obj + FO_LOCK, 1, false);
-    nc_ke_init_event(k, obj + NC_FO_EVENT, 0, false);
+    /* A file object's event starts out set. NT completes the open on that
+     * event (IopParseDevice hands it to the create request), so a handle
+     * nothing was read from or written to yet can be waited on; an I/O
+     * clears it as it starts and sets it as it completes. Left clear, a
+     * title that waits on each file before closing it waited for ever on
+     * the ones it only opened (KOF: Maximum Impact - Maniax, at boot). */
+    nc_ke_init_event(k, obj + NC_FO_EVENT, 0, true);
     nc_vm_wr32(k->vm, obj + FO_INDEX, (uint32_t)(nf - g_files));
     const uint32_t fcb = obj + FO_FCB;
     nc_vm_wr32(k->vm, obj + FO_FSCONTEXT, fcb);
