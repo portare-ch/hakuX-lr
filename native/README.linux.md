@@ -91,9 +91,13 @@ for the breakpoint each one is replaced with (about 75 ns each).
 Instructions with a memory source cause a KVM exit instead (about 5.5 µs
 each), as all do with `NC_KVM_RSQRT_INGUEST=0`.
 
-`kvm-rsqrt-test` checks the lookup and operand decoder without `/dev/kvm`;
-`kvm-rsqrt-test --exhaustive` compares all 2^32 input bit patterns with the
-Intel reference. `kvm-rsqrt-backend-test` exercises the patch/trap path with
+When the core is closed, the log reports how many instructions were
+corrected in the guest and how many through the host.
+
+`kvm-rsqrt-test` checks the Intel reference and the operand decoder without
+`/dev/kvm`; `kvm-rsqrt-test --exhaustive` compares the reference with the
+host's own `RSQRTSS` for all 2^32 input bit patterns, which must match on a
+host that isn't AMD (an AMD host reports how many differ). `kvm-rsqrt-backend-test` exercises the patch/trap path with
 synthetic RAM, `kvm-rsqrt-lane-test` runs the guest handler's arithmetic
 against the Intel reference (`--exhaustive` for all inputs),
 `kvm-rsqrt-scan-test` runs the scan and its instruction
@@ -116,7 +120,7 @@ cc -O2 -I. tests/native/kvm/rsqrt_scan_test.c native/cpu/kvm_rsqrt_scan.c \
 
 References: [Intel measurements](https://gist.github.com/rygorous/ba9a5bfbfc3555d7242b8a47c522b093),
 [Bochs source](https://github.com/bochs-emu/Bochs/blob/master/bochs/cpu/sse_rcp.cc),
-[O'Callahan's XOR lookup](https://robert.ocallahan.org/2021/09/emulating-amd-rsqrtss-etc-on-intel.html).
+[O'Callahan on the AMD and Intel results](https://robert.ocallahan.org/2021/09/emulating-amd-rsqrtss-etc-on-intel.html).
 
 ### Build regression checks
 

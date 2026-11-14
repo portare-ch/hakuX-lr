@@ -2,10 +2,12 @@
 
 ## Unreleased
 
-- **AMD CPU testing** — Add an opt-in KVM prototype for Intel-compatible
-  `RSQRTSS`/`RSQRTPS` results at explicitly selected guest addresses
-  (`NC_KVM_RSQRT_SITES`). Corrections are generated on the AMD host;
-  Intel continues to execute the original instructions.
+- **AMD CPUs** — On an AMD host the KVM backend gives `RSQRTSS` and
+  `RSQRTPS` the Intel results the Xbox's CPU returns. It is on by default:
+  the booted XBE is scanned for the instructions and each one is corrected,
+  those with a register source inside the guest. `NC_KVM_RSQRT=0` turns it
+  off, and `NC_KVM_RSQRT_SITES` corrects explicitly listed addresses in
+  place of the scan. Intel hosts execute the original instructions.
 - **Kernel and game compatibility** (#215)
   - A file can be waited on from the moment it is opened. KOF: Maximum
     Impact - Maniax boots instead of staying on a black screen.

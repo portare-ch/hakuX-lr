@@ -58,9 +58,7 @@ int main(void)
     check(rsqrt_config(cpu) && cpu->nrsqrt == (nc_rsqrt_host_amd() ? 2u : 0u),
           "environment selection applies only on actual AMD hosts");
     unsetenv("NC_KVM_RSQRT_SITES");
-    if (!cpu->rsqrt.index && !nc_rsqrt_init(&cpu->rsqrt)) {
-        return 1;
-    }
+    cpu->rsqrt_on = true;
     /* Exercise the handler on Intel CI as well, without adding any
      * production override to the AMD vendor gate. */
     if (!cpu->rsqrt_sites) {
@@ -168,7 +166,6 @@ int main(void)
     rsqrt_patch(cpu, CODE, sizeof(scalar));
     check(vm.phys[0] == 0xCC && !cpu->rsqrt_sites[0].armed, "existing HLE hook retains ownership of its address");
 
-    nc_rsqrt_destroy(&cpu->rsqrt);
     free(cpu->rsqrt_sites);
     free(cpu->sys);
     free(vm.phys);
