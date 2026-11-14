@@ -29,6 +29,7 @@
 #include "native/cpu/cpu.h"
 #include "native/core/vm.h"
 #include "native/cpu/kvm_rsqrt.h"
+#include "native/cpu/kvm_rsqrt_scan.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -42,6 +43,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <time.h>
 #include <ucontext.h>
 #include <unistd.h>
 
@@ -112,7 +114,6 @@ typedef struct RsqrtSite {
     unsigned len;
     bool armed;
 } RsqrtSite;
-#define MAX_RSQRT_SITES 64
 
 struct NcCpu {
     NcCpuConfig cfg;
@@ -145,7 +146,7 @@ struct NcCpu {
     unsigned nhooks;
     uint32_t stepping;     /* a hook's EIP run once with TF set (nc_frame_bypass_hook), 0 none */
     NcRsqrt rsqrt;
-    RsqrtSite rsqrt_sites[MAX_RSQRT_SITES];
+    RsqrtSite *rsqrt_sites;     /* ascending by eip */
     unsigned nrsqrt;
     uint64_t rsqrt_hits;
 };
@@ -446,20 +447,75 @@ static bool refuse(NcCpu *cpu, const char *why)
     return false;
 }
 
-/* Explicit instruction addresses make this an A/B prototype: never scan
- * mixed code/data for matching bytes. Actual host CPUID, not cfg.cpuid's
- * emulated Pentium III. Intel pays neither patch nor per-instruction cost. */
+static int rsqrt_site_cmp(const void *a, const void *b)
+{
+    const uint32_t x = ((const RsqrtSite *)a)->eip, y = ((const RsqrtSite *)b)->eip;
+    return x < y ? -1 : x > y;
+}
+
+/* The first site at eip or above (nrsqrt: none) */
+static unsigned rsqrt_from(const NcCpu *cpu, uint32_t eip)
+{
+    unsigned lo = 0, hi = cpu->nrsqrt;
+    while (lo < hi) {
+        const unsigned mid = lo + (hi - lo) / 2;
+        if (cpu->rsqrt_sites[mid].eip < eip) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    return lo;
+}
+
+/* The instructions corrected are the title's own, found by a walk of its
+ * code (kvm_rsqrt_scan.h; NC_KVM_RSQRT=0: none), or NC_KVM_RSQRT_SITES'
+ * explicit addresses in their place for an A/B check: never bytes that
+ * match in mixed code and data. Actual host CPUID, not cfg.cpuid's emulated
+ * Pentium III. Intel pays neither scan, patch nor per-instruction cost. */
 static bool rsqrt_config(NcCpu *cpu)
 {
-    const char *p = getenv("NC_KVM_RSQRT_SITES");
-    if (!p || !*p || !nc_rsqrt_host_amd()) {
+    const char *p = getenv("NC_KVM_RSQRT_SITES"), *on = getenv("NC_KVM_RSQRT");
+    const bool listed = p && *p;
+    if (!nc_rsqrt_host_amd() || (!listed && ((on && !strcmp(on, "0")) || !cpu->cfg.title_image))) {
         return true;
     }
-    for (;;) {
+    NcRsqrtScan scan = {0};
+    size_t max = 1;
+    if (listed) {
+        for (const char *c = p; *c; c++) {
+            max += *c == ',';
+        }
+    } else {
+        uint32_t size = 0;
+        uint8_t *image = cpu->cfg.title_image(cpu->cfg.opaque, &size);
+        struct timespec t0, t1;
+        clock_gettime(CLOCK_MONOTONIC, &t0);
+        const bool scanned = image && nc_rsqrt_scan_xbe(image, size, &scan);
+        clock_gettime(CLOCK_MONOTONIC, &t1);
+        free(image);
+        if (!scanned || !scan.nsites) {
+            if (image && !scanned) {
+                nc_log("hakuX-native-kvm", "Intel RSQRT: the title's code couldn't be scanned, none corrected");
+            }
+            nc_rsqrt_scan_free(&scan);
+            return true;
+        }
+        nc_log("hakuX-native-kvm", "Intel RSQRT: %u instructions in the title's code (%u more unreached, %u "
+               "disputed), scanned in %ld ms", scan.nsites, scan.unreached, scan.disputed,
+               (long)((t1.tv_sec - t0.tv_sec) * 1000 + (t1.tv_nsec - t0.tv_nsec) / 1000000));
+        max = scan.nsites;
+    }
+    cpu->rsqrt_sites = calloc(max, sizeof(*cpu->rsqrt_sites));
+    if (!cpu->rsqrt_sites) {
+        nc_rsqrt_scan_free(&scan);
+        return false;
+    }
+    while (listed) {
         while (isspace((unsigned char)*p)) {
             p++;
         }
-        if (!isxdigit((unsigned char)*p) || cpu->nrsqrt == MAX_RSQRT_SITES) {
+        if (!isxdigit((unsigned char)*p)) {
             return false;
         }
         char *end;
@@ -467,11 +523,6 @@ static bool rsqrt_config(NcCpu *cpu)
         const unsigned long at = strtoul(p, &end, 16);
         if (errno || at < 0x10000u || at > UINT32_MAX - 14u) {
             return false;
-        }
-        for (unsigned i = 0; i < cpu->nrsqrt; i++) {
-            if (cpu->rsqrt_sites[i].eip == at) {
-                return false;
-            }
         }
         cpu->rsqrt_sites[cpu->nrsqrt++].eip = (uint32_t)at;
         p = end;
@@ -485,11 +536,21 @@ static bool rsqrt_config(NcCpu *cpu)
             return false;
         }
     }
+    for (unsigned i = 0; i < scan.nsites; i++) {
+        cpu->rsqrt_sites[cpu->nrsqrt++].eip = scan.sites[i];
+    }
+    nc_rsqrt_scan_free(&scan);
+    qsort(cpu->rsqrt_sites, cpu->nrsqrt, sizeof(*cpu->rsqrt_sites), rsqrt_site_cmp);
+    for (unsigned i = 1; i < cpu->nrsqrt; i++) {
+        if (cpu->rsqrt_sites[i].eip == cpu->rsqrt_sites[i - 1].eip) {
+            return false;
+        }
+    }
     if (!nc_rsqrt_init(&cpu->rsqrt)) {
         return false;
     }
-    nc_log("hakuX-native-kvm", "experimental Intel RSQRT: %u AMD-only sites, %u host XOR corrections",
-           cpu->nrsqrt, cpu->rsqrt.ndelta);
+    nc_log("hakuX-native-kvm", "Intel RSQRT: %u AMD-only sites (%s), %u host XOR corrections", cpu->nrsqrt,
+           listed ? "NC_KVM_RSQRT_SITES" : "the title's", cpu->rsqrt.ndelta);
     return true;
 }
 
@@ -509,7 +570,7 @@ NcCpu *nc_cpu_create(const NcCpuConfig *cfg, uint32_t fs_base)
     cpu->kvm = cpu->vmfd = cpu->vcpu = -1;
     cpu->frame.cpu = cpu;
     if (!rsqrt_config(cpu)) {
-        return refuse(cpu, "invalid NC_KVM_RSQRT_SITES or unsupported host RSQRT profile"), NULL;
+        return refuse(cpu, "invalid RSQRT sites or unsupported host RSQRT profile"), NULL;
     }
     errno = 0;
     cpu->kvm = open("/dev/kvm", O_RDWR | O_CLOEXEC);
@@ -630,6 +691,9 @@ void nc_cpu_destroy(NcCpu *cpu)
                (unsigned long long)cpu->rsqrt_hits);
     }
     nc_rsqrt_destroy(&cpu->rsqrt);
+    free(cpu->rsqrt_sites);
+    cpu->rsqrt_sites = NULL;
+    cpu->nrsqrt = 0;
     if (g_cpu == cpu) {
         nc_vm_prot_hook = g_prev_hook;
         g_prev_hook = NULL;
@@ -1296,9 +1360,11 @@ static void rsqrt_patch(NcCpu *cpu, uint32_t va, uint32_t len)
     if (!cpu->rsqrt.index) {
         return;
     }
-    for (unsigned i = 0; i < cpu->nrsqrt; i++) {
+    /* the sites whose 15 bytes at most reach into [va, va+len) */
+    for (unsigned i = rsqrt_from(cpu, va > 14 ? va - 14 : 0);
+         i < cpu->nrsqrt && cpu->rsqrt_sites[i].eip < (uint64_t)va + len; i++) {
         RsqrtSite *s = &cpu->rsqrt_sites[i];
-        if ((uint64_t)s->eip + 15 <= va || s->eip >= (uint64_t)va + len || hook_at(cpu, s->eip) >= 0) {
+        if (hook_at(cpu, s->eip) >= 0) {
             continue;
         }
         uint8_t bytes[15];
@@ -1310,7 +1376,8 @@ static void rsqrt_patch(NcCpu *cpu, uint32_t va, uint32_t len)
             continue; /* not loaded yet, or not a supported RSQRT instruction */
         }
         bool overlap = false;
-        for (unsigned j = 0; j < cpu->nrsqrt; j++) {
+        for (unsigned j = rsqrt_from(cpu, s->eip > 14 ? s->eip - 14 : 0);
+             j < cpu->nrsqrt && cpu->rsqrt_sites[j].eip < s->eip + in.len; j++) {
             const RsqrtSite *other = &cpu->rsqrt_sites[j];
             overlap |= j != i && other->armed && s->eip < other->eip + other->len &&
                        other->eip < s->eip + in.len;
@@ -1328,9 +1395,9 @@ static void rsqrt_patch(NcCpu *cpu, uint32_t va, uint32_t len)
 
 static bool rsqrt_trap(NcCpu *cpu, uint32_t at)
 {
-    for (unsigned i = 0; i < cpu->nrsqrt; i++) {
+    for (unsigned i = rsqrt_from(cpu, at); i < cpu->nrsqrt && cpu->rsqrt_sites[i].eip == at; i++) {
         RsqrtSite *s = &cpu->rsqrt_sites[i];
-        if (!s->armed || s->eip != at) {
+        if (!s->armed) {
             continue;
         }
         rsqrt_follow(cpu, s);

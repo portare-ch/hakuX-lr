@@ -63,6 +63,9 @@ int main(void)
     }
     /* Exercise the handler on Intel CI as well, without adding any
      * production override to the AMD vendor gate. */
+    if (!cpu->rsqrt_sites) {
+        cpu->rsqrt_sites = calloc(2, sizeof(*cpu->rsqrt_sites));
+    }
     cpu->nrsqrt = 2;
     cpu->rsqrt_sites[0].eip = CODE;
     cpu->rsqrt_sites[1].eip = CODE + 0x40;
@@ -152,6 +155,7 @@ int main(void)
     check(vm.phys[0] == 0xCC && !cpu->rsqrt_sites[0].armed, "existing HLE hook retains ownership of its address");
 
     nc_rsqrt_destroy(&cpu->rsqrt);
+    free(cpu->rsqrt_sites);
     free(vm.phys);
     free(vm.vprot);
     free(vm.pte);
