@@ -38,7 +38,6 @@ enum { START = 1, INSIDE = 2, TABLE = 3 };
 #define TRIED     0x80u
 #define DATA_RANK 1000u
 #define TABLE_MAX 1024u
-#define RETRIES   16
 
 enum { FROM_ENTRY, FROM_IMM, FROM_DATA };
 
@@ -507,6 +506,24 @@ static void table_cut(Scan *sc, Sec *s, uint32_t o, int32_t rid)
     sc->out->tables_cut++;
 }
 
+/* An item turned away by family fid's code waits for it: queued again
+ * should the family be given up (evict). */
+static void block(Scan *sc, Item item, int32_t fid)
+{
+    item.next = -1;
+    const int32_t bi = (int32_t)sc->blocked.n;
+    PUSH(sc->blocked, item);
+    if (!sc->oom) {
+        Family *f = &sc->fams.p[fid];
+        if (f->blocked1 >= 0) {
+            sc->blocked.p[f->blocked1].next = bi;
+        } else {
+            f->blocked0 = bi;
+        }
+        f->blocked1 = bi;
+    }
+}
+
 static void descend(Scan *sc)
 {
     while ((sc->trusted.n || sc->heap.n) && !sc->oom) {
@@ -526,8 +543,23 @@ static void descend(Scan *sc)
         const bool strict = !item.trusted;
         const uint32_t root = item.root, rank = item.rank;
         Sec *sec = code_at(sc, root);
-        if (!sec || sec->state[root - sec->s.va] & (TRIED | MARK)) {
-            continue; /* not code, done, or already code (or a table) */
+        if (!sec) {
+            continue; /* not code */
+        }
+        if (sec->state[root - sec->s.va] & MARK) {
+            /* Already code (or a table), but another family's, which may
+             * yet be given up and its bytes with it: this reference to them
+             * is then the one that has them walked again. The entry's
+             * family never is. */
+            const int32_t orid = sec->owner[root - sec->s.va];
+            const int32_t ofid = orid >= 0 ? sc->regions.p[orid].fam : -1;
+            if (ofid >= 0 && ofid != item.fam && sc->fams.p[ofid].origin != FROM_ENTRY) {
+                block(sc, item, ofid);
+            }
+            continue;
+        }
+        if (sec->state[root - sec->s.va] & TRIED) {
+            continue; /* done */
         }
         sec->state[root - sec->s.va] |= TRIED;
         if (strict) {
@@ -539,7 +571,9 @@ static void descend(Scan *sc)
         }
         const size_t site0 = sc->sites.n;
         bool ok = false;
-        for (unsigned attempt = 0; attempt < RETRIES && !sc->oom; attempt++) {
+        /* Each further attempt follows a family given up or a table cut,
+         * and none is made here: the attempts end. */
+        while (!sc->oom) {
             uint32_t at = 0;
             const int rc = walk(sc, root, strict, &at);
             if (rc == WALK_OK && !sc->oom) {
@@ -573,18 +607,7 @@ static void descend(Scan *sc)
                     continue;
                 }
             }
-            item.next = -1;
-            const int32_t bi = (int32_t)sc->blocked.n;
-            PUSH(sc->blocked, item);
-            if (!sc->oom) {
-                Family *f = &sc->fams.p[ofid];
-                if (f->blocked1 >= 0) {
-                    sc->blocked.p[f->blocked1].next = bi;
-                } else {
-                    f->blocked0 = bi;
-                }
-                f->blocked1 = bi;
-            }
+            block(sc, item, ofid);
             break;
         }
         if (!ok) {

@@ -29,7 +29,7 @@ static void wr32(uint8_t *p, uint32_t v)
 #define RDATA 0x12000u
 #define TEXT_SIZE  0x200u
 #define RDATA_SIZE 0x40u
-#define RDATA_RAW  0x18u /* the rest of .rdata is zeros not in the file */
+#define RDATA_RAW  0x24u /* the rest of .rdata is zeros not in the file */
 
 static void put(uint8_t *text, uint32_t va, const char *hex)
 {
@@ -135,29 +135,44 @@ int main(void)
      * and a dword in the data happens to be that address (11092) */
     put(text, 0x11090, "B8C30F52C1" "C3");
     put(text, 0x110A0, "E8EBFFFFFF" "C3");           /* another callback, which calls 11090 */
+    /* mov eax, 90E8C390; add [eax], al; add bl, al; ret: a dword in the data
+     * is the address of its immediate's E8 (110C3, after a C3), a call of
+     * 11158 that isn't there. The callback at 11170 does call 11158, when
+     * that walk already has it. 11180, known only from the immediate at
+     * 11190 and so tried after both, calls 110C0: the walk from 110C3 is
+     * given up, 11158 with it, and 11170's call has it walked again. */
+    put(text, 0x110C0, "B890C3E890" "0000" "00C3" "C3");
+    put(text, 0x11158, "F30F52C1" "C3");
+    put(text, 0x11170, "E8E3FFFFFF" "C3");
+    put(text, 0x11180, "E83BFFFFFF" "C3");
+    put(text, 0x11190, "B880110100" "C3");
     wr32(rdata + 0x00, 0x11030);
     wr32(rdata + 0x04, 0x11081); /* the rsqrtss at 11080 past its F3: an rsqrtps that isn't there */
     wr32(rdata + 0x08, 0x11080);
     wr32(rdata + 0x0C, 0x110A0);
     wr32(rdata + 0x10, 0x3F800000);
     wr32(rdata + 0x14, 0x11092); /* tried before 110A0: later seeds first */
+    wr32(rdata + 0x18, 0x11170);
+    wr32(rdata + 0x1C, 0x110C3);
+    wr32(rdata + 0x20, 0x11190);
 
     NcRsqrtScan scan;
-    static const uint32_t expect[] = {0x11020, 0x11030, 0x11050, 0x11060, 0x11080};
+    static const uint32_t expect[] = {0x11020, 0x11030, 0x11050, 0x11060, 0x11080, 0x11158};
     check(nc_rsqrt_scan_xbe(xbe, file_size, &scan), "the XBE is scanned");
     for (unsigned i = 0; i < scan.nsites; i++) {
         printf("  site %08x\n", scan.sites[i]);
     }
-    check(scan.nsites == 5 && !memcmp(scan.sites, expect, sizeof(expect)),
-          "sites: called, through a pointer, both switch cases, a callback in data");
+    check(scan.nsites == 6 && !memcmp(scan.sites, expect, sizeof(expect)),
+          "sites: called, through a pointer, both switch cases, a callback in data, and a function first "
+          "reached by a walk given up since");
     check(scan.unreached == 1, "the unreferenced function's RSQRT is left alone");
-    check(scan.evicted_straddled == 1, "the seed inside an instruction gives way to the function called over it");
+    check(scan.evicted_straddled == 2, "the seeds inside an instruction give way to the functions called over them");
     check(scan.disputed == 0, "the linear sweep agrees with every site");
 
     /* the entry under the debug key, and a section table past the file */
     wr32(xbe + 0x128, TEXT ^ 0x94859D4Bu);
     NcRsqrtScan debug;
-    check(nc_rsqrt_scan_xbe(xbe, file_size, &debug) && debug.nsites == 5, "a debug XBE's entry is decoded");
+    check(nc_rsqrt_scan_xbe(xbe, file_size, &debug) && debug.nsites == 6, "a debug XBE's entry is decoded");
     nc_rsqrt_scan_free(&debug);
     wr32(xbe + 0x11C, 2000);
     check(!nc_rsqrt_scan_xbe(xbe, file_size, &debug), "a broken section table is refused");
