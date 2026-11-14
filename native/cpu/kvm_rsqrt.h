@@ -6,14 +6,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* A byte per upper-21-bit input bucket, indexing the XOR palette. Built
- * from this host's estimates; never applied to another host's results. */
-typedef struct NcRsqrt {
-    uint8_t *index;
-    uint32_t delta[256];
-    unsigned ndelta;
-} NcRsqrt;
-
 typedef struct NcRsqrtInsn {
     unsigned len, dst, src;
     bool scalar, mem;
@@ -30,8 +22,5 @@ uint32_t nc_rsqrt_native(uint32_t bits);
 uint32_t nc_rsqrt_intel(uint32_t bits);
 /* nc_rsqrt_intel's 2048 mantissas (u16), for the in-guest routine */
 const uint16_t *nc_rsqrt_intel_mantissa(void);
-bool nc_rsqrt_init(NcRsqrt *r);
-void nc_rsqrt_destroy(NcRsqrt *r);
-uint32_t nc_rsqrt_correct(const NcRsqrt *r, uint32_t bits);
 
 #endif

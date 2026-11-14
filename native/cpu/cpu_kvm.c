@@ -71,7 +71,8 @@ const char nc_cpu_backend[] = "kvm";
 #define RSQ_RTN_SIZE  96u
 #define LIN_RSQ_TABLE 0xB000u /* 2048 u16 */
 #define LIN_RSQ_SITES 0xC000u /* count, then {eip, u16 routine, u16 length} each, ascending */
-#define RSQ_GUEST_MAX ((LIN_END - LIN_RSQ_SITES - 4u) / 8u)
+#define LIN_RSQ_HITS (LIN_END - 8u) /* the handler's corrections, counted (64 bits) */
+#define RSQ_GUEST_MAX ((LIN_RSQ_HITS - LIN_RSQ_SITES - 4u) / 8u)
 #define LIN_END   0x10000u
 #define SYS_SIZE  (SYS_LOW + (LIN_END - LIN_GDT))
 
@@ -158,7 +159,7 @@ struct NcCpu {
     Hook hooks[MAX_HOOKS];
     unsigned nhooks;
     uint32_t stepping;     /* a hook's EIP run once with TF set (nc_frame_bypass_hook), 0 none */
-    NcRsqrt rsqrt;
+    bool rsqrt_on;      /* an AMD host with sites to correct */
     RsqrtSite *rsqrt_sites;     /* ascending by eip */
     unsigned nrsqrt;
     uint64_t rsqrt_hits;
@@ -575,13 +576,11 @@ static bool rsqrt_config(NcCpu *cpu)
             return false;
         }
     }
-    if (!nc_rsqrt_init(&cpu->rsqrt)) {
-        return false;
-    }
+    cpu->rsqrt_on = true;
     const char *ig = getenv("NC_KVM_RSQRT_INGUEST");
     cpu->rsqrt_inguest = !ig || strcmp(ig, "0");
-    nc_log("hakuX-native-kvm", "Intel RSQRT: %u AMD-only sites (%s), %u host XOR corrections, register forms %s",
-           cpu->nrsqrt, listed ? "NC_KVM_RSQRT_SITES" : "the title's", cpu->rsqrt.ndelta,
+    nc_log("hakuX-native-kvm", "Intel RSQRT: %u AMD-only sites (%s), register forms %s",
+           cpu->nrsqrt, listed ? "NC_KVM_RSQRT_SITES" : "the title's",
            cpu->rsqrt_inguest ? "corrected in the guest" : "through the host");
     return true;
 }
@@ -602,7 +601,7 @@ NcCpu *nc_cpu_create(const NcCpuConfig *cfg, uint32_t fs_base)
     cpu->kvm = cpu->vmfd = cpu->vcpu = -1;
     cpu->frame.cpu = cpu;
     if (!rsqrt_config(cpu)) {
-        return refuse(cpu, "invalid RSQRT sites or unsupported host RSQRT profile"), NULL;
+        return refuse(cpu, "invalid RSQRT sites"), NULL;
     }
     errno = 0;
     cpu->kvm = open("/dev/kvm", O_RDWR | O_CLOEXEC);
@@ -718,11 +717,14 @@ void nc_cpu_destroy(NcCpu *cpu)
         return;
     }
     rsqrt_restore(cpu);
-    if (cpu->rsqrt.index) {
-        nc_log("hakuX-native-kvm", "RSQRT: %llu corrected instructions",
-               (unsigned long long)cpu->rsqrt_hits);
+    if (cpu->rsqrt_on) {
+        uint64_t guest = 0;
+        if (cpu->sys && cpu->sys != MAP_FAILED) {
+            memcpy(&guest, lin(cpu, LIN_RSQ_HITS), sizeof(guest));
+        }
+        nc_log("hakuX-native-kvm", "RSQRT: %llu instructions corrected in the guest, %llu through the host",
+               (unsigned long long)guest, (unsigned long long)cpu->rsqrt_hits);
     }
-    nc_rsqrt_destroy(&cpu->rsqrt);
     free(cpu->rsqrt_sites);
     cpu->rsqrt_sites = NULL;
     cpu->nrsqrt = 0;
@@ -1412,7 +1414,10 @@ static void rsqrt_follow(NcCpu *cpu, RsqrtSite *s)
 
 /* Disarm a site, its INT3 removed: through the mapping when it still leads
  * to the site's page, else at the page itself (unmapped, or another page
- * mapped there now). */
+ * mapped there now). A 0xCC on the site's own page is taken for ours, also
+ * once the bytes after it have changed: code rewritten in place with an
+ * INT3 of its own at a site's address can't be told from ours, and the
+ * guest's handler, which knows a site by its address alone, takes it too. */
 static void rsqrt_disarm(NcCpu *cpu, RsqrtSite *s)
 {
     uint8_t b;
@@ -1456,7 +1461,7 @@ static void rsqrt_restore(NcCpu *cpu)
 
 static void rsqrt_patch(NcCpu *cpu, uint32_t va, uint32_t len)
 {
-    if (!cpu->rsqrt.index) {
+    if (!cpu->rsqrt_on) {
         return;
     }
     /* the sites whose 15 bytes at most reach into [va, va+len) */
@@ -1555,7 +1560,7 @@ static bool rsqrt_trap_site(NcCpu *cpu, uint32_t at)
             memcpy(input, f->fpu.xmm[in.src], count * 4);
         }
         for (unsigned j = 0; j < count; j++) {
-            const uint32_t result = nc_rsqrt_correct(&cpu->rsqrt, input[j]);
+            const uint32_t result = nc_rsqrt_intel(input[j]);
             memcpy(f->fpu.xmm[in.dst] + 4 * j, &result, 4);
         }
         /* RSQRT raises no numeric exceptions. Scalar upper lanes, MXCSR,
