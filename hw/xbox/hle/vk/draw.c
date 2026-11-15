@@ -1458,9 +1458,24 @@ unsigned hle_draw_fb_stages(const HleCmdDraw *c, uint32_t rt_id)
         return ff_fb_stages(c, rt_id);
     }
     unsigned m = 0, conv = 0;
+    const HleVkSurf *own = NULL;
     for (unsigned st = 0; st < HLE_TSS_STAGES; st++) {
         unsigned mode = (g_dr.st.rs[HLE_PS_TEXMODES] >> (5 * st)) & 0x1F;
         if (c->tex[st] == rt_id && (mode == HLE_PST_PROJECT2D || mode == HLE_PST_PROJECT3D)) {
+            /* A linear stage that gives the target's memory another size
+             * than the target's doesn't read the pixel it draws: it is a
+             * view of part of it, read at other places. Its texels come
+             * from the target's copy instead (hle_draw_snap_needed).
+             * Prince of Persia: The Two Thrones shrinks its glow in place,
+             * each 640 x 480 pass reading the target as a 320 x 240
+             * texture; read as each pixel's own, nothing shrank and the
+             * frame was added over itself, a pale wash over its menus. */
+            if (c->tex_rect[st] && snap_ok(rt_id)) {
+                own = own ? own : hle_surf_get(rt_id);
+                if (own && (((c->tex_rect[st] >> 16) & 0x1FFFu) != own->d.w || (c->tex_rect[st] & 0x1FFFu) != own->d.h)) {
+                    continue;
+                }
+            }
             if (conv_kernel(&g_dr.st, c, st)) {
                 conv |= 1u << st;
             } else {
