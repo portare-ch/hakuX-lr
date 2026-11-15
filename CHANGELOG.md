@@ -36,6 +36,10 @@
 - **SX Superstar** (#114) — Avoid writing stale render targets into
   freed memory after a video-mode change. This fixes a crash at the
   main menu.
+- **Star Wars Jedi Knight: Jedi Academy** (#126) — Ignore a draw Begin
+  sent while a primitive is still open, as the console does. This fixes
+  the torn character models in the intro and the blurry patch on the
+  ground in the first level.
 
 ## linux-v0.26.0 (Linux, aarch64 and x86-64, and Android)
 

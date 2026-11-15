@@ -4714,6 +4714,9 @@ void hle_pbd_method(uint32_t m, uint32_t v)
         break;
     case NV097_SET_BEGIN_END:
         if (v) {
+            if (g_pd.in_draw) {
+                break;      /* Begin inside a primitive: the hardware carries on with it */
+            }
             g_pd.in_draw = true;
             g_pd.prim = v;
             g_pd.nidx = g_pd.nimm = g_pd.ninl = 0;
