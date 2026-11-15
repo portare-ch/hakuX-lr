@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Street Fighter Anniversary Collection** (#156) — Update every cached
+  copy of a texture when the game rewrites its memory, not only the first
+  one checked. This fixes the missing menu letters and the garbled
+  sprites on the Super Arts select and VS screens of 3rd Strike.
+
 ## linux-v0.27.0 (Linux, aarch64 and x86-64, and Android)
 
 - **AMD CPUs** — On an AMD host the KVM backend gives `RSQRTSS` and

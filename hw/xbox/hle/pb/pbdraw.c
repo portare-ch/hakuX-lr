@@ -175,6 +175,8 @@ typedef struct PbTex {
     uint32_t pal_hash;
     uint64_t checked;                   /* the epoch it was last checked at */
     uint64_t edge_hash[2];              /* its bytes on its first and last pages, at definition */
+    uint64_t seq_mid;                   /* writes reported to the pages between (tex_seq) */
+    uint32_t seq_edge[2];               /* ... and to its first and last pages */
     uint64_t landing;                   /* render target readback used to define this texture */
     uint32_t host_bytes;                /* its image's texels as uploaded (g_pd.tex_bytes) */
     bool ok;                            /* defined (else it can't be: not again) */
@@ -3039,11 +3041,22 @@ static uint64_t span_hash(uint32_t pa, uint32_t len)
     return m ? XXH3_64bits(m, len) : 0;
 }
 
+/* The writes reported to t's pages: its first, its last, and those between.
+ * The dirty bits are shared and cleared by whichever texture looks first;
+ * these counts are compared with each texture's own. */
+static uint64_t tex_seq(const PbTex *t, uint32_t edge[2])
+{
+    const uint64_t sum = hle_mem_wseq_sum(t->pa, t->bytes, &edge[0], &edge[1]);
+    const bool one = (t->pa >> 12) == ((t->pa + t->bytes - 1) >> 12);
+    return one ? 0 : sum - edge[0] - edge[1];
+}
+
 static void tex_edges_set(PbTex *t)
 {
     const uint32_t lo = t->pa, hi = lo + t->bytes, p0 = lo & ~4095u, pl = (hi - 1) & ~4095u;
     t->edge_hash[0] = span_hash(lo, MIN(hi, p0 + 4096) - lo);
     t->edge_hash[1] = pl != p0 ? span_hash(pl, hi - pl) : 0;
+    t->seq_mid = tex_seq(t, t->seq_edge);
 }
 
 static bool edge_dirty(uint32_t page)
@@ -3051,15 +3064,29 @@ static bool edge_dirty(uint32_t page)
     return hle_host_mem_dirty((uint32_t)(hle_ram_addr_base() + page));
 }
 
-static bool tex_written(const PbTex *t)
+/* Street Fighter III: 3rd Strike samples each 256 x 256 sprite atlas with
+ * several palettes, a texture each here: the first to see a write cleared
+ * the pages' dirty bits and the others kept their old texels. */
+static bool tex_written(PbTex *t)
 {
     if (!t->bytes) {
         return false;
     }
     const uint32_t lo = t->pa, hi = lo + t->bytes, p0 = lo & ~4095u, pl = (hi - 1) & ~4095u;
-    const bool mid = pl > p0 + 4096 && hle_mem_written(p0 + 4096, pl - p0 - 4096);
-    const bool first = edge_dirty(p0) && span_hash(lo, MIN(hi, p0 + 4096) - lo) != t->edge_hash[0];
-    const bool last = pl != p0 && edge_dirty(pl) && span_hash(pl, hi - pl) != t->edge_hash[1];
+    uint32_t edge[2];
+    const uint64_t seq_mid = tex_seq(t, edge);
+    bool mid = pl > p0 + 4096 && hle_mem_written(p0 + 4096, pl - p0 - 4096);
+    mid |= seq_mid != t->seq_mid;
+    const bool first = (edge_dirty(p0) || edge[0] != t->seq_edge[0]) &&
+                       span_hash(lo, MIN(hi, p0 + 4096) - lo) != t->edge_hash[0];
+    const bool last = pl != p0 && (edge_dirty(pl) || edge[1] != t->seq_edge[1]) &&
+                      span_hash(pl, hi - pl) != t->edge_hash[1];
+    if (!first) {
+        t->seq_edge[0] = edge[0];           /* compared: its bytes are the image's */
+    }
+    if (!last) {
+        t->seq_edge[1] = edge[1];
+    }
     return mid || first || last;
 }
 
