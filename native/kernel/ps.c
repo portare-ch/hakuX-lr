@@ -66,9 +66,6 @@
 #define FX_CR0_NPX_STATE      0x200
 #define NPX_STATE_NOT_LOADED  0x0A      /* CR0_TS | CR0_MP */
 
-#define STACK_REGION   0xD0000000u
-#define STACK_GUARD    0x10000u
-#define DEFAULT_STACK  0x10000u
 #define KERNEL_STACK_SIZE 0x3000u       /* the least the kernel makes (nboxkrnl kernel.hpp) */
 #define DEFAULT_PRIORITY 8
 
@@ -78,65 +75,26 @@ static void list_init(NcVm *vm, uint32_t head)
     nc_vm_wr32(vm, head + 4, head);
 }
 
-/* Stack slots have an unmapped guard below and a zeroed page above.
- * Some titles read past StackBase expecting the console's adjacent
- * system allocation (Dave Mirra 2 and Tomb Raider: Legend). Reuse free
- * slots, split spare space, and keep the region below the GPU window. */
-#define STACK_OVER NC_PAGE
-
-static uint32_t stack_span(uint32_t size)
-{
-    return STACK_GUARD + nc_align_up(size + STACK_OVER, STACK_GUARD);
-}
-
+/* A stack comes from the system range (mm.c): its pages with a guard page
+ * below, at the lowest free addresses, as the console's MmCreateKernelStack
+ * places it. What is over its top is whatever was allocated next. */
 bool nc_ps_stack_alloc(NcKernel *k, uint32_t size, uint32_t *base)
 {
-    if (!k->next_stack_va) {
-        k->next_stack_va = STACK_REGION;
+    *base = nc_mm_sys_alloc(k, size, true, false);
+    if (!*base) {
+        nc_log("hakuX-native", "ps: no room for a stack of %u KiB", size >> 10);
     }
-    const uint32_t span = stack_span(size);
-    for (unsigned i = 0; i < k->nstack_free; i++) {
-        const uint32_t va = k->stack_free[i].va, have = k->stack_free[i].span;
-        if (have < span || !nc_vm_alloc_at(k->vm, va + STACK_GUARD, size + STACK_OVER, NULL)) {
-            continue;
-        }
-        k->stack_free[i] = k->stack_free[--k->nstack_free];
-        if (have - span >= 2 * STACK_GUARD) {
-            k->stack_free[k->nstack_free].va = va + span;   /* the rest, a slot of its own */
-            k->stack_free[k->nstack_free++].span = have - span;
-        }
-        *base = va + STACK_GUARD;
-        memset(nc_vm_host(k->vm, *base + size), 0, STACK_OVER);
-        return true;
-    }
-    const uint32_t slot = k->next_stack_va;
-    if (span > NC_GPU_WINDOW - slot) {
-        nc_log("hakuX-native", "ps: the stack region is full (%u KiB more asked)", size >> 10);
-        return false;
-    }
-    if (!nc_vm_alloc_at(k->vm, slot + STACK_GUARD, size + STACK_OVER, NULL)) {
-        return false;
-    }
-    k->next_stack_va = slot + span;
-    *base = slot + STACK_GUARD;
-    memset(nc_vm_host(k->vm, *base + size), 0, STACK_OVER);
-    return true;
+    return *base != 0;
 }
 
+/* The stack with its lowest page at base: its pages and its addresses go
+ * back. One from a state saved before the system range has no allocation
+ * there: its pages go, and the page that was mapped over its top. */
 void nc_ps_stack_free(NcKernel *k, uint32_t base, uint32_t size)
 {
-    const uint32_t slot = base - STACK_GUARD, span = stack_span(size);
-    if (base < STACK_REGION + STACK_GUARD || base % STACK_GUARD || !size || span > k->next_stack_va - slot ||
-        k->nstack_free == sizeof(k->stack_free) / sizeof(k->stack_free[0])) {
-        return;     /* not a slot of the region, or no room to keep it: its addresses stay used */
+    if (!nc_mm_sys_free(k, base, true)) {
+        nc_mm_decommit(k, base, size + NC_PAGE);
     }
-    for (unsigned i = 0; i < k->nstack_free; i++) {
-        if (slot < k->stack_free[i].va + k->stack_free[i].span && k->stack_free[i].va < slot + span) {
-            return; /* given back already */
-        }
-    }
-    k->stack_free[k->nstack_free].va = slot;
-    k->stack_free[k->nstack_free++].span = span;
 }
 
 static NcThread *thread_create(NcKernel *k, uint32_t stack_size, uint32_t tls_size, uint32_t ext_size)
@@ -164,17 +122,11 @@ static NcThread *thread_create(NcKernel *k, uint32_t stack_size, uint32_t tls_si
      * (fs:[4]) is the save area's bottom: XAPI sizes the TLS as
      * align16(template) + 4 and indexes it from there with a negative TLS
      * index, so its first dword (pointing at the 16-byte aligned block after
-     * it) is at exactly fs:[4] - TlsDataSize. Without the save area a title's
-     * frames sat 0x210 bytes nearer the top than on the console: Silent
-     * Hill 2 reads 0x170 bytes over its stack pointer near the bottom of its
-     * calls, into the save area there, past the stack here (a fault the
-     * title doesn't handle: the game gone, loading a room). The kernel
-     * makes no stack under KERNEL_STACK_SIZE, the save area and TLS in it
-     * (PsCreateSystemThreadEx): Splinter Cell - Double Agent asks for less
-     * than a page and its thread's frames went past the one page it got,
-     * the save area and TLS taking 0x2A4 of it. */
+     * it) is at exactly fs:[4] - TlsDataSize. The stack is the size asked
+     * for, rounded up to pages and no less than KERNEL_STACK_SIZE, the save
+     * area and TLS inside it (PsCreateSystemThreadEx). */
     const uint32_t tls = nc_align_up(tls_size, 4);
-    uint32_t size = nc_align_up((stack_size ? stack_size : DEFAULT_STACK) + FX_SAVE_AREA + tls + 16, NC_PAGE);
+    uint32_t size = nc_align_up(stack_size, NC_PAGE);
     if (size < KERNEL_STACK_SIZE) {
         size = KERNEL_STACK_SIZE;
     }
@@ -468,16 +420,8 @@ void nc_ps_schedule(NcKernel *k, NcFrame *f)
     }
     if (cur && cur != next && cur->state == NC_T_TERMINATED) {
         /* Off its stack for good: the pages go back (titles start threads per
-         * movie and load), the slot can hold a new thread. Its ETHREAD stays,
-         * signaled, for whoever still holds a handle. */
-        const uint32_t end = cur->stack_base + STACK_OVER;  /* extra page, including legacy padding */
-        for (uint32_t p = cur->stack_limit; p < end; p += NC_PAGE) {
-            const uint32_t pa = nc_vm_phys(k->vm, p);
-            if (pa != UINT32_MAX) {
-                nc_vm_unmap(k->vm, p, NC_PAGE); /* unmapped before it can be handed out again */
-                nc_vm_free_phys(k->vm, pa & ~(NC_PAGE - 1), NC_PAGE);
-            }
-        }
+         * movie and load), its addresses can hold a new allocation. Its ETHREAD
+         * stays, signaled, for whoever still holds a handle. */
         nc_ps_stack_free(k, cur->stack_limit, cur->stack_base - cur->stack_limit);
         cur->state = NC_T_FREE;
     }

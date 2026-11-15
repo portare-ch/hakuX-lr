@@ -22,7 +22,6 @@
 #include <sys/prctl.h>
 #include <unistd.h>
 
-#define MAIN_STACK_SIZE (256u * 1024u)
 
 static NcThread *g_boot;
 static bool g_relaunch;
@@ -276,11 +275,10 @@ bool nc_core_boot(NcCore *c, int disc_fd)
     }
     nc_mods_bind(&c->vm, c->cpu, &c->xbe.info);
 
-    uint32_t stack = MAIN_STACK_SIZE;
-    if (c->xbe.stack_commit > stack) {
-        stack = nc_align_up(c->xbe.stack_commit, NC_PAGE);
-    }
-    g_boot = nc_kernel_boot_thread(&c->kernel, c->cpu, c->xbe.info.entry, stack);
+    /* The thread that calls the title's entry point has the kernel's default
+     * stack, as on the console (PsCreateSystemThread: 12 KiB); XAPI starts
+     * the title's own thread from it, with the XBE's stack size. */
+    g_boot = nc_kernel_boot_thread(&c->kernel, c->cpu, c->xbe.info.entry, 0x3000);
     if (!g_boot || fail_at("thread")) {
         return boot_failed("The emulated CPU couldn't start.");
     }

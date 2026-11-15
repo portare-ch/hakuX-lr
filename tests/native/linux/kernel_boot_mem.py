@@ -16,8 +16,9 @@ import sys
 import tempfile
 
 HERE = Path(__file__).resolve().parent
-# Thunk order: DbgPrint, MmAllocateContiguousMemory.
-IMPORTS = [8, 165]
+# Thunk order: DbgPrint, MmAllocateContiguousMemory, MmAllocateSystemMemory,
+# MmFreeSystemMemory, MmCreateKernelStack, MmDeleteKernelStack.
+IMPORTS = [8, 165, 167, 172, 169, 170]
 
 
 def tool(*names):

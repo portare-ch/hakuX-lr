@@ -6,6 +6,10 @@
   copy of a texture when the game rewrites its memory, not only the first
   one checked. This fixes the missing menu letters and the garbled
   sprites on the Super Arts select and VS screens of 3rd Strike.
+- **Shin Sangoku Musou 3** (#121) — Place thread stacks, system memory
+  and kernel pool pages at the addresses the console's allocator gives
+  them, so that memory just above a stack is what a game finds there on
+  a console. This fixes the crash when the first battle loads.
 
 ## linux-v0.27.0 (Linux, aarch64 and x86-64, and Android)
 

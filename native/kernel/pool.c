@@ -1,15 +1,15 @@
 /*
  * hakuX native core — kernel pool.
  *
- * Guest memory for ExAllocatePool and kernel objects, in physical RAM
- * reached through the contiguous window: an initial range, then 64 KiB
- * chunks added as it fills. First-fit over a sorted free list kept on the
- * host; blocks are 16-byte aligned.
+ * Guest memory for ExAllocatePool and kernel objects: an initial range in
+ * physical RAM reached through the contiguous window, then pages from the
+ * system range (mm.c) as it fills, as the console's pool takes its pages.
+ * First-fit over a sorted free list kept on the host; blocks are 16-byte
+ * aligned.
  */
 #include "native/kernel/kernel.h"
 
 #define POOL_ALIGN 16u
-#define POOL_CHUNK 0x10000u
 
 void nc_pool_init(NcKernel *k, uint32_t va, uint32_t len)
 {
@@ -20,17 +20,16 @@ void nc_pool_init(NcKernel *k, uint32_t va, uint32_t len)
     memset(nc_vm_host(k->vm, va), 0, len);
 }
 
-/* More pool: a chunk of free physical RAM joins the free list. */
+/* More pool: the pages the request needs join the free list. */
 static bool pool_grow(NcKernel *k, uint32_t size)
 {
-    const uint32_t chunk = nc_align_up(size > POOL_CHUNK ? size : POOL_CHUNK, POOL_CHUNK);
-    const uint32_t pa = nc_vm_alloc_phys_high(k->vm, chunk);
-    if (pa == UINT32_MAX) {
+    const uint32_t chunk = nc_align_up(size, NC_PAGE);
+    const uint32_t va = nc_mm_sys_alloc(k, chunk, false, true);
+    if (!va) {
         return false;
     }
-    memset(nc_vm_host(k->vm, NC_CONTIG_WINDOW | pa), 0, chunk);
     k->pool_len += chunk;
-    nc_pool_free(k, NC_CONTIG_WINDOW | pa, chunk);
+    nc_pool_free(k, va, chunk);
     return true;
 }
 

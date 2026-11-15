@@ -378,8 +378,16 @@ void nc_ps_terminate_current(NcKernel *k, uint32_t status);
  * PsTerminateSystemThread(STATUS_SUCCESS) ends it. */
 void nc_ps_thread_returned(NcKernel *k, NcFrame *f);
 
+/* mm.c: the system range (stacks, system memory, pool pages): the lowest
+ * free run that holds size, a guard page below it for a stack. Returns the
+ * first mapped address, or 0. nc_mm_sys_free takes that address back and
+ * returns the pages freed; 0 if it is not such an allocation. */
+uint32_t nc_mm_sys_alloc(NcKernel *k, uint32_t size, bool guard, bool zero);
+uint32_t nc_mm_sys_free(NcKernel *k, uint32_t va, bool guard);
+void nc_mm_decommit(NcKernel *k, uint32_t va, uint32_t size);
 bool nc_ps_stack_alloc(NcKernel *k, uint32_t size, uint32_t *base);
-/* The stack at base (size bytes, its pages gone) gives its slot back. */
+/* The stack with its lowest page at base (size bytes): its pages and its
+ * addresses go back. */
 void nc_ps_stack_free(NcKernel *k, uint32_t base, uint32_t size);
 /* A kernel-owned thread, suspended, with no start context yet. */
 NcThread *nc_ps_kernel_thread(NcKernel *k, uint32_t stack_size, int priority);
