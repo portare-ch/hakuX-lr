@@ -58,16 +58,40 @@ static unsigned g_ncontig;
 static pthread_mutex_t g_contig_mu = PTHREAD_MUTEX_INITIALIZER;
 static uint32_t g_gpu_instance_end;
 
-/* Reserve the top 128 KiB at boot: the 64 KiB page-frame database and
+/* Reserve 128 KiB at boot at the top of the RAM the NV2A reaches (all of
+ * it on a console of 64 or 128 MiB): the 64 KiB page-frame database and
  * 16 GPU instance pages. This keeps early contiguous allocations below
  * RAM's limit, where some titles write a guard just past their heap. */
 #define TOP_PAD        0x10000u
 #define INSTANCE_PAGES 16u
 static uint32_t g_instance_held;    /* bit i: instance page i (from the lowest) still held */
 
+/* The RAM a title limited to the retail console's has (nc_mm_limit_title),
+ * or 0: all of it. */
+static uint32_t g_title_limit;
+
+void nc_mm_limit_title(NcKernel *k)
+{
+    NcVm *vm = k->vm;
+    if (vm->ram_size <= NC_RAM_RETAIL) {
+        return;
+    }
+    /* The memory above is kept from the title as the kernel keeps it on a
+     * console with more: its free pages are never handed out. What the
+     * kernel itself put there at boot (its pool, the GPU's instance pages)
+     * stays. */
+    uint32_t held = 0;
+    for (uint32_t p = NC_RAM_RETAIL / NC_PAGE; p < vm->ram_size / NC_PAGE; p++) {
+        held += nc_vm_claim_phys(vm, p * NC_PAGE, NC_PAGE);
+    }
+    g_title_limit = NC_RAM_RETAIL;
+    nc_log("hakuX-native", "mm: the title limits itself to 64 MiB (XBE initialization flag 4): %u MiB of the "
+           "console's %u MiB kept from it", held / (0x100000u / NC_PAGE), vm->ram_size >> 20);
+}
+
 static uint32_t instance_lo(const NcKernel *k)
 {
-    return k->vm->ram_size - TOP_PAD - INSTANCE_PAGES * NC_PAGE;
+    return k->vm->gpu_size - TOP_PAD - INSTANCE_PAGES * NC_PAGE;
 }
 
 bool nc_mm_hold_top(NcKernel *k)
@@ -729,6 +753,12 @@ static uint32_t contig_alloc(NcKernel *k, uint32_t size, uint32_t lo, uint32_t h
                              uint32_t protect, uint32_t ra)
 {
     size = nc_align_up(size ? size : 1, NC_PAGE);
+    /* Contiguous memory is what a title gives the GPU (textures, vertex and
+     * push buffers), so it comes from the RAM the NV2A reaches: on a console
+     * of 256 MiB the half above it serves virtual memory only. */
+    if (k->vm->gpu_size < k->vm->ram_size && (!hi || hi > k->vm->gpu_size)) {
+        hi = k->vm->gpu_size;
+    }
     /* The top of RAM, virtual pages moved out of the way (vm.c), then the
      * window needing the fewest moves; neither when there are fewer free
      * pages than asked for. */
@@ -1138,7 +1168,7 @@ static uint64_t MmClaimGpuInstanceMemory(NcKernel *k, NcFrame *f, const uint32_t
         nc_vm_wr32(k->vm, a[1], TOP_PAD);
     }
     if (!g_gpu_instance_end) {
-        g_gpu_instance_end = k->vm->ram_size - TOP_PAD;
+        g_gpu_instance_end = k->vm->gpu_size - TOP_PAD;
         if (a[0] != UINT32_MAX) {
             const uint32_t size = nc_align_up(a[0], NC_PAGE), pages = size / NC_PAGE;
             for (unsigned i = 0; i + pages < INSTANCE_PAGES; i++) {
@@ -1190,7 +1220,9 @@ static uint64_t MmQueryStatistics(NcKernel *k, NcFrame *f, const uint32_t *a)
     if (nc_vm_rd32(k->vm, a[0]) != 0x24) {
         return NC_STATUS_INVALID_PARAMETER;
     }
-    const uint32_t total = k->vm->ram_size / NC_PAGE;
+    /* the memory the title has: all of it, or the 64 MiB it limited itself
+     * to (nc_mm_limit_title) */
+    const uint32_t total = (g_title_limit ? g_title_limit : k->vm->ram_size) / NC_PAGE;
     uint32_t used = 0;
     for (uint32_t p = 0; p < total; p++) {
         used += k->vm->page_used[p] != 0;
@@ -1292,6 +1324,7 @@ void nc_mm_reset(void)
     g_ncontig = 0;
     pthread_mutex_unlock(&g_contig_mu);
     g_gpu_instance_end = 0;
+    g_title_limit = 0;
     memset(g_kept, 0, sizeof(g_kept));      /* a relaunch's come back from kept.bin, as in a new process */
     g_nkept = 0;
     g_holders_logged = false;

@@ -11,7 +11,8 @@ extern "C" {
 #endif
 
 /* NV2A register space at 0xFD000000 and its vblank clock. */
-void nc_dev_nv2a_init(void);
+/* ram: what the NV2A reaches of the console's memory (NV_PFB_CSTATUS). */
+void nc_dev_nv2a_init(uint32_t ram);
 /* The vblank thread stopped and joined (the guest's CPU first: it raises the
  * vblank's interrupt); then, with nothing left reading them, the registers,
  * the misc windows and every setting freed or reset, for another init. */

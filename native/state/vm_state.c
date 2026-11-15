@@ -169,7 +169,7 @@ bool nc_ram_state_load(NcRd *r, unsigned v)
 static bool in_window(const NcVm *vm, uint32_t va)
 {
     return (va >= NC_CONTIG_WINDOW && va - NC_CONTIG_WINDOW < vm->ram_size) ||
-           (va >= NC_GPU_WINDOW && va - NC_GPU_WINDOW < vm->ram_size);
+           (va >= NC_GPU_WINDOW && va - NC_GPU_WINDOW < vm->gpu_size);
 }
 
 /* The mappings outside the windows, as runs of pages mapped in order:

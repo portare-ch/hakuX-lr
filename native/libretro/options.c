@@ -6,6 +6,7 @@
  * frame pacing and frame repeats update live. Other options apply at boot.
  */
 #include "native/libretro/libretro_int.h"
+#include "native/core/core.h"
 #include "native/core/online.h"
 #include "native/hle/hle_native.h"
 #include "native/kernel/kernel.h"
@@ -33,7 +34,7 @@
 
 enum { OPT_SCALE, OPT_CROP, OPT_FORMAT, OPT_LANGUAGE, OPT_REGION, OPT_RUMBLE, OPT_NETWORK, OPT_COMMUNICATOR,
        OPT_MIC_GATE, OPT_RESAMPLER, OPT_PROCESSING, OPT_PRECISION, OPT_PACE,
-       OPT_REPEAT, OPT_MODS, OPT_COUNT };
+       OPT_REPEAT, OPT_MODS, OPT_RAM, OPT_COUNT };
 
 /* The language values follow XC_LANGUAGE after auto: english is 1. */
 static struct retro_core_option_v2_definition g_defs[OPT_COUNT + 1] = {
@@ -159,6 +160,14 @@ static struct retro_core_option_v2_definition g_defs[OPT_COUNT + 1] = {
         NULL, NULL,
         {{"disabled", "Off"}, {"enabled", "On"}, {NULL, NULL}},
         "disabled"},
+    [OPT_RAM] = {
+        "hakux_console_ram", "Console Memory", NULL,
+        "Sets the console's memory. 64 MB is the retail console and what games expect. 128 MB and 256 MB are "
+        "upgraded consoles (128 MB is also the debug kit's), for homebrew and patched games that use the extra "
+        "memory. Games that limit themselves to 64 MB, as most do, see 64 MB either way." NEXT,
+        NULL, NULL,
+        {{"64", "64 MB (retail)"}, {"128", "128 MB"}, {"256", "256 MB"}, {NULL, NULL}},
+        "64"},
     {NULL},
 };
 
@@ -270,6 +279,7 @@ void nc_lr_options_apply(void)
     nc_lr_input_set_rumble(rumble);
     nc_lr_video_set_repeat(!strcmp(g_defs[OPT_REPEAT].values[g_applied[OPT_REPEAT]].value, "enabled"));
     nc_online_set_cheats(!strcmp(g_defs[OPT_MODS].values[g_applied[OPT_MODS]].value, "enabled"));
+    nc_core_set_ram((unsigned)atoi(g_defs[OPT_RAM].values[g_applied[OPT_RAM]].value));
 
     /* 480p, as a console on its component cable (the AV pack here) is set
      * up: 4:3 480p is 00080000. PAL60 for a PAL console only (RetroArch

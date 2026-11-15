@@ -33,6 +33,9 @@ void nc_core_set_loadstate(const char *path);
 /* The next boot is a relaunch: it boots the XBE the saved launch data page
  * names (nc_kernel_relaunch_file) instead of default.xbe. */
 void nc_core_set_relaunch(bool on);
+/* The console's memory for the next boots, in MiB: 64 (the retail console,
+ * the default), or 128 or 256 as on an upgraded one. Anything else: 64. */
+void nc_core_set_ram(unsigned mib);
 /* The next boot is the dashboard's (C:\xboxdash.xbe), with no disc: the app's
  * Dashboard, where Xbox Live accounts are made. */
 void nc_core_set_dashboard(bool on);

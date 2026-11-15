@@ -817,12 +817,12 @@ static void *vblank_thread(void *arg)
     return NULL;
 }
 
-void nc_dev_nv2a_init(void)
+void nc_dev_nv2a_init(uint32_t ram)
 {
     g_regs = nc_big_alloc(NV2A_SIZE); /* pages are touched only where the guest writes */
     nc_wr32(g_regs + NV_PMC_BOOT_0, 0x02A000A1u);
     nc_wr32(g_regs + NV_PFB_CFG0, 3);
-    nc_wr32(g_regs + NV_PFB_CSTATUS, 64u << 20);
+    nc_wr32(g_regs + NV_PFB_CSTATUS, ram);
     /* 16.6667 MHz * N 28 / (M 1 << P 1), as xemu's PRAMDAC */
     nc_wr32(g_regs + NV_PRAMDAC_NVPLL_COEFF, 0x00011C01u);
     char v[NC_PROPERTY_VALUE_MAX] = "";

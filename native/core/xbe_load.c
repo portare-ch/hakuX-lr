@@ -65,7 +65,7 @@ static bool xbe_read(const NcDisc *disc, const NcXbe *x, uint64_t off, void *buf
     return nc_disc_read(disc, &x->file, off, buf, len);
 }
 
-bool nc_xbe_load(NcVm *vm, const NcDisc *disc, const char *path, const NcKernel *k, NcXbe *out)
+bool nc_xbe_load(NcVm *vm, const NcDisc *disc, const char *path, NcKernel *k, NcXbe *out)
 {
     memset(out, 0, sizeof(*out));
     out->fd = -1;
@@ -89,6 +89,10 @@ bool nc_xbe_load(NcVm *vm, const NcDisc *disc, const char *path, const NcKernel 
     uint8_t probe[0x180];
     if (out->file.size < sizeof(probe) || !xbe_read(disc, out, 0, probe, sizeof(probe))) {
         return false;
+    }
+    out->init_flags = nc_rd32(probe + 0x124);
+    if (out->init_flags & NC_XBE_INIT_LIMIT_64MB) {
+        nc_mm_limit_title(k);       /* before the image takes its pages */
     }
     const uint32_t base = nc_rd32(probe + 0x104);
     const uint32_t hdr_size = nc_rd32(probe + 0x108);

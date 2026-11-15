@@ -103,6 +103,7 @@ bool nc_vm_init(NcVm *vm, uint32_t ram_size)
         }
     }
     vm->ram_size = ram_size;
+    vm->gpu_size = ram_size < NC_GPU_REACH ? ram_size : NC_GPU_REACH;
     vm->page_used = calloc(ram_size / NC_PAGE, 1);
     vm->pte = nc_big_alloc(PTE_BYTES);
     vm->vprot = nc_big_alloc(VPROT_BYTES);
@@ -123,9 +124,9 @@ bool nc_vm_init(NcVm *vm, uint32_t ram_size)
     vm->phys = phys;
 
     /* The contiguous window: VA 0x80000000 + pa for all of RAM. And the
-     * NV2A's BAR1 aperture at 0xF0000000, another view of RAM, where D3D's
-     * tiled locks point (D3DLOCK_TILED). */
-    if (!nc_vm_map(vm, NC_CONTIG_WINDOW, 0, ram_size) || !nc_vm_map(vm, NC_GPU_WINDOW, 0, ram_size)) {
+     * NV2A's BAR1 aperture at 0xF0000000, another view of the RAM it
+     * reaches, where D3D's tiled locks point (D3DLOCK_TILED). */
+    if (!nc_vm_map(vm, NC_CONTIG_WINDOW, 0, ram_size) || !nc_vm_map(vm, NC_GPU_WINDOW, 0, vm->gpu_size)) {
         return false;
     }
     vm->ram = vm->base + NC_CONTIG_WINDOW;
@@ -302,7 +303,10 @@ static void prot_views(NcVm *vm, uint32_t page, uint32_t n, int prot)
 {
     pthread_mutex_lock(&g_prot_lock);
     view_prot(vm, NC_CONTIG_WINDOW + page * NC_PAGE, n * NC_PAGE, prot);
-    view_prot(vm, NC_GPU_WINDOW + page * NC_PAGE, n * NC_PAGE, prot);
+    const uint32_t gpu_pages = vm->gpu_size / NC_PAGE;
+    if (page < gpu_pages) {
+        view_prot(vm, NC_GPU_WINDOW + page * NC_PAGE, (n < gpu_pages - page ? n : gpu_pages - page) * NC_PAGE, prot);
+    }
     for (unsigned a = 0; a < g_nalias; a++) {
         const Alias *al = &g_alias[a];
         const uint64_t end = (uint64_t)(page + n) * NC_PAGE, aend = (uint64_t)al->pa + al->len;

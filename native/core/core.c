@@ -29,6 +29,12 @@ static bool g_relaunch;
 static bool g_dashboard;        /* boot the dashboard (nc_core_set_dashboard) */
 static char g_loadstate[512];   /* boot into this savestate (nc_core_set_loadstate) */
 static bool g_loaded;
+static uint32_t g_ram = NC_RAM_RETAIL;  /* the console's memory (nc_core_set_ram) */
+
+void nc_core_set_ram(unsigned mib)
+{
+    g_ram = mib == 128 || mib == 256 ? (uint32_t)mib << 20 : NC_RAM_RETAIL;
+}
 
 void nc_core_set_relaunch(bool on)
 {
@@ -128,9 +134,14 @@ bool nc_core_boot(NcCore *c, int disc_fd)
     nc_dev_nv2a_vblank_multiply(1);
     /* Some games check for the dashboard during startup. */
     nc_dash_install(nc_io_hdd_root());
-    /* NC_RAM_MB=128 (debug kit size): a dev switch for memory investigations. */
+    /* The console's memory: the retail 64 MiB, or an upgraded console's
+     * 128 or 256 MiB (nc_core_set_ram). NC_RAM_MB=64|128|256 sets it for
+     * the tools that have no setting. */
     const char *mb = getenv("NC_RAM_MB");
-    const uint32_t ram = mb && atoi(mb) == 128 ? 128u << 20 : NC_RAM_RETAIL;
+    if (mb && *mb) {
+        nc_core_set_ram((unsigned)atoi(mb));
+    }
+    const uint32_t ram = g_ram;
     /* a savestate's kernel objects are where its boot made them (KERN v3
      * moved the pool's first range) */
     nc_kernel_pool_for(g_loadstate[0] ? nc_kern_state_kprocess(g_loadstate) : 0);
@@ -150,7 +161,7 @@ bool nc_core_boot(NcCore *c, int disc_fd)
         /* the last title's kept memory (D3D's saved display), where it was */
         nc_kernel_av_saved_set(nc_mm_keep_restore(&c->kernel));
     }
-    nc_dev_nv2a_init();
+    nc_dev_nv2a_init(c->vm.gpu_size);
     nc_dev_apu_init(&c->vm); /* before the catch-all, which would claim its window */
     nc_dev_ohci_init(&c->vm);
     nc_dev_aci_init(&c->vm);
