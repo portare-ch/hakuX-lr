@@ -214,6 +214,16 @@ static void test_fog(void)
     HT_CHECK(strstr(buf, "(pc.fog.y - vFog)") != NULL);
     HT_CHECK(strstr(buf, "mix(unpackUnorm4x8(pc.fog_color).zyx, cur.rgb, fogf)") != NULL);
     dump("fog", "frag");
+    /* the exponential modes: 2^(16 x) and 2^(-32 x^2) of x = pc.fog.x +
+     * pc.fog.y d, an infinite x counted as +infinity */
+    pk.fog = 2;
+    HT_CHECK(hle_ff_ps_glsl(&pk, buf, sizeof(buf)) > 0);
+    HT_CHECK(strstr(buf, "float fx = pc.fog.x + pc.fog.y * vFog;") != NULL);
+    HT_CHECK(strstr(buf, "if (isnan(fx) || isinf(fx)) fx = 1.0e30;") != NULL);
+    HT_CHECK(strstr(buf, "exp2(16.0 * fx)") != NULL);
+    pk.fog = 3;
+    HT_CHECK(hle_ff_ps_glsl(&pk, buf, sizeof(buf)) > 0);
+    HT_CHECK(strstr(buf, "exp2(-32.0 * fx * fx)") != NULL);
     pk.fog = 0;
     HT_CHECK(hle_ff_ps_glsl(&pk, buf, sizeof(buf)) > 0);
     HT_CHECK(strstr(buf, "vFog") == NULL);

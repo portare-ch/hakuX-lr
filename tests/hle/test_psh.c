@@ -104,6 +104,23 @@ static void test_final_fog(void)
     HT_CHECK(strstr(buf, "vec3 A = clamp(max(fogr.aaa, 0.0), 0.0, 1.0);") != NULL);
     HT_CHECK(strstr(buf, "outc = vec4(A * B + (1.0 - A) * C + D, G);") != NULL);
     HT_CHECK(strstr(buf, "float G = clamp(max(r0.a, 0.0), 0.0, 1.0);") != NULL);
+    /* the NV2A's exponential modes take x = p0 - 1.5 + p1 d (pc.fog.x +
+     * pc.fog.y d): EXP 2^(16 x), EXP_ABS 2^(-16 |x|), EXP2 2^(-32 x^2); an
+     * infinite or NaN x counts as +infinity */
+    k.fog = 2;
+    HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), NULL) > 0);
+    HT_CHECK(strstr(buf, "float fx = pc.fog.x + pc.fog.y * vFog;") != NULL);
+    HT_CHECK(strstr(buf, "if (isnan(fx) || isinf(fx)) fx = 1.0e30;") != NULL);
+    HT_CHECK(strstr(buf, "float fogf = exp2(16.0 * fx);") != NULL);
+    k.fog_abs = 1;
+    HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), NULL) > 0);
+    HT_CHECK(strstr(buf, "float fogf = exp2(16.0 * -abs(fx));") != NULL);
+    k.fog = 3;
+    HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), NULL) > 0);
+    HT_CHECK(strstr(buf, "float fogf = exp2(-32.0 * fx * fx);") != NULL);
+    k.fog = 4;                          /* (the linear mode again, for what follows) */
+    k.fog_abs = 0;
+    HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), NULL) > 0);
     HT_CHECK(strstr(buf, "v1r0 = clamp(v1r0, 0.0, 1.0);") != NULL);
     HT_CHECK(strstr(buf, "(pc.fog.y - vFog) / (pc.fog.y - pc.fog.x)") != NULL);
     HT_CHECK(strstr(buf, "a >= r") != NULL);

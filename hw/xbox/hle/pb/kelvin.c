@@ -299,6 +299,15 @@ void hle_kelvin_state(HleCmdState *st)
             dens = -p1 * 2.0f *
                    ((rs[RS_FOGTABLEMODE] & 3) == 2 ? sqrtf(logf(256.0f)) : logf(256.0f));
             memcpy(&rs[RS_FOGDENSITY], &dens, 4);
+            /* The NV2A's exponential modes take x = p0 - 1.5 + p1 d: EXP is
+             * 2^(16 x), EXP_ABS 2^(-16 |x|), EXP2 and EXP2_ABS 2^(-32 x^2)
+             * (nxdk_pgraph_tests' Fog param steps p0 with p1 0: the console's
+             * factor follows those, mirrored about 1.5 in the ABS and EXP2
+             * modes). D3D pushes p0 1.5, so x is p1 d. FOGSTART and FOGEND,
+             * unused by these modes, carry p0 - 1.5 and p1 to the shaders. */
+            st = p0 - 1.5f;
+            memcpy(&rs[RS_FOGSTART], &st, 4);
+            memcpy(&rs[RS_FOGEND], &p1, 4);
         }
     }
     if (W(0x02A8)) {                    /* ABGR -> D3DCOLOR */

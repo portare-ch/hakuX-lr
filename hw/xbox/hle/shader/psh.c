@@ -685,13 +685,23 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
     /* the table modes too: the NV2A's linear mode is the same hardware
      * (push-buffer mode decodes D3D's vertex fog as linear, p0 1 / p1 1), so
      * Otogi 2's NaN fog coordinates turned every surface the fog colour */
-    case 2:  put(&b, "  float fogf = exp(-%s * pc.fog.z);\n", fd); break;
-    case 3:  put(&b, "  float fd = %s * pc.fog.z;\n"
-                     "  float fogf = exp(-fd * fd);\n", fd); break;
-    default: put(&b, "  float fogf = (pc.fog.y - %s) / (pc.fog.y - pc.fog.x);\n", fd); break;
+    /* the exponential modes (pb/kelvin.c): x = pc.fog.x + pc.fog.y d, the
+     * NV2A's p0 - 1.5 + p1 d; the ABS modes take |x|, not |d| */
+    /* A term that is infinite or not a number counts as +infinity, whatever
+     * its sign (nxdk_pgraph_tests' Fog inf coord, oFog +inf with a negative
+     * p1: the console leaves LINEAR, LINEAR_ABS and EXP unfogged and fogs
+     * EXP_ABS and both EXP2 modes whole). */
+    case 2:  put(&b, "  float fx = pc.fog.x + pc.fog.y * vFog;\n"
+                     "  if (isnan(fx) || isinf(fx)) fx = 1.0e30;\n"
+                     "  float fogf = exp2(16.0 * %s);\n", k->fog_abs ? "-abs(fx)" : "fx"); break;
+    case 3:  put(&b, "  float fx = pc.fog.x + pc.fog.y * vFog;\n"
+                     "  if (isnan(fx) || isinf(fx)) fx = 1.0e30;\n"
+                     "  float fogf = exp2(-32.0 * fx * fx);\n"); break;
+    default: put(&b, "  float fogf = (pc.fog.y - %s) / (pc.fog.y - pc.fog.x);\n"
+                     "  if (isnan(fogf) || isinf(fogf)) fogf = 1.0;\n", fd); break;
     }
     if (k->fog >= 2) {
-        put(&b, "  fogf = isnan(fogf) ? 1.0 : clamp(fogf, 0.0, 1.0);\n");
+        put(&b, "  fogf = clamp(fogf, 0.0, 1.0);\n");
     }
     put(&b, "  vec4 fogr = vec4(col(pc.fog_color).rgb, fogf);\n"
             "  float dot1 = 0.0, dot2 = 0.0, dot3 = 0.0;\n%s%s",
