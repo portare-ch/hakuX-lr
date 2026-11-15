@@ -34,7 +34,7 @@
 
 enum { OPT_SCALE, OPT_CROP, OPT_FORMAT, OPT_LANGUAGE, OPT_REGION, OPT_RUMBLE, OPT_NETWORK, OPT_COMMUNICATOR,
        OPT_MIC_GATE, OPT_RESAMPLER, OPT_PROCESSING, OPT_PRECISION, OPT_PACE,
-       OPT_REPEAT, OPT_MODS, OPT_RAM, OPT_COUNT };
+       OPT_REPEAT, OPT_MODS, OPT_RAM, OPT_RAM_PATCH, OPT_COUNT };
 
 /* The language values follow XC_LANGUAGE after auto: english is 1. */
 static struct retro_core_option_v2_definition g_defs[OPT_COUNT + 1] = {
@@ -168,6 +168,14 @@ static struct retro_core_option_v2_definition g_defs[OPT_COUNT + 1] = {
         NULL, NULL,
         {{"64", "64 MB (retail)"}, {"128", "128 MB"}, {"256", "256 MB"}, {NULL, NULL}},
         "64"},
+    [OPT_RAM_PATCH] = {
+        "hakux_ram_patch", "Patch Games for Console Memory", NULL,
+        "Removes each game's 64 MB limit as it loads, so it has all of the console's memory, as game files "
+        "were patched for upgraded consoles. It has no effect with 64 MB. A game not written for more memory "
+        "may misbehave; the game's files are not changed." NEXT,
+        NULL, NULL,
+        {{"disabled", "Off"}, {"enabled", "On"}, {NULL, NULL}},
+        "disabled"},
     {NULL},
 };
 
@@ -280,6 +288,7 @@ void nc_lr_options_apply(void)
     nc_lr_video_set_repeat(!strcmp(g_defs[OPT_REPEAT].values[g_applied[OPT_REPEAT]].value, "enabled"));
     nc_online_set_cheats(!strcmp(g_defs[OPT_MODS].values[g_applied[OPT_MODS]].value, "enabled"));
     nc_core_set_ram((unsigned)atoi(g_defs[OPT_RAM].values[g_applied[OPT_RAM]].value));
+    nc_xbe_set_unlimit(!strcmp(g_defs[OPT_RAM_PATCH].values[g_applied[OPT_RAM_PATCH]].value, "enabled"));
 
     /* 480p, as a console on its component cable (the AV pack here) is set
      * up: 4:3 480p is 00080000. PAL60 for a PAL console only (RetroArch

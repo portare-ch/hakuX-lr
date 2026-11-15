@@ -2,7 +2,8 @@
 # Copyright (C) 2026-present PortareOS
 # SPDX-License-Identifier: GPL-2.0-or-later
 """Run the console memory test on xboxrun: 64, 128 and 256 MiB, and a title
-whose XBE limits it to 64 MiB on a console with more.
+whose XBE limits it to 64 MiB on a console with more, as it is and with the
+limit patched out as it loads.
 
 Assembles kernel_ram.s for i386 with clang and ld.lld; skips (exit 77) if
 either tool is unavailable.
@@ -34,9 +35,10 @@ def tool(*names):
     return None
 
 
-def boot(build, iso, data, mib):
-    """The test's totals on a console of mib: (total pages, the NV2A's memory, block, pages committed)."""
-    env = dict(os.environ, NC_TIMEOUT='30', NC_RAM_MB=str(mib))
+def boot(build, iso, data, mib, unlimit=False):
+    """The test's totals on a console of mib: (total pages, the NV2A's memory, block, pages committed).
+    unlimit: the titles' 64 MiB limit patched out as they load."""
+    env = dict(os.environ, NC_TIMEOUT='30', NC_RAM_MB=str(mib), NC_RAM_UNLIMIT='1' if unlimit else '0')
     result = subprocess.run([str(build / 'xboxrun'), '--headless', str(iso), str(data)], env=env,
                             capture_output=True, text=True, timeout=60)
     out = result.stdout + result.stderr
@@ -86,6 +88,15 @@ def main():
                 raise SystemExit(f'FAIL: limited to 64 MiB on {mib} MiB: total {total} pages, block {block:08x}, '
                                  f'committed {committed} pages')
             print(f'PASS: a title limited to 64 MiB on {mib} MiB: {total} pages, {committed} committed and written')
+        for mib in (64, 128, 256):
+            total, gpu, block, committed, out = boot(build, root / 'kernel_ram_64.iso', root / 'data', mib, True)
+            ok = (total == mib * 256 and committed >= (mib - 8) * 256 and 'limits itself' not in out
+                  and ('patched out' in out) == (mib > 64))
+            if not ok:
+                raise SystemExit(f'FAIL: the limit patched out on {mib} MiB: total {total} pages, '
+                                 f'committed {committed} pages')
+            print(f'PASS: a title limited to 64 MiB, the limit patched out, on {mib} MiB: {total} pages, '
+                  f'{committed} committed and written')
     return 0
 
 

@@ -65,6 +65,13 @@ static bool xbe_read(const NcDisc *disc, const NcXbe *x, uint64_t off, void *buf
     return nc_disc_read(disc, &x->file, off, buf, len);
 }
 
+static bool g_unlimit;
+
+void nc_xbe_set_unlimit(bool on)
+{
+    g_unlimit = on;
+}
+
 bool nc_xbe_load(NcVm *vm, const NcDisc *disc, const char *path, NcKernel *k, NcXbe *out)
 {
     memset(out, 0, sizeof(*out));
@@ -91,6 +98,15 @@ bool nc_xbe_load(NcVm *vm, const NcDisc *disc, const char *path, NcKernel *k, Nc
         return false;
     }
     out->init_flags = nc_rd32(probe + 0x124);
+    /* The limit patched out as the XBE loads (nc_xbe_set_unlimit), as XBEs
+     * were patched for upgraded consoles: on a console with more memory
+     * only, a retail one's titles are left as they are. */
+    const bool unlimit = g_unlimit && (out->init_flags & NC_XBE_INIT_LIMIT_64MB) && vm->ram_size > NC_RAM_RETAIL;
+    if (unlimit) {
+        out->init_flags &= ~NC_XBE_INIT_LIMIT_64MB;
+        nc_log("hakuX-native", "xbe: the 64 MiB limit (initialization flag 4) patched out: the title has the "
+               "console's %u MiB", vm->ram_size >> 20);
+    }
     if (out->init_flags & NC_XBE_INIT_LIMIT_64MB) {
         nc_mm_limit_title(k);       /* before the image takes its pages */
     }
@@ -109,6 +125,9 @@ bool nc_xbe_load(NcVm *vm, const NcDisc *disc, const char *path, NcKernel *k, Nc
     uint8_t *hdr = nc_vm_host(vm, base);
     if (!xbe_read(disc, out, 0, hdr, hdr_size)) {
         return false;
+    }
+    if (unlimit) {
+        nc_wr32(hdr + 0x124, out->init_flags);  /* the title reads its header too */
     }
     int rc = hle_xbe_parse(hdr, hdr_size, &out->info);
     if (rc != HLE_XBE_OK) {

@@ -142,6 +142,10 @@ bool nc_core_boot(NcCore *c, int disc_fd)
         nc_core_set_ram((unsigned)atoi(mb));
     }
     const uint32_t ram = g_ram;
+    const char *all = getenv("NC_RAM_UNLIMIT");     /* the tools' again: =1 patches the titles' limit out */
+    if (all && *all) {
+        nc_xbe_set_unlimit(atoi(all) != 0);
+    }
     /* a savestate's kernel objects are where its boot made them (KERN v3
      * moved the pool's first range) */
     nc_kernel_pool_for(g_loadstate[0] ? nc_kern_state_kprocess(g_loadstate) : 0);

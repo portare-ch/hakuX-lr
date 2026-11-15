@@ -22,6 +22,9 @@
   console. A game whose XBE limits it to 64 MB, as most do, keeps 64 MB.
   The NV2A reaches the first 128 MB, so on 256 MB the upper half serves
   the CPU only. The memory size the NV2A reports follows the option.
+  **Patch Games for Console Memory** (off by default) removes a game's
+  64 MB limit as it loads, as game files were patched for upgraded
+  consoles; the files themselves are not changed.
 
 ## linux-v0.26.0 (Linux, aarch64 and x86-64, and Android)
 

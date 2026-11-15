@@ -33,6 +33,9 @@ typedef struct NcXbe {
 /* path: on the disc ("\default.xbe", or "\Device\CdRom0\..."), or on a hard
  * disk partition ("\Device\Harddisk0\Partition2\xboxdash.xbe": the host
  * file, kept open for XeLoadSection). */
+/* XBEs loaded from now have their 64 MiB limit (NC_XBE_INIT_LIMIT_64MB)
+ * patched out on a console with more memory. Off by default. */
+void nc_xbe_set_unlimit(bool on);
 bool nc_xbe_load(NcVm *vm, const NcDisc *disc, const char *path, NcKernel *k, NcXbe *out);
 /* len bytes at off of the booted XBE's host file (fd, nc_xbe_load's), the
  * mods' patches of it over them ([$u\...]: a title update's). */
