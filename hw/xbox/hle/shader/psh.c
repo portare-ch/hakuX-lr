@@ -758,8 +758,8 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
         case HLE_PST_BUMPENVMAP:
         case HLE_PST_BUMPENVMAP_LUM: {
             /* offset texture: the input stage's (b, g) as signed bytes (du,
-             * dv) through the bump matrix (column-major, as the NV2A takes
-             * BUMPENVMAT 00, 01, 10, 11) move this stage's coordinates; LUM
+             * dv) through the bump matrix (column-major: 00, 01, 10, 11, as
+             * the draw packs the NV2A's 00, 01, 11, 10) move this stage's coordinates; LUM
              * scales the RGB by LSCALE * the input's r + LOFFSET */
             unsigned in = s == 3 ? (k->input_tex >> 20) & 3 : s == 2 ? (k->input_tex >> 16) & 1 : 0;
             if (!s) {

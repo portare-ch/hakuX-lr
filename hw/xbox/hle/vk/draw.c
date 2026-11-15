@@ -65,8 +65,9 @@ enum {
     TSS_MIPFILTER, TSS_MIPMAPLODBIAS, TSS_MAXMIPLEVEL, TSS_MAXANISOTROPY,
     TSS_COLORKEYOP, TSS_COLORSIGN, TSS_ALPHAKILL, TSS_COLOROP = 12, TSS_COLORARG0, TSS_COLORARG1, TSS_COLORARG2, TSS_ALPHAOP,
     TSS_ALPHAARG0, TSS_ALPHAARG1, TSS_ALPHAARG2, TSS_RESULTARG, TSS_TEXTURETRANSFORMFLAGS,
-    TSS_BUMPENVMAT00 = 22,      /* 00, 01, 10, 11: SetTextureState_BumpEnv pushes types
-                                   22..25 to BUMP_ENV_MAT 0..3 (Otogi 0xf5c50) */
+    TSS_BUMPENVMAT00 = 22,      /* 00, 01, 11, 10, the console's D3DTSS order:
+                                   SetTextureState_BumpEnv pushes types 22..25 to
+                                   BUMP_ENV_MAT 0..3 (Otogi 0xf5c50) */
     TSS_BUMPENVLSCALE = 26, TSS_BUMPENVLOFFSET,
     TSS_TEXCOORDINDEX = 28, TSS_BORDERCOLOR = 29, TSS_COLORKEYCOLOR = 30,
     TSS_CONVOLUTION = 31,       /* HLE's own (pb/kelvin.c): HlePshKey.conv */
@@ -4383,7 +4384,12 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
                 const uint32_t *t = s->tss[st];
                 uint32_t *mt = st == 3 ? pc.bump3 : &pc.bump[2 * (st - 1)];
                 mt[0] = half2(t[TSS_BUMPENVMAT00], t[TSS_BUMPENVMAT00 + 1]);
-                mt[1] = half2(t[TSS_BUMPENVMAT00 + 2], t[TSS_BUMPENVMAT00 + 3]);
+                /* the second column 10, 11: the words are 00, 01, 11, 10.
+                 * Spartan: Total Warrior grades its frame through a 256 x
+                 * 256 table at (0.5 du, 0.5 dv), its words 0.5, 0, 0.5, 0;
+                 * read 00, 01, 10, 11 both channels moved u alone and the
+                 * intro was green and purple. */
+                mt[1] = half2(t[TSS_BUMPENVMAT00 + 3], t[TSS_BUMPENVMAT00 + 2]);
                 pc.bumpl[st - 1] = half2(t[TSS_BUMPENVLSCALE], t[TSS_BUMPENVLSCALE + 1]);
             } else if (st == 3 && m == HLE_PST_DOT_RFLCT_SPEC_CONST) {
                 /* the constant eye vector in the stage's words (psh.h) */

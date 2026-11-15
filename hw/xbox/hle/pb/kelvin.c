@@ -204,7 +204,7 @@ static void tss(uint32_t *t, unsigned s)
     t[TSS_ALPHAKILL] = (ctl0 >> 2) & 1;
     t[TSS_COLORSIGN] = filt & 0xF0000000u;
     t[TSS_BORDERCOLOR] = R(b + 0x24);
-    /* SET_TEXTURE_SET_BUMP_ENV_MAT 00 01 10 11, SCALE, OFFSET, where written */
+    /* SET_TEXTURE_SET_BUMP_ENV_MAT 00 01 11 10, SCALE, OFFSET, where written */
     for (unsigned i = 0; i < 6; i++) {
         if (W(b + 0x28 + 4 * i)) {
             t[TSS_BUMPENVMAT00 + i] = R(b + 0x28 + 4 * i);
