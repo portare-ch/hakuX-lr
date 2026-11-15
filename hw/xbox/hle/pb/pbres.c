@@ -248,12 +248,21 @@ static bool tex_native(uint32_t fmt)
 /* A YUY2 / UYVY texture's texels converted to A8R8G8B8 into the arena as
  * object id's image (HLE_OP_TEX), sent as a linear A8R8G8B8 texture (texel
  * coordinates like the source); false if they can't be. */
-static bool yuv_define(uint32_t id, const uint32_t h5[5], const HleResDesc *d)
+static bool yuv_define(uint32_t id, const uint32_t h5[5], const HleResDesc *d, uint32_t lin_pitch,
+                       uint32_t span)
 {
+    /* lin_pitch, span: the row pitch and the bytes read where the header's
+     * 64-byte steps can't say the pitch (hle_draw_tex_define's lin_span);
+     * 0: the header's */
     uint32_t pitch;
     uint32_t off0 = hle_res_subresource(d, 0, 0, &pitch);
-    const uint8_t *src = hle_pa_ptr(hle_res_data_pa(h5[1]) + off0, pitch * d->h);
-    if (!src || d->w < 2) {
+    if (lin_pitch && span) {
+        pitch = lin_pitch;
+    } else {
+        span = pitch * d->h;
+    }
+    const uint8_t *src = d->w < 2 ? NULL : hle_pa_ptr(hle_res_data_pa(h5[1]) + off0, span);
+    if (!src) {
         return false;
     }
     uint8_t *dst;
@@ -514,7 +523,9 @@ static uint32_t lin_span(const HleResDesc *d, uint32_t def)
     if (!fi || !(fi->flags & HLE_FI_LIN) || (fi->flags & HLE_FI_DXT) || !d->w || !d->h) {
         return 0;
     }
-    return pitch * (d->h - 1) + d->w * (fi->bpp / 8);
+    /* (YUY2 / UYVY: texels in pairs, an odd width's last pair whole) */
+    const uint32_t w = fi->flags & HLE_FI_YUV ? (d->w + 1) & ~1u : d->w;
+    return pitch * (d->h - 1) + w * (fi->bpp / 8);
 }
 
 uint32_t hle_draw_tex_bytes(const uint32_t h5[5], uint32_t def)
@@ -544,7 +555,8 @@ uint32_t hle_draw_tex_define(uint32_t id, const uint32_t h5[5], const uint32_t *
     *bytes = ri.bytes;
     if (d.fmt == HLE_XFMT_YUY2 || d.fmt == HLE_XFMT_UYVY) {
         *host_bytes = d.w * d.h * 4;
-        return yuv_define(id, h5, &d) ? id : 0;        /* movies: converted to A8R8G8B8 */
+        /* movies: converted to A8R8G8B8 */
+        return yuv_define(id, h5, &d, span ? sign >> HLE_TEXDEF_PITCH_SHIFT : 0, span) ? id : 0;
     }
     return tex_define(id, h5, &d, &ri, pal, npal, sign, host_bytes) ? id : 0;
 }
