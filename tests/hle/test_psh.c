@@ -394,9 +394,47 @@ static void test_shadow_project(void)
     HT_CHECK(n > 0 && n == strlen(buf));
     dump("psh_shadow");
     HT_CHECK(strstr(buf, "vec3 pq = nvproj(vTex0);") != NULL);
-    HT_CHECK(strstr(buf, "float m = 16777215.0, r = clamp(pq.z, 0.0, m);") != NULL);
+    /* r / q itself, not nvproj's (kept within 1e7: F24's depths reach 1e30) */
+    HT_CHECK(strstr(buf, "float rq = abs(vTex0.w) > 1.0e-30 ? vTex0.z / vTex0.w : pq.z;") != NULL);
+    HT_CHECK(strstr(buf, "float m = 16777215.0, r = clamp(rq, 0.0, m);") != NULL);
     HT_CHECK(strstr(buf, "greaterThanEqual(d, vec4(r))") != NULL);
-    HT_CHECK(strstr(buf, "/ vTex0.w") == NULL);
+    /* a linear filter: four compares, weighted */
+    HT_CHECK(strstr(buf, "textureGather(") != NULL);
+    HT_CHECK(strstr(buf, "vec2 f = fract(uv * sz - 0.5);") != NULL);
+}
+
+/* Point filtering: the stage's one texel compared, no weighting; each stage
+ * by its own filter */
+static void test_shadow_point(void)
+{
+    uint32_t rs[HLE_PS_REGS] = { 0 };
+    rs[HLE_PS_RGB_IN] = IN4(R_T0, R_T1, R_ZERO, R_ZERO);
+    rs[HLE_PS_RGB_OUT] = R_R0 << 4;
+    rs[HLE_PS_COUNT] = 1;
+    rs[HLE_PS_TEXMODES] = 2 | (2u << 5);                /* t0, t1 PROJECT3D */
+    HlePshKey k;
+    hle_psh_key(rs, &k);
+    k.shadow = 3 | (1u << 4);                           /* both stages, LESS */
+    k.shadow_fmt = 1 | (2u << 2);                       /* D24, D16 */
+    k.shadow_point = 1;                                 /* t0 alone */
+    size_t n = hle_psh_glsl(&k, buf, sizeof(buf), NULL);
+    HT_CHECK(n > 0 && n == strlen(buf));
+    dump("psh_shadow_point");
+    const char *t0 = strstr(buf, "vec3 pq = nvproj(vTex0);");
+    const char *t1 = strstr(buf, "vec3 pq = nvproj(vTex1);");
+    HT_CHECK(t0 != NULL && t1 != NULL && t0 < t1);
+    if (!t0 || !t1 || t0 >= t1) {
+        return;
+    }
+    const char *one = strstr(t0, "uv).r * 16777215.0);");
+    const char *four = strstr(t0, "textureGather(");
+    HT_CHECK(one != NULL && one < t1);                  /* t0: one compare */
+    HT_CHECK(strstr(t0, "t0 = vec4(float(lessThan(d, vec4(r)).x));") != NULL);
+    HT_CHECK(four != NULL && four > t1);                /* t1: four */
+    HT_CHECK(strstr(t1, "uv) * 65535.0;") != NULL);
+    k.shadow_point = 0;
+    HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), NULL) > 0);
+    HT_CHECK(strstr(buf, "uv).r * 16777215.0);") == NULL);
 }
 
 /* An uploaded F24 texture (shadow_fmt 0 with the stage's shadow bit): the
@@ -416,7 +454,7 @@ static void test_shadow_f24(void)
     HT_CHECK(n > 0 && n == strlen(buf));
     dump("psh_shadow_f24");
     HT_CHECK(strstr(buf, "float m = 3.402823466e38, r = uintBitsToFloat(floatBitsToUint("
-                         "clamp(pq.z, 0.0, m)) & 0xFFFFFF80u);") != NULL);
+                         "clamp(rq, 0.0, m)) & 0xFFFFFF80u);") != NULL);
     HT_CHECK(strstr(buf, "uv) * 1.0;") != NULL);
     HT_CHECK(strstr(buf, "equal(d, vec4(r))") != NULL);
 }
@@ -957,6 +995,7 @@ static void test_precision_mode(void)
     HlePshKey k;
     HT_EQ_U32(sizeof(HlePshKey), 216);
     HT_EQ_U32(offsetof(HlePshKey, precise), offsetof(HlePshKey, fb_op) + sizeof(uint16_t));
+    HT_EQ_U32(offsetof(HlePshKey, shadow_point), offsetof(HlePshKey, precise) + 1);
     HT_EQ_U32(offsetof(HlePshKey, fb_const), 208);
     hle_psh_set_precision(false);
     hle_psh_key(rs, &k);
@@ -1009,6 +1048,7 @@ int main(void)
     HT_RUN(test_dot_zw_formats);
     HT_RUN(test_brdf);
     HT_RUN(test_shadow_project);
+    HT_RUN(test_shadow_point);
     HT_RUN(test_shadow_f24);
     HT_RUN(test_bumpenv);
     HT_RUN(test_two_side);

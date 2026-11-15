@@ -255,7 +255,28 @@ static void test_convert(void)
     HT_EQ_U32(conv1(HLE_XFMT_R6G5B5, 0x8000), 0xFF820000u);         /* L 32: 0x82 */
     HT_EQ_U32(conv1(HLE_XFMT_LIN_R6G5B5, 0x03E0), 0xFF00FF00u);
     HT_EQ_U32(conv1(HLE_XFMT_R6G5B5, 0x0010), 0xFF000084u);         /* U -16: 0x84 */
-    HT_CHECK(!hle_tex_convert(HLE_XFMT_L16, "\0\0", 1, &(uint32_t){ 0 }));
+    HT_CHECK(!hle_tex_convert(HLE_XFMT_DXT1, "\0\0\0\0", 1, &(uint32_t){ 0 }));
+    /* the formats converted where they are sampled with a border
+     * (hle_tex_border_conv): the texel their view's mapping gives */
+    HT_EQ_U32(conv1(HLE_XFMT_X8R8G8B8, 0x00112233u), 0xFF112233u);
+    HT_EQ_U32(conv1(HLE_XFMT_LIN_B8G8R8A8, 0x11223344u), 0x44332211u);  /* word B G R A */
+    HT_EQ_U32(conv1(HLE_XFMT_R8G8B8A8, 0x11223344u), 0x44112233u);      /* word R G B A */
+    HT_EQ_U32(conv1(HLE_XFMT_R5G6B5, 0xF800), 0xFFFF0000u);
+    HT_EQ_U32(conv1(HLE_XFMT_LIN_R5G6B5, 0x07E0), 0xFF00FF00u);
+    HT_EQ_U32(conv1(HLE_XFMT_X1R5G5B5, 0x001F), 0xFF0000FFu);
+    HT_EQ_U32(conv1(HLE_XFMT_LIN_X1R5G5B5, 0x7C00), 0xFFFF0000u);       /* bit 15 unused */
+    HT_EQ_U32(conv1(HLE_XFMT_L8, 0x80), 0xFF808080u);
+    HT_EQ_U32(conv1(HLE_XFMT_AL8, 0x80), 0x80808080u);
+    HT_EQ_U32(conv1(HLE_XFMT_A8, 0x80), 0x80FFFFFFu);                   /* (1, 1, 1, a) */
+    HT_EQ_U32(conv1(HLE_XFMT_A8L8, 0x8040), 0x80404040u);
+    HT_EQ_U32(conv1(HLE_XFMT_G8B8, 0x8040), 0x80408040u);               /* (low, high, low, high) */
+    HT_EQ_U32(conv1(HLE_XFMT_R8B8, 0x8040), 0x80804040u);               /* (high, low, low, high) */
+    HT_EQ_U32(conv1(HLE_XFMT_L16, 0x8040), 0xFFFF8040u);                /* (1, high, low, 1) */
+    HT_CHECK(hle_tex_border_conv(HLE_XFMT_LIN_X8R8G8B8) && hle_tex_border_conv(HLE_XFMT_A8) &&
+             hle_tex_border_conv(HLE_XFMT_R5G6B5));
+    /* four channels the view passes as they are: sampled as stored */
+    HT_CHECK(!hle_tex_border_conv(HLE_XFMT_A8R8G8B8) && !hle_tex_border_conv(HLE_XFMT_LIN_A8B8G8R8) &&
+             !hle_tex_border_conv(HLE_XFMT_A1R5G5B5) && !hle_tex_border_conv(HLE_XFMT_DXT1));
     /* R16B16 uses the high bytes of V and U in RGBA order (V, U, U, V). */
     HT_EQ_U32(conv1(HLE_XFMT_V16U16, 0x80FF7F00u), 0x80807F7Fu);
     HT_EQ_U32(conv1(HLE_XFMT_LIN_V16U16, 0x0001FFFFu), 0x0000FFFFu);

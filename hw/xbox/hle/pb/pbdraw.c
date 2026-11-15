@@ -3324,8 +3324,10 @@ static uint32_t texture(unsigned s, bool *unset, bool *lin)
     *lin = fi && (fi->flags & HLE_FI_LIN);
     if (*lin) {
         uint32_t rect = R(NV097_SET_TEXTURE_IMAGE_RECT + b), pitch = R(NV097_SET_TEXTURE_CONTROL1 + b) >> 16;
+        /* (the header's pitch in 64-byte steps, rounded up: a pitch
+         * between them goes with the definition, HLE_TEXDEF_PITCH_SHIFT) */
         size = (MAX(rect >> 16, 1u) - 1) | (MAX(rect & 0xFFFF, 1u) - 1) << HLE_SIZE_HEIGHT_SHIFT |
-               (MAX(pitch, 64u) / 64 - 1) << HLE_SIZE_PITCH_SHIFT;
+               ((MAX(pitch, 64u) + 63) / 64 - 1) << HLE_SIZE_PITCH_SHIFT;
         static const uint8_t k_halves[4] = { HLE_ZREAD_HALVES, 0, 0, 0 };
         uint8_t map[4];
         uint32_t zid = hle_res_zread_map(code, map) ? zread(pa, rect >> 16, rect & 0xFFFF, map, code, 0, NULL) :
@@ -3483,7 +3485,7 @@ static uint32_t texture(unsigned s, bool *unset, bool *lin)
     if (redefine) {
         const uint32_t h5[5] = { HLE_COMMON_TYPE_TEXTURE | 1, off, 0, fmt, size };
         uint32_t bytes = 0, host_bytes = 0;
-        coh_pend_wait(pa, hle_draw_tex_bytes(h5));  /* a copy queued into its texels lands first */
+        coh_pend_wait(pa, hle_draw_tex_bytes(h5, def));  /* a copy queued into its texels lands first */
         t->ok = hle_draw_tex_define(t->id, h5, pal, npal, (sxor ? sign : 0) | def, &bytes, &host_bytes) != 0;
         if (t->ok) {                    /* failed: the back end keeps the image it had */
             g_pd.tex_bytes -= t->host_bytes;

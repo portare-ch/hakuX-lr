@@ -503,11 +503,29 @@ static bool tex_define(uint32_t id, const uint32_t h5[5], const HleResDesc *dp,
     return true;
 }
 
-uint32_t hle_draw_tex_bytes(const uint32_t h5[5])
+/* A linear texture's span of guest memory at the row pitch def gives (its
+ * top half, HLE_TEXDEF_PITCH_SHIFT: the NV2A's, where the header's 64-byte
+ * steps can't say it): the rows before the last at that pitch, the last
+ * its texels. 0: the header's pitch stands (ri's bytes). */
+static uint32_t lin_span(const HleResDesc *d, uint32_t def)
+{
+    const uint32_t pitch = def >> HLE_TEXDEF_PITCH_SHIFT;
+    const HleFmtInfo *fi = pitch ? hle_fmt_info(d->fmt) : NULL;
+    if (!fi || !(fi->flags & HLE_FI_LIN) || (fi->flags & HLE_FI_DXT) || !d->w || !d->h) {
+        return 0;
+    }
+    return pitch * (d->h - 1) + d->w * (fi->bpp / 8);
+}
+
+uint32_t hle_draw_tex_bytes(const uint32_t h5[5], uint32_t def)
 {
     HleResDesc d;
     HleResInfo ri;
-    return hle_res_from_header(h5[0], h5[3], h5[4], &d) && hle_res_info(&d, &ri) ? ri.bytes : 0;
+    if (!hle_res_from_header(h5[0], h5[3], h5[4], &d) || !hle_res_info(&d, &ri)) {
+        return 0;
+    }
+    const uint32_t span = lin_span(&d, def);
+    return span ? span : ri.bytes;
 }
 
 uint32_t hle_draw_tex_define(uint32_t id, const uint32_t h5[5], const uint32_t *pal, uint32_t npal,
@@ -518,6 +536,10 @@ uint32_t hle_draw_tex_define(uint32_t id, const uint32_t h5[5], const uint32_t *
     *host_bytes = 0;
     if (!tex_desc(h5, &d, &ri)) {
         return 0;
+    }
+    const uint32_t span = lin_span(&d, sign);
+    if (span) {
+        ri.bytes = span;                /* what tex_define reads, and the cache tracks */
     }
     *bytes = ri.bytes;
     if (d.fmt == HLE_XFMT_YUY2 || d.fmt == HLE_XFMT_UYVY) {

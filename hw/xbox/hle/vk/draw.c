@@ -4336,17 +4336,14 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
             /* D3DCMP_* (0x200 + n), or SET_SHADOW_COMPARE_FUNC's word as
              * pushed: the NV2A keeps its low 3 bits */
             k.pk.shadow |= (lit ? 7 : f & 7) << 4;
-            /* point filtered (minification and magnification both): the
-             * NV2A compares the one texel; a linear filter weights four */
-            bool nearest = true;
+            /* each stage point filtered (minification and magnification
+             * both): the NV2A compares the one texel; a linear filter
+             * weights four */
             for (unsigned st = 0; st < 4; st++) {
-                if (((k.pk.shadow >> st) & 1) &&
-                    ((s->tss[st][TSS_MAGFILTER] & 7) != 1 || (s->tss[st][TSS_MINFILTER] & 7) != 1)) {
-                    nearest = false;
+                if (((k.pk.shadow >> st) & 1) && (s->tss[st][TSS_MAGFILTER] & 7) == 1 &&
+                    (s->tss[st][TSS_MINFILTER] & 7) == 1) {
+                    k.pk.shadow_point |= 1u << st;
                 }
-            }
-            if (nearest) {
-                k.pk.shadow |= HLE_PSH_SHADOW_NEAREST;
             }
             static unsigned s_logged;
             if (s_logged < 4) {

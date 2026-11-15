@@ -25,8 +25,9 @@ uint32_t hle_draw_arena_alloc16(uint32_t len, uint8_t **ptr);
 #define HLE_TEXDEF_PITCH_SHIFT  16
 uint32_t hle_draw_tex_define(uint32_t id, const uint32_t h5[5], const uint32_t *pal, uint32_t npal,
                              uint32_t sign, uint32_t *bytes, uint32_t *host_bytes);
-/* The span of guest memory header words h5's texels take (0: not a texture) */
-uint32_t hle_draw_tex_bytes(const uint32_t h5[5]);
+/* The span of guest memory header words h5's texels take (0: not a texture);
+ * def: hle_draw_tex_define's sign word (its row pitch, HLE_TEXDEF_PITCH_SHIFT) */
+uint32_t hle_draw_tex_bytes(const uint32_t h5[5], uint32_t def);
 /* The video overlay's surface (header words h5, YUY2 / UYVY) as B8G8R8A8 in
  * the arena, converted with color: its offset, HLE_ARENA_FULL = none. */
 struct HlePvideoColor;

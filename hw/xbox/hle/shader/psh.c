@@ -404,7 +404,7 @@ static void shadow_sample(Buf *b, const HlePshKey *k, unsigned s, bool project3d
            "%s"
            "    float m = %s, r = %s;\n",
         s, s, s, s, s, s, s, s, s, glcl, k_max[fmt], r);
-    if (k->shadow & HLE_PSH_SHADOW_NEAREST) {
+    if ((k->shadow_point >> s) & 1) {
         /* point filtering: the one texel's compare, no weighting
          * (nxdk_pgraph_tests' depth formats: hard edges on the console) */
         put(b, "    vec4 d = vec4(texture(sampler2D(uTex2D[nonuniformEXT(ti)], "
