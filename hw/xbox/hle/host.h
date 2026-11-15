@@ -161,7 +161,7 @@ void *hle_host_vk_loader(void);
 /* End of the allocation run containing pa, extended through adjacent
  * blocks from the same caller up to limit. Returns 0 if unknown. */
 uint32_t hle_host_contig_end(uint32_t pa, uint32_t limit);
-/* The title freed part of [pa, limit) and has not allocated it again. */
+/* True if any page in [pa, limit) was freed and not reallocated. */
 bool hle_host_contig_freed(uint32_t pa, uint32_t limit);
 
 /* Disc reads so far: operations, bytes and the time spent in them

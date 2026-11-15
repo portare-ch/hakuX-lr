@@ -52,12 +52,12 @@ typedef struct Contig {
 } Contig;
 
 static Contig g_contig[MAX_CONTIG];
-/* Pages of a contiguous block the title freed, until a block takes them
- * again: a render target there is no longer the title's memory. */
+/* Track freed contiguous pages until reallocation so stale render targets
+ * cannot write over memory the game has reused. */
 static uint8_t g_contig_freed[NC_RAM_MAX / NC_PAGE];
 static unsigned g_ncontig;
-/* Held for each change to g_contig and g_ncontig, and by nc_mm_contig_end,
- * which the decode thread calls: the guest's thread reads them without it. */
+/* Protect contiguous allocations and freed-page tracking across the guest
+ * and GPU decoder threads. */
 static pthread_mutex_t g_contig_mu = PTHREAD_MUTEX_INITIALIZER;
 static uint32_t g_gpu_instance_end;
 

@@ -803,9 +803,8 @@ static PbObj *evict_slot(void)
     return i < 0 ? NULL : &g_pd.objs[i];
 }
 
-/* A linear object whose memory is no longer the title's block: freed and
- * given to a smaller block, or freed and not allocated again. It is never
- * reused or written back, and goes once nothing holds it (object). */
+/* A linear target is stale if its allocation was freed or replaced by a
+ * smaller block. Never reuse or write it back; discard it when unreferenced. */
 static bool past_block(const HleSurfDesc *d)
 {
     if (!d->pitch) {
