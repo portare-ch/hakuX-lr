@@ -578,12 +578,8 @@ uint64_t nc_ke_check_waits(NcKernel *k)
     uint64_t earliest = 0;
     for (unsigned i = 0; i < NC_MAX_THREADS; i++) {
         NcThread *t = &k->threads[i];
-        /* A suspended thread isn't in its wait: NT's suspend is an APC that
-         * takes the thread out of it, and the wait starts again once the
-         * thread is resumed (resume checks the waits). Until then a signal
-         * goes to the other waiters or stays with the object. Given to the
-         * suspended thread, a mutant or a lock was held by a thread that
-         * couldn't run to release it. */
+        /* Suspended threads must not consume signals or acquire locks.
+         * Resume checks their waits again. */
         if (t->state != NC_T_WAITING || t->suspend) {
             continue;
         }
@@ -1793,11 +1789,8 @@ static uint64_t KeSetBasePriorityThread(NcKernel *k, NcFrame *f, const uint32_t 
     }
     const int old = nc_ke_base_priority(k, t);
     int inc = (int32_t)a[1];
-    /* A title's process is in the variable priority class, and NT keeps a
-     * base set by increment inside it: 1 to 15, never the real-time
-     * priorities from 16 up. A thread given +14 otherwise ran at 22, above
-     * every boosted thread of the title, and one that never waits starved
-     * the rest (Angelic Concert's idle-time counter: a black screen). */
+    /* Keep increment-based priorities in the variable class (1-15).
+     * Higher priorities can starve other threads, as in Angelic Concert. */
     int p = inc >= 16 ? LOW_REALTIME_PRIORITY - 1 : inc <= -16 ? 1 : BASE_PRIORITY + inc;
     p = p < 1 ? 1 : p >= LOW_REALTIME_PRIORITY ? LOW_REALTIME_PRIORITY - 1 : p;
     int now = p;

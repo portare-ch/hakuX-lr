@@ -668,8 +668,7 @@ static uint32_t resume(NcKernel *k, NcThread *t)
     if (t->suspend && !--t->suspend) {
         k->resched = true;
         if (t->state == NC_T_WAITING) {
-            /* back in the wait it was suspended in: what was signalled or
-             * came due meanwhile ends it now */
+            /* Recheck signals and deadlines after suspension. */
             nc_ke_check_waits(k);
         }
     }

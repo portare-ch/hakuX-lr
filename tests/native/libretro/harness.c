@@ -469,9 +469,8 @@ static long status_kib(const char *key)
     return v;
 }
 
-/* Anonymous memory mapped writable and executable, in KiB: a code pool. The
- * core's own are gone with it; lavapipe leaves its 10 MiB one behind each
- * time the driver is unloaded (check.py's cycles). */
+/* Anonymous writable/executable mappings, in KiB. check.py uses this to
+ * account for lavapipe's retained 10 MiB code pools after unload. */
 static long exec_pool_kib(void)
 {
     FILE *f = fopen("/proc/self/maps", "r");

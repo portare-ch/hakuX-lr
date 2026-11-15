@@ -1719,8 +1719,7 @@ bool hle_pbd_pace(void)
     return !hle_pbd_pace_reached();
 }
 
-/* Where the display was last told to read its frame from (the CRTC's start
- * address, hle_pb_flipped): a title's frame buffers, as it goes round them. */
+/* Recent CRTC start addresses, recorded by hle_pb_flipped(). */
 #define SCAN_ADDRS 4u
 static uint32_t g_scan_addr[SCAN_ADDRS];
 static uint32_t g_scan_addrs;
@@ -1745,15 +1744,10 @@ static bool scan_addr_seen(uint32_t pa)
     return seen;
 }
 
-/* A frame presented without a draw, from a frame buffer the display reads,
- * while the target bound over that memory is a small one: the console's
- * scanout knows nothing of the bound target, it shows the memory as the
- * video mode lays it out. The object of that layout, when there is one or
- * the CPU has written the memory since (its writes are left for the swap's
- * rt_cpu_sync); 0 otherwise. Aquaman: Battle for Atlantis decodes its
- * movies straight into its back buffers and presents them with a
- * 256 x 256 texture target of an earlier draw still bound, and that view of
- * each frame was shown: black movies. */
+/* Find or create a display-sized view of a known frame buffer; return 0
+ * unless a matching object exists or the CPU wrote its memory.
+ * Aquaman decodes movies into back buffers with a 256x256 target still
+ * bound. Scanout uses the video mode's layout, not that target's size. */
 static uint32_t scanned_frame(uint32_t pa)
 {
     uint32_t pitch, xfmt;
@@ -1765,7 +1759,7 @@ static uint32_t scanned_frame(uint32_t pa)
     const uint32_t w = g_pd.disp_w, h = g_pd.disp_h;
     const HleFmtInfo *fi = pitch ? hle_fmt_info(xfmt) : NULL;
     if (!fi || !w || !h || (uint64_t)w * (fi->bpp / 8) > pitch) {
-        return 0;               /* no video mode set, or not this display's */
+        return 0;               /* No usable display layout. */
     }
     bool have = false;
     for (unsigned i = 0; i < g_pd.nobjs && !have; i++) {
@@ -1776,7 +1770,7 @@ static uint32_t scanned_frame(uint32_t pa)
     const bool cpu = hle_mem_written(pa, pitch * h);
     const uint32_t id = have || cpu ? object(pa, xfmt, pitch, w, h) : 0;
     if (cpu) {
-        hle_mem_mark_written(pa, pitch * h);    /* taken above, and by a new object: the swap's to upload */
+        hle_mem_mark_written(pa, pitch * h);    /* Preserve CPU writes for the swap's rt_cpu_sync(). */
     }
     return id;
 }

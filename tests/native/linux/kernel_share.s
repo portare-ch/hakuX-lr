@@ -1,9 +1,6 @@
 /* Copyright (C) 2026-present PortareOS */
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/* Share access of hard disk files (kernel_share.py): an open that asks
- * for what another doesn't share, or doesn't share what another holds, is
- * refused; an open for attributes takes no part; and the opens of a file
- * follow it through a rename.
+/* File sharing and rename tests (kernel_share.py).
  * Code: 0x11000; thunks: 0x10f00, in IMPORTS order. Print and halt. */
 .intel_syntax noprefix
 .set THUNK, 0x10f00
@@ -54,7 +51,7 @@
 .text
 .globl _start
 _start:
-    /* 1. Held for writing without sharing: a reader is refused. */
+    /* 1. An exclusive writer blocks readers. */
     STEP 1
     OPEN ha, tmp_attrs, READ_WRITE, 0
     test eax, eax
@@ -63,7 +60,7 @@ _start:
     OPEN hb, tmp_attrs, READ, 7
     cmp eax, SHARING_VIOLATION
     jne fail
-    /* 2. An open for attributes takes no part. */
+    /* 2. Attribute-only opens bypass sharing checks. */
     STEP 3
     OPEN hb, tmp_attrs, ATTRIBUTES, 0
     test eax, eax
@@ -71,7 +68,7 @@ _start:
     CLOSE hb
     CLOSE ha
 
-    /* 3. Two readers, one of them sharing no writing: a writer is refused. */
+    /* 3. A reader that disallows write sharing blocks writers. */
     STEP 4
     OPEN ha, tmp_attrs, READ_DELETE, 7
     test eax, eax
@@ -85,8 +82,7 @@ _start:
     cmp eax, SHARING_VIOLATION
     jne fail
 
-    /* 4. Renamed through the first handle: the second is still an open of
-     * that file, under its new name, and not of a new file of the old one. */
+    /* 4. Sharing follows a rename and does not affect a reused old name. */
     STEP 7
     push 10                             /* FileRenameInformation */
     push 16

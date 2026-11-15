@@ -78,11 +78,8 @@ struct DirEntry;
 
 typedef struct NcFile {
     bool used;
-    /* Sharing, as NT keeps it for each open of a file (hard disk files):
-     * the kinds of access the handle has to the file's data (SHARE_READ,
-     * _WRITE, _DELETE; 0: none of them, an open for attributes, which takes
-     * no part), and the kinds its ShareAccess lets other opens have. They sit
-     * in what was padding: the record's size is part of the savestate lock. */
+    /* Access held and shared (SHARE_*); attribute-only opens do not participate.
+     * These fields use padding to preserve the savestate record size. */
     uint8_t share_has, share_lets;
     enum FileKind kind;
     char path[512];      /* canonical device path */
@@ -133,8 +130,7 @@ typedef struct NcFile {
     bool no_buffering;
 } NcFile;
 
-/* The three kinds of access sharing is about, numbered as the bits of
- * NtCreateFile's ShareAccess (FILE_SHARE_READ, _WRITE, _DELETE). */
+/* NtCreateFile's ShareAccess bits (FILE_SHARE_READ, _WRITE, _DELETE). */
 #define SHARE_READ   1u
 #define SHARE_WRITE  2u
 #define SHARE_DELETE 4u
@@ -433,9 +429,7 @@ static NcFile *file_other(const NcFile *nf, const char *host, bool del)
     return NULL;
 }
 
-/* Which kinds of access a DesiredAccess asks of the file's data: reading
- * (or executing) it, writing (or appending to) it, deleting the file; the
- * generic rights as they map to those. */
+/* Map DesiredAccess to SHARE_* bits, including generic access rights. */
 static uint8_t share_kinds(uint32_t access)
 {
     uint8_t has = 0;
@@ -456,13 +450,9 @@ static uint8_t share_kinds(uint32_t access)
     return has;
 }
 
-/* NT's check of a new open against the opens a file has (the counts of
- * IoCheckShareAccess): refused when it asks for a kind of access that not
- * every open lets others have, or doesn't let others have a kind one of
- * them holds. Mission: Impossible - Operation Surma copies each level to
- * its cache partition on a thread, the copy's file opened without sharing,
- * and takes a level from the cache only if it can open it there: the open
- * let through, it read the unfinished copy and stopped on its disc error. */
+/* Reject access denied by an existing open, or a share mode that denies
+ * access an existing open holds (NT's IoCheckShareAccess).
+ * Mission: Impossible relies on this while copying levels to its cache. */
 static bool share_refused(const char *host, uint8_t has, uint8_t lets)
 {
     unsigned opens = 0, holders[SHARE_KINDS] = {0}, lenders[SHARE_KINDS] = {0};
@@ -496,12 +486,8 @@ static uint32_t file_handle(NcKernel *k, NcFile *nf)
     }
     *(uint16_t *)nc_vm_host(k->vm, obj) = 5; /* IO_TYPE_FILE */
     nc_ke_init_event(k, obj + FO_LOCK, 1, false);
-    /* A file object's event starts out set. NT completes the open on that
-     * event (IopParseDevice hands it to the create request), so a handle
-     * nothing was read from or written to yet can be waited on; an I/O
-     * clears it as it starts and sets it as it completes. Left clear, a
-     * title that waits on each file before closing it waited for ever on
-     * the ones it only opened (KOF: Maximum Impact - Maniax, at boot). */
+    /* NT signals this event when the open completes; later I/O clears and
+     * signals it again. KOF waits before closing even files it never read. */
     nc_ke_init_event(k, obj + NC_FO_EVENT, 0, true);
     nc_vm_wr32(k->vm, obj + FO_INDEX, (uint32_t)(nf - g_files));
     const uint32_t fcb = obj + FO_FCB;
@@ -2082,11 +2068,8 @@ static uint64_t NtSetInformationFile(NcKernel *k, NcFrame *f, const uint32_t *a)
         } else if (rename(nf->host, host) != 0) {
             st = STATUS_ACCESS_DENIED;
         } else {
-            /* Every open of the file follows it to its new name, not this
-             * handle's alone: the opens of a file are found by its name
-             * (their sharing, a delete pending), and one left under the old
-             * name was counted for whatever file has that name next, and
-             * no longer for this one. */
+            /* Update every open's path so sharing and pending deletion still apply
+             * to this file, not a new file created under its old name. */
             for (int i = 0; i < MAX_FILES && !nf->is_dir; i++) {
                 NcFile *o = &g_files[i];
                 if (o != nf && o->used && o->kind == F_HOST && !o->is_dir && !strcmp(o->host, nf->host)) {

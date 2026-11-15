@@ -126,10 +126,8 @@ def cycles(command, env, n, expect=None):
     # first, second or third cycle as the driver's threads and glslang's
     # symbol tables happened to interleave, then stayed. What malloc holds
     # (mallinfo2, -1 without it) stands for the heap.
-    # lavapipe maps a 10 MiB writable, executable pool the first time a
-    # load of the driver draws, and leaves it behind when the driver is
-    # unloaded with the core's device: 10 MiB a cycle that isn't the core's.
-    # Only whole pools of that driver are taken out of the growth.
+    # lavapipe retains a 10 MiB executable pool after each driver unload.
+    # Exclude matching pool growth from this leak check.
     first, last = rows[1], rows[-1]
     mapped = last[2] - last[4] - (first[2] - first[4])
     pools = last[6] - first[6]
