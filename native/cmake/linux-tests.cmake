@@ -144,6 +144,11 @@ if(NC_GUEST_TESTS)
            COMMAND "${Python3_EXECUTABLE}" "${NC_REPO}/tests/native/linux/kernel_boot_mem.py" "$<TARGET_FILE_DIR:xboxrun>"
                    "${CMAKE_C_COMPILER}")
   set_tests_properties(kernel-boot-mem PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
+  # File sharing checks, including renames with multiple open handles.
+  add_test(NAME kernel-share
+           COMMAND "${Python3_EXECUTABLE}" "${NC_REPO}/tests/native/linux/kernel_share.py" "$<TARGET_FILE_DIR:xboxrun>"
+                   "${CMAKE_C_COMPILER}")
+  set_tests_properties(kernel-share PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
   add_test(NAME kernel-smbus
            COMMAND "${Python3_EXECUTABLE}" "${NC_REPO}/tests/native/linux/kernel_smbus.py" "$<TARGET_FILE_DIR:xboxrun>"
                    "${CMAKE_C_COMPILER}")

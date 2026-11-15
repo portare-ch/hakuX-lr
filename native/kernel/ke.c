@@ -578,7 +578,9 @@ uint64_t nc_ke_check_waits(NcKernel *k)
     uint64_t earliest = 0;
     for (unsigned i = 0; i < NC_MAX_THREADS; i++) {
         NcThread *t = &k->threads[i];
-        if (t->state != NC_T_WAITING) {
+        /* Suspended threads must not consume signals or acquire locks.
+         * Resume checks their waits again. */
+        if (t->state != NC_T_WAITING || t->suspend) {
             continue;
         }
         int idx = satisfied(k, t, &t->wait);
@@ -1516,7 +1518,7 @@ static uint64_t KeSetEventBoostPriority(NcKernel *k, NcFrame *f, const uint32_t 
 {
     for (unsigned i = 0; i < k->threads_hi; i++) {
         NcThread *t = &k->threads[i];
-        if (t->state != NC_T_WAITING || t->wait.wait_all) {
+        if (t->state != NC_T_WAITING || t->suspend || t->wait.wait_all) {
             continue;
         }
         for (unsigned j = 0; j < t->wait.count; j++) {
@@ -1787,8 +1789,10 @@ static uint64_t KeSetBasePriorityThread(NcKernel *k, NcFrame *f, const uint32_t 
     }
     const int old = nc_ke_base_priority(k, t);
     int inc = (int32_t)a[1];
-    int p = inc >= 16 ? 15 : inc <= -16 ? 1 : BASE_PRIORITY + inc;
-    p = p < 1 ? 1 : p > 31 ? 31 : p;
+    /* Keep increment-based priorities in the variable class (1-15).
+     * Higher priorities can starve other threads, as in Angelic Concert. */
+    int p = inc >= 16 ? LOW_REALTIME_PRIORITY - 1 : inc <= -16 ? 1 : BASE_PRIORITY + inc;
+    p = p < 1 ? 1 : p >= LOW_REALTIME_PRIORITY ? LOW_REALTIME_PRIORITY - 1 : p;
     int now = p;
     if (p < LOW_REALTIME_PRIORITY && t->priority < LOW_REALTIME_PRIORITY) {
         now = t->priority - (int8_t)*kt_byte(k, t, KT_PRIORITY_DEC) + p - old;

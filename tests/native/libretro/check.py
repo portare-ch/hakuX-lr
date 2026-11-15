@@ -108,7 +108,7 @@ def cycles(command, env, n, expect=None):
                             text=True, timeout=300)
     rows = [tuple(int(v) for v in m) for m in re.findall(
         r'cycle \d+: (\d+) threads, (\d+) descriptors, VmSize (\d+) KiB, VmRSS (\d+) KiB, heap (\d+) KiB, '
-        r'malloc (-?\d+) KiB', result.stdout)]
+        r'malloc (-?\d+) KiB, code pools (\d+) KiB', result.stdout)]
     stops = result.stdout.count('the core stopped in') + result.stderr.count('the core stopped in')
     before = re.findall(r'signals caught before the core: (\w+)', result.stdout)
     caught = re.findall(r'cycle \d+: .*, signals caught (\w+)', result.stdout)
@@ -126,17 +126,23 @@ def cycles(command, env, n, expect=None):
     # first, second or third cycle as the driver's threads and glslang's
     # symbol tables happened to interleave, then stayed. What malloc holds
     # (mallinfo2, -1 without it) stands for the heap.
+    # lavapipe retains a 10 MiB executable pool after each driver unload.
+    # Exclude matching pool growth from this leak check.
     first, last = rows[1], rows[-1]
     mapped = last[2] - last[4] - (first[2] - first[4])
+    pools = last[6] - first[6]
+    if 'driver "llvmpipe"' in result.stderr and 0 < pools <= 10240 * (n - 2) and pools % 10240 == 0:
+        mapped -= pools
     held = last[5] - first[5] if first[5] >= 0 and last[5] >= 0 else 0
     if (last[0] != first[0] or last[1] != first[1] or mapped > 4096 or held > 4096
             or last[3] - first[3] > 64 * 1024):
         raise SystemExit(f'FAIL: {n} cycles of {command[2]} left something behind: {first} then {last} '
-                         '(threads, descriptors, VmSize KiB, VmRSS KiB, heap KiB, malloc KiB)')
+                         '(threads, descriptors, VmSize KiB, VmRSS KiB, heap KiB, malloc KiB, code pools KiB)')
     print(f'PASS: {n} cycles of {Path(command[2]).name} in one process, after each {last[0]} thread(s), '
           f'{last[1]} descriptor(s) and the signal handlers as before the core; mappings but the heap '
           f'{first[2] - first[4]} to {last[2] - last[4]} KiB, malloc {first[5]} to {last[5]} KiB, '
-          f'VmRSS {first[3]} to {last[3]} KiB')
+          f'VmRSS {first[3]} to {last[3]} KiB'
+          + (f" ({pools} KiB of them lavapipe's code pools, left by the driver)" if mapped != last[2] - last[4] - (first[2] - first[4]) else ''))
 
 
 def xbe_of(image):

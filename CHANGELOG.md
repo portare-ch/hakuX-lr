@@ -6,6 +6,17 @@
   `RSQRTSS`/`RSQRTPS` results at explicitly selected guest addresses
   (`NC_KVM_RSQRT_SITES`). Corrections are generated on the AMD host;
   Intel continues to execute the original instructions.
+- **Kernel and game compatibility** (#215)
+  - A file can be waited on from the moment it is opened. KOF: Maximum
+    Impact - Maniax boots instead of staying on a black screen.
+  - Hard-disk files keep the share access they were opened with; an open
+    that conflicts is refused. Mission: Impossible - Operation Surma starts
+    a new game.
+  - A thread's base priority stays within the range of a game's process,
+    and a suspended thread no longer takes the object it was waiting for.
+- **Video** (#215) — A frame the game wrote into its frame buffer itself is
+  shown as the video mode lays it out, whatever render target is still
+  bound. Aquaman: Battle for Atlantis shows its intro movies.
 
 ## linux-v0.26.0 (Linux, aarch64 and x86-64, and Android)
 

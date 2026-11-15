@@ -15,9 +15,9 @@
 #define NC_STATE_V_CACHE 1
 #define NC_STATE_MIN_CACHE 1
 #define NC_STATE_H_CACHE 0x41cfc66au
-#define NC_STATE_V_FILE 3
+#define NC_STATE_V_FILE 4
 #define NC_STATE_MIN_FILE 1
-#define NC_STATE_H_FILE 0x2c150e4cu
+#define NC_STATE_H_FILE 0x61366af7u
 #define NC_STATE_V_KERN 3
 #define NC_STATE_MIN_KERN 1
 #define NC_STATE_H_KERN 0x156d0f8bu

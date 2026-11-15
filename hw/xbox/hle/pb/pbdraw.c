@@ -365,7 +365,7 @@ static volatile int g_phase;            /* 0 none, 1 arena space, 2 ring space *
 
 /* The log lines' limits: the first few of each a boot (hle_pbd_reset) */
 static struct {
-    unsigned objs_full, past_blocks, surfaces, no_target, gamma, overlay, sprog;
+    unsigned objs_full, past_blocks, surfaces, no_target, gamma, overlay, sprog, scanned_frames;
     int64_t scan_for;                   /* the idle period logged (hle_pbd_scanout) */
 } g_lg;
 
@@ -1719,6 +1719,62 @@ bool hle_pbd_pace(void)
     return !hle_pbd_pace_reached();
 }
 
+/* Recent CRTC start addresses, recorded by hle_pb_flipped(). */
+#define SCAN_ADDRS 4u
+static uint32_t g_scan_addr[SCAN_ADDRS];
+static uint32_t g_scan_addrs;
+
+static void scan_addr_note(uint32_t pa)
+{
+    for (unsigned i = 0; i < SCAN_ADDRS; i++) {
+        if (__atomic_load_n(&g_scan_addr[i], __ATOMIC_RELAXED) == pa) {
+            return;
+        }
+    }
+    const uint32_t n = __atomic_fetch_add(&g_scan_addrs, 1, __ATOMIC_RELAXED);
+    __atomic_store_n(&g_scan_addr[n % SCAN_ADDRS], pa, __ATOMIC_RELAXED);
+}
+
+static bool scan_addr_seen(uint32_t pa)
+{
+    bool seen = false;
+    for (unsigned i = 0; i < SCAN_ADDRS; i++) {
+        seen |= pa && __atomic_load_n(&g_scan_addr[i], __ATOMIC_RELAXED) == pa;
+    }
+    return seen;
+}
+
+/* Find or create a display-sized view of a known frame buffer; return 0
+ * unless a matching object exists or the CPU wrote its memory.
+ * Aquaman decodes movies into back buffers with a 256x256 target still
+ * bound. Scanout uses the video mode's layout, not that target's size. */
+static uint32_t scanned_frame(uint32_t pa)
+{
+    uint32_t pitch, xfmt;
+    unsigned hz;
+    if (!scan_addr_seen(pa)) {
+        return 0;
+    }
+    hle_pb_display_mode_get(&pitch, &xfmt, &hz);
+    const uint32_t w = g_pd.disp_w, h = g_pd.disp_h;
+    const HleFmtInfo *fi = pitch ? hle_fmt_info(xfmt) : NULL;
+    if (!fi || !w || !h || (uint64_t)w * (fi->bpp / 8) > pitch) {
+        return 0;               /* No usable display layout. */
+    }
+    bool have = false;
+    for (unsigned i = 0; i < g_pd.nobjs && !have; i++) {
+        const PbObj *s = &g_pd.objs[i];
+        have = s->id && !s->cube && s->d.pa == pa && s->d.xfmt == xfmt && s->d.pitch == pitch && s->d.w == w &&
+               s->d.h >= h;
+    }
+    const bool cpu = hle_mem_written(pa, pitch * h);
+    const uint32_t id = have || cpu ? object(pa, xfmt, pitch, w, h) : 0;
+    if (cpu) {
+        hle_mem_mark_written(pa, pitch * h);    /* Preserve CPU writes for the swap's rt_cpu_sync(). */
+    }
+    return id;
+}
+
 /* FLIP_INCREMENT_WRITE: the frame in the colour target is done; it goes to
  * the display (D3D's vblank handler shows it there too). The display scans
  * out D3D's back buffer, whatever is bound: a target smaller than the
@@ -1745,6 +1801,17 @@ static void swap(void)
             fo = f;
             ax = g_pd.frame_aa_x;
             ay = g_pd.frame_aa_y;
+        } else {
+            const uint32_t frame = scanned_frame(fo->d.pa);
+            if (frame) {
+                if (g_lg.scanned_frames++ < 4) {
+                    hle_log("hakuX-hle-pb", "swap: nothing drawn and a %ux%u target bound over frame buffer %08x: "
+                            "shown as the video mode lays it out (first 4 logged)", fo->d.w, fo->d.h, fo->d.pa);
+                }
+                id = frame;
+                fo = obj_of(frame);
+                ax = ay = 1;
+            }
         }
     }
     coh_shown(fo);                          /* the front buffer's path keeps its memory */
@@ -2142,6 +2209,9 @@ void hle_pb_flipped(uint32_t start)
      * 9-14 ms on, and juddered). The swap that comes is marked flipped, for
      * when no flip follows it (hle_pbd_scanout). */
     const uint32_t pa = start & 0x0FFFFFFFu;
+    if (pa) {
+        scan_addr_note(pa);
+    }
     if (pa && __atomic_load_n(&g_pd.ahead_pa, __ATOMIC_ACQUIRE) == pa) {
         __atomic_store_n(&g_pd.flipped_pa, pa, __ATOMIC_RELEASE);
     }
@@ -5833,6 +5903,8 @@ void hle_pbd_reset(void)
     g_disp_moded = false;
     g_restored_until = 0;
     g_restored_display = false;
+    memset(g_scan_addr, 0, sizeof(g_scan_addr));
+    g_scan_addrs = 0;
     memset(&g_fps, 0, sizeof(g_fps));
     memset(&g_vh_prog, 0, sizeof(g_vh_prog));
     memset(&g_vh_ff, 0, sizeof(g_vh_ff));

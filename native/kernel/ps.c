@@ -667,6 +667,10 @@ static uint32_t resume(NcKernel *k, NcThread *t)
     uint32_t prev = t->suspend;
     if (t->suspend && !--t->suspend) {
         k->resched = true;
+        if (t->state == NC_T_WAITING) {
+            /* Recheck signals and deadlines after suspension. */
+            nc_ke_check_waits(k);
+        }
     }
     return prev;
 }
