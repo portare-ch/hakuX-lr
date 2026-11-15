@@ -394,17 +394,16 @@ static void test_shadow_project(void)
     HT_CHECK(n > 0 && n == strlen(buf));
     dump("psh_shadow");
     HT_CHECK(strstr(buf, "vec3 pq = nvproj(vTex0);") != NULL);
-    /* r / q itself, not nvproj's (kept within 1e7: F24's depths reach 1e30) */
+    /* Keep r/q's full range; F24 depths can exceed nvproj's 1e7 clamp. */
     HT_CHECK(strstr(buf, "float rq = abs(vTex0.w) > 1.0e-30 ? vTex0.z / vTex0.w : pq.z;") != NULL);
     HT_CHECK(strstr(buf, "float m = 16777215.0, r = clamp(rq, 0.0, m);") != NULL);
     HT_CHECK(strstr(buf, "greaterThanEqual(d, vec4(r))") != NULL);
-    /* a linear filter: four compares, weighted */
+    /* Linear filtering weights four comparisons. */
     HT_CHECK(strstr(buf, "textureGather(") != NULL);
     HT_CHECK(strstr(buf, "vec2 f = fract(uv * sz - 0.5);") != NULL);
 }
 
-/* Point filtering: the stage's one texel compared, no weighting; each stage
- * by its own filter */
+/* Stage 0 uses a point comparison while stage 1 uses linear filtering. */
 static void test_shadow_point(void)
 {
     uint32_t rs[HLE_PS_REGS] = { 0 };

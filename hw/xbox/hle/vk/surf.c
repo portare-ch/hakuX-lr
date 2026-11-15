@@ -807,8 +807,7 @@ VkImageView hle_surf_order_view(HleVkSurf *s, uint32_t ord)
     for (unsigned i = 0; i < 4; i++) {
         c[i] = k_chan[k_byte[order][i]];
         if (c[i] == VK_COMPONENT_SWIZZLE_A && hle_surf_x_alpha(s)) {
-            /* X8R8G8B8's unused byte: 0xFF, or 0 where it was rendered as Z8
-             * (HLE_DRAW_ORD_AZERO) */
+            /* X8R8G8B8's unused byte is 0 for Z8, otherwise 0xFF. */
             c[i] = ord & HLE_DRAW_ORD_AZERO ? VK_COMPONENT_SWIZZLE_ZERO : VK_COMPONENT_SWIZZLE_ONE;
         }
     }

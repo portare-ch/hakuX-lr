@@ -256,8 +256,7 @@ static void test_convert(void)
     HT_EQ_U32(conv1(HLE_XFMT_LIN_R6G5B5, 0x03E0), 0xFF00FF00u);
     HT_EQ_U32(conv1(HLE_XFMT_R6G5B5, 0x0010), 0xFF000084u);         /* U -16: 0x84 */
     HT_CHECK(!hle_tex_convert(HLE_XFMT_DXT1, "\0\0\0\0", 1, &(uint32_t){ 0 }));
-    /* the formats converted where they are sampled with a border
-     * (hle_tex_border_conv): the texel their view's mapping gives */
+    /* Border conversion must preserve each format's sampled channel values. */
     HT_EQ_U32(conv1(HLE_XFMT_X8R8G8B8, 0x00112233u), 0xFF112233u);
     HT_EQ_U32(conv1(HLE_XFMT_LIN_B8G8R8A8, 0x11223344u), 0x44332211u);  /* word B G R A */
     HT_EQ_U32(conv1(HLE_XFMT_R8G8B8A8, 0x11223344u), 0x44112233u);      /* word R G B A */
@@ -274,7 +273,7 @@ static void test_convert(void)
     HT_EQ_U32(conv1(HLE_XFMT_L16, 0x8040), 0xFFFF8040u);                /* (1, high, low, 1) */
     HT_CHECK(hle_tex_border_conv(HLE_XFMT_LIN_X8R8G8B8) && hle_tex_border_conv(HLE_XFMT_A8) &&
              hle_tex_border_conv(HLE_XFMT_R5G6B5));
-    /* four channels the view passes as they are: sampled as stored */
+    /* Formats with identity channel mapping need no border conversion. */
     HT_CHECK(!hle_tex_border_conv(HLE_XFMT_A8R8G8B8) && !hle_tex_border_conv(HLE_XFMT_LIN_A8B8G8R8) &&
              !hle_tex_border_conv(HLE_XFMT_A1R5G5B5) && !hle_tex_border_conv(HLE_XFMT_DXT1));
     /* R16B16 uses the high bytes of V and U in RGBA order (V, U, U, V). */

@@ -245,15 +245,13 @@ static bool tex_native(uint32_t fmt)
     }
 }
 
-/* A YUY2 / UYVY texture's texels converted to A8R8G8B8 into the arena as
- * object id's image (HLE_OP_TEX), sent as a linear A8R8G8B8 texture (texel
- * coordinates like the source); false if they can't be. */
+/* Convert YUY2/UYVY to a linear A8R8G8B8 texture in the upload arena.
+ * Keep the source's texel coordinates. Return false if upload fails. */
 static bool yuv_define(uint32_t id, const uint32_t h5[5], const HleResDesc *d, uint32_t lin_pitch,
                        uint32_t span)
 {
-    /* lin_pitch, span: the row pitch and the bytes read where the header's
-     * 64-byte steps can't say the pitch (hle_draw_tex_define's lin_span);
-     * 0: the header's */
+    /* Use the exact pitch and span when the header cannot encode them;
+     * zero selects the header's pitch and full row span. */
     uint32_t pitch;
     uint32_t off0 = hle_res_subresource(d, 0, 0, &pitch);
     if (lin_pitch && span) {
@@ -377,9 +375,8 @@ static bool tex_define(uint32_t id, const uint32_t h5[5], const HleResDesc *dp,
     /* a format the back end doesn't sample as stored: A8R8G8B8 as well, or
      * depth as a float (hle_tex_convert), a linear texture a linear one */
     bool conv = !p8 && !dxtd && !etc && !tex_native(d.fmt);
-    /* ... or one sampled with a border whose view would map the border
-     * colour (hle_tex_border_conv); not with a colour sign, whose channels
-     * the shader decodes as stored */
+    /* Convert border-sampled formats whose views would remap the border
+     * colour. Signed channels keep their stored representation. */
     if (border && !p8 && !vol && hle_tex_border_conv(d.fmt) && !hle_fmt_sign_xor(d.fmt, sign)) {
         conv = true;
     }
@@ -512,10 +509,8 @@ static bool tex_define(uint32_t id, const uint32_t h5[5], const HleResDesc *dp,
     return true;
 }
 
-/* A linear texture's span of guest memory at the row pitch def gives (its
- * top half, HLE_TEXDEF_PITCH_SHIFT: the NV2A's, where the header's 64-byte
- * steps can't say it): the rows before the last at that pitch, the last
- * its texels. 0: the header's pitch stands (ri's bytes). */
+/* Source span at def's exact row pitch, including only the texels in the
+ * final row. Return 0 when the header's byte count should be used. */
 static uint32_t lin_span(const HleResDesc *d, uint32_t def)
 {
     const uint32_t pitch = def >> HLE_TEXDEF_PITCH_SHIFT;
@@ -523,7 +518,7 @@ static uint32_t lin_span(const HleResDesc *d, uint32_t def)
     if (!fi || !(fi->flags & HLE_FI_LIN) || (fi->flags & HLE_FI_DXT) || !d->w || !d->h) {
         return 0;
     }
-    /* (YUY2 / UYVY: texels in pairs, an odd width's last pair whole) */
+    /* YUY2/UYVY stores pixel pairs; include the full pair for odd widths. */
     const uint32_t w = fi->flags & HLE_FI_YUV ? (d->w + 1) & ~1u : d->w;
     return pitch * (d->h - 1) + w * (fi->bpp / 8);
 }
@@ -550,12 +545,12 @@ uint32_t hle_draw_tex_define(uint32_t id, const uint32_t h5[5], const uint32_t *
     }
     const uint32_t span = lin_span(&d, sign);
     if (span) {
-        ri.bytes = span;                /* what tex_define reads, and the cache tracks */
+        ri.bytes = span;                /* Use the same span for reads and cache tracking. */
     }
     *bytes = ri.bytes;
     if (d.fmt == HLE_XFMT_YUY2 || d.fmt == HLE_XFMT_UYVY) {
         *host_bytes = d.w * d.h * 4;
-        /* movies: converted to A8R8G8B8 */
+        /* Convert movie textures to A8R8G8B8. */
         return yuv_define(id, h5, &d, span ? sign >> HLE_TEXDEF_PITCH_SHIFT : 0, span) ? id : 0;
     }
     return tex_define(id, h5, &d, &ri, pal, npal, sign, host_bytes) ? id : 0;

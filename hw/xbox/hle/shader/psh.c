@@ -367,11 +367,10 @@ static const char *k_cmp[8] = {
     "false", "a < r", "a == r", "a <= r", "a > r", "a != r", "a >= r", "true",
 };
 
-/* Shadow buffer at stage s: the stored depth compared with the r coordinate
- * (depth FUNC r, both in the format's range; PROJECT2D compares with 0),
- * the four results bilinearly weighted (percentage-closer filtering). The
- * stored depth is scaled to 0..1 but for an uploaded F24 texture's (format
- * 0), its float as it is: F24 reaches far past F16's 511.9375. */
+/* Compare stored depth with projected r using depth FUNC r; PROJECT2D uses 0.
+ * Point filtering compares one texel; linear filtering weights four results.
+ * Stored depth is normalised except for uploaded F24 textures (format 0),
+ * whose values can exceed F16's maximum of 511.9375. */
 static void shadow_sample(Buf *b, const HlePshKey *k, unsigned s, bool project3d)
 {
     char glcl[40] = "";                 /* Clamp before gathering depth. */
@@ -387,10 +386,8 @@ static void shadow_sample(Buf *b, const HlePshKey *k, unsigned s, bool project3d
         put(b, "  vec4 t%u = vec4(%s);\n", s, func ? "1.0" : "0.0");
         return;
     }
-    /* F24 compares at its precision: r's mantissa cut to 16 bits, as the
-     * depth stored (nxdk_pgraph_tests' 0.5e30 matches its texel) */
-    /* (r / q itself: nvproj keeps coordinates within 1e7, F24's depths
-     * reach 1e30 and more) */
+    /* Match F24's 16-bit mantissa. Compute r/q directly: nvproj clamps
+     * coordinates to 1e7, while F24 depths can exceed 1e30. */
     const char *r = !project3d ? "0.0" : fmt ? "clamp(rq, 0.0, m)" :
                     "uintBitsToFloat(floatBitsToUint(clamp(rq, 0.0, m)) & 0xFFFFFF80u)";
     put(b, "  vec4 t%u;\n  { uint ti = pc.tex[%u] & 0xFFFFu, si = (pc.tex[%u] >> 16) & 0xFFu;\n"
@@ -405,8 +402,7 @@ static void shadow_sample(Buf *b, const HlePshKey *k, unsigned s, bool project3d
            "    float m = %s, r = %s;\n",
         s, s, s, s, s, s, s, s, s, glcl, k_max[fmt], r);
     if ((k->shadow_point >> s) & 1) {
-        /* point filtering: the one texel's compare, no weighting
-         * (nxdk_pgraph_tests' depth formats: hard edges on the console) */
+        /* Point filtering compares one texel without weighting. */
         put(b, "    vec4 d = vec4(texture(sampler2D(uTex2D[nonuniformEXT(ti)], "
                "uSmp[nonuniformEXT(si)]), uv).r * %s);\n"
                "    t%u = vec4(float(%s(d, vec4(r)).x));\n", k_scale[fmt], s, k_op[func]);

@@ -192,8 +192,8 @@ bool hle_tex_convert(uint32_t code, const void *src, uint32_t n, void *dst)
             memcpy(o + 4 * i, &f, 4);
         }
         return true;
-    /* the formats a border colour can't meet as the view maps them
-     * (hle_tex_border_conv): the texel the view's mapping gives */
+    /* Expand formats selected by hle_tex_border_conv to their sampled RGBA
+     * values, keeping the border colour independent of channel mapping. */
     case HLE_XFMT_X8R8G8B8: case HLE_XFMT_LIN_X8R8G8B8:
         for (uint32_t i = 0; i < n; i++) {
             put32(o, i, ld32(s + 4 * i) | 0xFF000000u);
