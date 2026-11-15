@@ -245,15 +245,22 @@ static bool tex_native(uint32_t fmt)
     }
 }
 
-/* A YUY2 / UYVY texture's texels converted to A8R8G8B8 into the arena as
- * object id's image (HLE_OP_TEX), sent as a linear A8R8G8B8 texture (texel
- * coordinates like the source); false if they can't be. */
-static bool yuv_define(uint32_t id, const uint32_t h5[5], const HleResDesc *d)
+/* Convert YUY2/UYVY to a linear A8R8G8B8 texture in the upload arena.
+ * Keep the source's texel coordinates. Return false if upload fails. */
+static bool yuv_define(uint32_t id, const uint32_t h5[5], const HleResDesc *d, uint32_t lin_pitch,
+                       uint32_t span)
 {
+    /* Use the exact pitch and span when the header cannot encode them;
+     * zero selects the header's pitch and full row span. */
     uint32_t pitch;
     uint32_t off0 = hle_res_subresource(d, 0, 0, &pitch);
-    const uint8_t *src = hle_pa_ptr(hle_res_data_pa(h5[1]) + off0, pitch * d->h);
-    if (!src || d->w < 2) {
+    if (lin_pitch && span) {
+        pitch = lin_pitch;
+    } else {
+        span = pitch * d->h;
+    }
+    const uint8_t *src = d->w < 2 ? NULL : hle_pa_ptr(hle_res_data_pa(h5[1]) + off0, span);
+    if (!src) {
         return false;
     }
     uint8_t *dst;
@@ -319,6 +326,9 @@ static bool tex_define(uint32_t id, const uint32_t h5[5], const HleResDesc *dp,
     const HleResInfo ri = *rip;
     const HleFmtInfo *fi = hle_fmt_info(d.fmt);
     bool p8 = d.fmt == HLE_XFMT_P8;
+    const bool border = sign & HLE_TEXDEF_BORDER;
+    const uint32_t lin_pitch = sign >> HLE_TEXDEF_PITCH_SHIFT;
+    sign &= HLE_TEXDEF_SIGN;
     if (!fi || (fi->flags & HLE_FI_YUV) || (p8 && !npal)) {
         /* YUV textures other than yuv_define's, P8 without a palette */
         for (unsigned i = 0; i < 8; i++) {
@@ -365,6 +375,11 @@ static bool tex_define(uint32_t id, const uint32_t h5[5], const HleResDesc *dp,
     /* a format the back end doesn't sample as stored: A8R8G8B8 as well, or
      * depth as a float (hle_tex_convert), a linear texture a linear one */
     bool conv = !p8 && !dxtd && !etc && !tex_native(d.fmt);
+    /* Convert border-sampled formats whose views would remap the border
+     * colour. Signed channels keep their stored representation. */
+    if (border && !p8 && !vol && hle_tex_border_conv(d.fmt) && !hle_fmt_sign_xor(d.fmt, sign)) {
+        conv = true;
+    }
     uint32_t oxfmt = p8 || dxtd ? HLE_XFMT_A8R8G8B8 : etc ? etc_fmt :
                      conv ? hle_tex_conv_xfmt(d.fmt) : d.fmt;
     const HleFmtInfo *ofi = hle_fmt_info(oxfmt);
@@ -429,7 +444,7 @@ static bool tex_define(uint32_t id, const uint32_t h5[5], const HleResDesc *dp,
             } else if (fi->flags & HLE_FI_DXT) {
                 memcpy(dst + pos, s, n);
             } else {
-                uint32_t sp = pitch ? pitch : orow;
+                uint32_t sp = lin_pitch ? lin_pitch : pitch ? pitch : orow;
                 for (uint32_t y = 0; y < h; y++) {
                     memcpy(out + y * orow, s + y * sp, orow);
                 }
@@ -494,11 +509,29 @@ static bool tex_define(uint32_t id, const uint32_t h5[5], const HleResDesc *dp,
     return true;
 }
 
-uint32_t hle_draw_tex_bytes(const uint32_t h5[5])
+/* Source span at def's exact row pitch, including only the texels in the
+ * final row. Return 0 when the header's byte count should be used. */
+static uint32_t lin_span(const HleResDesc *d, uint32_t def)
+{
+    const uint32_t pitch = def >> HLE_TEXDEF_PITCH_SHIFT;
+    const HleFmtInfo *fi = pitch ? hle_fmt_info(d->fmt) : NULL;
+    if (!fi || !(fi->flags & HLE_FI_LIN) || (fi->flags & HLE_FI_DXT) || !d->w || !d->h) {
+        return 0;
+    }
+    /* YUY2/UYVY stores pixel pairs; include the full pair for odd widths. */
+    const uint32_t w = fi->flags & HLE_FI_YUV ? (d->w + 1) & ~1u : d->w;
+    return pitch * (d->h - 1) + w * (fi->bpp / 8);
+}
+
+uint32_t hle_draw_tex_bytes(const uint32_t h5[5], uint32_t def)
 {
     HleResDesc d;
     HleResInfo ri;
-    return hle_res_from_header(h5[0], h5[3], h5[4], &d) && hle_res_info(&d, &ri) ? ri.bytes : 0;
+    if (!hle_res_from_header(h5[0], h5[3], h5[4], &d) || !hle_res_info(&d, &ri)) {
+        return 0;
+    }
+    const uint32_t span = lin_span(&d, def);
+    return span ? span : ri.bytes;
 }
 
 uint32_t hle_draw_tex_define(uint32_t id, const uint32_t h5[5], const uint32_t *pal, uint32_t npal,
@@ -510,10 +543,15 @@ uint32_t hle_draw_tex_define(uint32_t id, const uint32_t h5[5], const uint32_t *
     if (!tex_desc(h5, &d, &ri)) {
         return 0;
     }
+    const uint32_t span = lin_span(&d, sign);
+    if (span) {
+        ri.bytes = span;                /* Use the same span for reads and cache tracking. */
+    }
     *bytes = ri.bytes;
     if (d.fmt == HLE_XFMT_YUY2 || d.fmt == HLE_XFMT_UYVY) {
         *host_bytes = d.w * d.h * 4;
-        return yuv_define(id, h5, &d) ? id : 0;        /* movies: converted to A8R8G8B8 */
+        /* Convert movie textures to A8R8G8B8. */
+        return yuv_define(id, h5, &d, span ? sign >> HLE_TEXDEF_PITCH_SHIFT : 0, span) ? id : 0;
     }
     return tex_define(id, h5, &d, &ri, pal, npal, sign, host_bytes) ? id : 0;
 }

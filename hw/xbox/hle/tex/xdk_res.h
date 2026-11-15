@@ -49,6 +49,10 @@ uint32_t hle_fmt_sign_rgba(uint32_t code, uint32_t sign);
  * F24 supplies bits 30 through 7 of the float. Return false for formats
  * with no conversion. */
 bool hle_tex_convert(uint32_t code, const void *src, uint32_t n, void *dst);
+/* Return true when border sampling needs A8R8G8B8 conversion. The NV2A's
+ * border colour is always A8R8G8B8; conversion prevents the image view's
+ * channel mapping from changing that colour. */
+bool hle_tex_border_conv(uint32_t code);
 /* The format code converted texels are sent as: A8R8G8B8, or F24S8 for depth,
  * linear when code is (a linear texture's coordinates are in texels). */
 uint32_t hle_tex_conv_xfmt(uint32_t code);

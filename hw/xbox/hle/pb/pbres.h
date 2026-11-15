@@ -12,14 +12,21 @@
 uint32_t hle_draw_arena_alloc(uint32_t len, uint8_t **ptr);
 /* The same, 16 bytes aligned instead of 256 (a draw's indices). */
 uint32_t hle_draw_arena_alloc16(uint32_t len, uint8_t **ptr);
-/* The texels of header words h5 (P8: palette pal, npal entries) defined as
- * object id's image (HLE_OP_TEX), the colour-sign channels of sign
- * offset binary (tex/xdk_res.h); id, or 0 if they can't be. *bytes: the
- * span of guest memory they came from. *host_bytes: the image's texels as uploaded (DXT decoded: more). */
+/* Define texture id from header h5; P8 uses npal entries from pal.
+ * sign's low bits select channels stored as offset binary (tex/xdk_res.h).
+ * HLE_TEXDEF_BORDER requests conversion when channel mapping would alter
+ * the border colour. Bits 16-31 hold an exact linear row pitch in bytes;
+ * zero uses the header's pitch.
+ * Return id on success, 0 on failure. bytes is the source memory span;
+ * host_bytes is the uploaded image size, including any decompression. */
+#define HLE_TEXDEF_SIGN         0xFu
+#define HLE_TEXDEF_BORDER       0x100u
+#define HLE_TEXDEF_PITCH_SHIFT  16
 uint32_t hle_draw_tex_define(uint32_t id, const uint32_t h5[5], const uint32_t *pal, uint32_t npal,
                              uint32_t sign, uint32_t *bytes, uint32_t *host_bytes);
-/* The span of guest memory header words h5's texels take (0: not a texture) */
-uint32_t hle_draw_tex_bytes(const uint32_t h5[5]);
+/* Return the texture's source memory span, or 0 for an invalid header.
+ * def uses the same pitch encoding as hle_draw_tex_define's sign argument. */
+uint32_t hle_draw_tex_bytes(const uint32_t h5[5], uint32_t def);
 /* The video overlay's surface (header words h5, YUY2 / UYVY) as B8G8R8A8 in
  * the arena, converted with color: its offset, HLE_ARENA_FULL = none. */
 struct HlePvideoColor;

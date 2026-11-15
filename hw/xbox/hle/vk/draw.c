@@ -2971,7 +2971,7 @@ static uint32_t stage_slot(const HleCmdDraw *c, unsigned st, uint32_t rt_id, uin
         *flags |= ((c->tex_lin >> st & 1) ? 1u << st : 0) | (rt->scale > 1 ? 256u << st : 0);
         return slot;
     } else if (ts && (ts->general || ts->layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)) {
-        slot = surf_slot(ts, c->tex_ord >> 2 * st & 3);  /* RT as texture (identity) */
+        slot = surf_slot(ts, c->tex_ord >> 4 * st & 15);  /* RT as texture (identity) */
         /* linear format: texel coords; bit 8 + st for an image at the
          * resolution scale, not one at 1x (a small target, surf.c
          * surf_scale: its texels are its own, the scale mustn't divide
@@ -4336,6 +4336,14 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
             /* D3DCMP_* (0x200 + n), or SET_SHADOW_COMPARE_FUNC's word as
              * pushed: the NV2A keeps its low 3 bits */
             k.pk.shadow |= (lit ? 7 : f & 7) << 4;
+            /* Select point comparison per stage when both filters are point;
+             * other stages use four weighted comparisons. */
+            for (unsigned st = 0; st < 4; st++) {
+                if (((k.pk.shadow >> st) & 1) && (s->tss[st][TSS_MAGFILTER] & 7) == 1 &&
+                    (s->tss[st][TSS_MINFILTER] & 7) == 1) {
+                    k.pk.shadow_point |= 1u << st;
+                }
+            }
             static unsigned s_logged;
             if (s_logged < 4) {
                 s_logged++;
