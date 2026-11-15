@@ -50,6 +50,7 @@
 #define NV_PMC_BOOT_0       0x000000u
 #define NV_PMC_INTR_0       0x000100u
 #define NV_PMC_INTR_EN_0    0x000140u
+#define NV_PFIFO_INTR_0     0x002100u
 #define NV_PFIFO_RUNOUT_STATUS 0x002400u
 #define NV_PFIFO_CACHE1_STATUS 0x003214u
 #define NV_PFIFO_CACHE1_DMA_PUSH 0x003220u
@@ -208,6 +209,10 @@ static void census_log(void)
         nc_log("hakuX-native-nv2a", "registers/s:%s", buf);
     }
 }
+
+/* CACHE1_STATUS reads left that still say "not empty" after the pusher was
+ * read busy (nv2a_read_reg) */
+static unsigned g_cache1_busy_reads;
 
 /* The FIFO in push-buffer mode: empty when the HLE has consumed to PUT. */
 static bool fifo_empty(void)
@@ -410,11 +415,31 @@ static uint64_t nv2a_read_reg(uint32_t off, unsigned size)
         uint32_t v;
         switch (word) {
         case NV_PFIFO_RUNOUT_STATUS:
-        case NV_PFIFO_CACHE1_STATUS:
             v = fifo_empty() ? PFIFO_LOW_MARK : 0;
             break;
+        case NV_PFIFO_CACHE1_STATUS:
+            /* Empty once the pusher was seen idle, or a few reads after it
+             * was seen busy: on the NV2A the cache drains after the pusher
+             * stops, here both end with the same store. pbkit's FIFO handler,
+             * having read the pusher busy and the cache not empty, loops
+             * while the cache reads empty; with the two turning idle between
+             * those reads it never left (nxdk_pgraph_tests' first Image blit
+             * test, some runs). */
+            if (fifo_empty() && g_cache1_busy_reads) {
+                g_cache1_busy_reads--;
+                v = 0;
+            } else {
+                v = fifo_empty() ? PFIFO_LOW_MARK : 0;
+            }
+            break;
         case NV_PFIFO_CACHE1_DMA_PUSH:
-            v = fifo_empty() ? ld(word) & ~PFIFO_DMA_BUSY : ld(word) | PFIFO_DMA_BUSY;
+            if (fifo_empty()) {
+                g_cache1_busy_reads = 0;
+                v = ld(word) & ~PFIFO_DMA_BUSY;
+            } else {
+                g_cache1_busy_reads = 8;
+                v = ld(word) | PFIFO_DMA_BUSY;
+            }
             break;
         case NV_USER_DMA_PUT:
         case NV_USER_DMA_GET:
@@ -530,6 +555,16 @@ static void nv2a_write(void *opaque, uint32_t off, uint64_t value, unsigned size
         hle_host_gpu_trace(HLE_GTR_FIFO, (uint32_t)value);
         __atomic_store_n(reg(off), (uint32_t)value, __ATOMIC_RELEASE);
         hle_pb_kick();                              /* access back: the decoder goes on */
+        return;
+    }
+    if (size == 4 && off == NV_PFIFO_INTR_0) {
+        /* PFIFO's pending interrupts: a 1 written clears its bit, as on the
+         * NV2A. Stored as written, a handler's acknowledge (pbkit writes
+         * ACQUIRE_TIMEOUT_RESET, 0x01000000) left that bit pending for good,
+         * and pbkit's FIFO handler, once it found the FIFO busy, waited for
+         * the register to read 0 forever (nxdk_pgraph_tests' first Image blit
+         * test hung there in most runs). Nothing here raises a PFIFO interrupt. */
+        __atomic_fetch_and(reg(off), ~(uint32_t)value, __ATOMIC_ACQ_REL);
         return;
     }
     if (g_pbmode && size == 4 && (off == NV_PGRAPH_INTR || off == NV_PGRAPH_INTR_EN)) {

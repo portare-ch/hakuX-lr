@@ -176,6 +176,10 @@ if(NC_GUEST_TESTS)
            COMMAND "${Python3_EXECUTABLE}" "${NC_REPO}/tests/native/linux/kernel_smbus.py" "$<TARGET_FILE_DIR:xboxrun>"
                    "${CMAKE_C_COMPILER}")
   set_tests_properties(kernel-smbus PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
+  # A PFIFO interrupt acknowledged (its bit written) reads 0 afterwards.
+  add_test(NAME nv2a-pfifo-intr
+           COMMAND "${Python3_EXECUTABLE}" "${NC_REPO}/tests/native/linux/nv2a_pfifo_intr.py" "$<TARGET_FILE_DIR:xboxrun>")
+  set_tests_properties(nv2a-pfifo-intr PROPERTIES TIMEOUT 60)
 endif()
 if(TARGET hakux_libretro)
   # The APU made again in one process (a relaunch), its EP's samples through
