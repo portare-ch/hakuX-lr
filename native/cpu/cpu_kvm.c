@@ -774,7 +774,8 @@ void nc_context_init(NcCpu *cpu, NcCpuContext *c, uint32_t eip, uint32_t esp)
     k->rip = eip;
     k->regs[NC_ESP] = esp;
     k->eflags = 0x202u;
-    k->fpu.fcw = 0x037F;
+    k->fpu.fcw = 0x027F;            /* a new thread's x87 control word: 53-bit precision, as the
+                                     * console's kernel sets its save area (KeInitializeThread) */
     k->fpu.mxcsr = 0x1F80;
 }
 
