@@ -29,6 +29,9 @@
   projective texture stage reads the active target at a different size.
   This fixes washed-out menus in Prince of Persia: Warrior Within and
   The Two Thrones.
+- **Freed render targets** (#114) — Stop writing a render target back
+  once the game has freed its memory. This fixes the crash when
+  SX Superstar reaches its main menu.
 
 ## linux-v0.26.0 (Linux, aarch64 and x86-64, and Android)
 

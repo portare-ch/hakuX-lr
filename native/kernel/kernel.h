@@ -335,6 +335,9 @@ void nc_mm_usage(NcKernel *k, uint32_t *contig_bytes, uint32_t *virtual_bytes, u
 /* End of the contiguous run containing pa. Adjacent allocations from
  * the same caller may extend the run up to limit. Returns 0 if absent. */
 uint32_t nc_mm_contig_end(uint32_t pa, uint32_t limit);
+/* A page of [pa, limit) was freed from a contiguous block and no block
+ * has taken it since. */
+bool nc_mm_contig_freed(uint32_t pa, uint32_t limit);
 /* mm.c: frees the contiguous blocks that code in [lo, hi) allocated (a mod's
  * buffers once its code is gone); returns their bytes. */
 uint32_t nc_mm_contig_free_callers(NcKernel *k, uint32_t lo, uint32_t hi);

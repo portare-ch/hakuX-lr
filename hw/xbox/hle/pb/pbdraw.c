@@ -803,14 +803,17 @@ static PbObj *evict_slot(void)
     return i < 0 ? NULL : &g_pd.objs[i];
 }
 
-/* A linear object that reaches past the title's block of memory: one made
- * before the memory was freed and given to a smaller block. It is never
- * reused or written back (its write-back would cover memory not the
- * target's), and goes once nothing holds it (object). */
+/* A linear object whose memory is no longer the title's block: freed and
+ * given to a smaller block, or freed and not allocated again. It is never
+ * reused or written back, and goes once nothing holds it (object). */
 static bool past_block(const HleSurfDesc *d)
 {
-    const uint32_t end = d->pitch ? hle_host_contig_end(d->pa, (uint32_t)MIN((uint64_t)d->pa + (uint64_t)d->pitch * d->h, UINT32_MAX)) : 0;
-    return end && (uint64_t)d->pitch * d->h > end - d->pa;
+    if (!d->pitch) {
+        return false;
+    }
+    const uint32_t limit = (uint32_t)MIN((uint64_t)d->pa + (uint64_t)d->pitch * d->h, UINT32_MAX);
+    const uint32_t end = hle_host_contig_end(d->pa, limit);
+    return (end && (uint64_t)d->pitch * d->h > end - d->pa) || hle_host_contig_freed(d->pa, limit);
 }
 
 static bool d16_padded(const HleSurfDesc *d)
