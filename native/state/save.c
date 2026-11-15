@@ -264,7 +264,15 @@ const char *nc_state_save(const char *path)
 
 /* ------------------------------------------------------------------ load */
 
-/* The header against the running game, then every section's version. */
+static const char *ram_mismatch(uint32_t state, uint32_t console)
+{
+    static char why[128];
+    snprintf(why, sizeof(why), "the state uses %u MiB of RAM, but the console is set to %u MiB",
+             state >> 20, console >> 20);
+    return why;
+}
+
+/* Check the savestate's identity against the running game. */
 static const char *identity_check(const NcStateInfo *info, const NcStateInfo *want)
 {
     static char why[256];
@@ -276,7 +284,7 @@ static const char *identity_check(const NcStateInfo *info, const NcStateInfo *wa
         return "the state was made with another copy of this game's disc";
     }
     if (info->ram_size != want->ram_size) {
-        return "the state's console has another memory size";
+        return ram_mismatch(info->ram_size, want->ram_size);
     }
     return NULL;
 }
@@ -296,7 +304,7 @@ const char *nc_state_compat(const char *path)
             return "the state was made with another game's disc (or another copy of it)";
         }
         if (info.ram_size != want.ram_size) {
-            return "the state's console has another memory size";
+            return ram_mismatch(info.ram_size, want.ram_size);
         }
     }
     return nc_state_verify(path, &info, k_sections, NSECTIONS);

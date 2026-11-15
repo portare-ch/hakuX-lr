@@ -103,6 +103,7 @@ bool nc_vm_init(NcVm *vm, uint32_t ram_size)
         }
     }
     vm->ram_size = ram_size;
+    vm->gpu_size = ram_size < NC_GPU_REACH ? ram_size : NC_GPU_REACH;
     vm->page_used = calloc(ram_size / NC_PAGE, 1);
     vm->pte = nc_big_alloc(PTE_BYTES);
     vm->vprot = nc_big_alloc(VPROT_BYTES);
@@ -122,10 +123,9 @@ bool nc_vm_init(NcVm *vm, uint32_t ram_size)
     }
     vm->phys = phys;
 
-    /* The contiguous window: VA 0x80000000 + pa for all of RAM. And the
-     * NV2A's BAR1 aperture at 0xF0000000, another view of RAM, where D3D's
-     * tiled locks point (D3DLOCK_TILED). */
-    if (!nc_vm_map(vm, NC_CONTIG_WINDOW, 0, ram_size) || !nc_vm_map(vm, NC_GPU_WINDOW, 0, ram_size)) {
+    /* Map all RAM at 0x80000000 and GPU-visible RAM at 0xF0000000.
+     * D3DLOCK_TILED uses the latter BAR1 aperture. */
+    if (!nc_vm_map(vm, NC_CONTIG_WINDOW, 0, ram_size) || !nc_vm_map(vm, NC_GPU_WINDOW, 0, vm->gpu_size)) {
         return false;
     }
     vm->ram = vm->base + NC_CONTIG_WINDOW;
@@ -302,7 +302,10 @@ static void prot_views(NcVm *vm, uint32_t page, uint32_t n, int prot)
 {
     pthread_mutex_lock(&g_prot_lock);
     view_prot(vm, NC_CONTIG_WINDOW + page * NC_PAGE, n * NC_PAGE, prot);
-    view_prot(vm, NC_GPU_WINDOW + page * NC_PAGE, n * NC_PAGE, prot);
+    const uint32_t gpu_pages = vm->gpu_size / NC_PAGE;
+    if (page < gpu_pages) {
+        view_prot(vm, NC_GPU_WINDOW + page * NC_PAGE, (n < gpu_pages - page ? n : gpu_pages - page) * NC_PAGE, prot);
+    }
     for (unsigned a = 0; a < g_nalias; a++) {
         const Alias *al = &g_alias[a];
         const uint64_t end = (uint64_t)(page + n) * NC_PAGE, aend = (uint64_t)al->pa + al->len;
@@ -539,7 +542,12 @@ void nc_vm_free_phys(NcVm *vm, uint32_t pa, uint32_t len)
                 }
             }
         }
-        memset(vm->page_used + pa / NC_PAGE, 0, pages);
+        /* Keep freed pages above the game's RAM limit out of the allocator,
+         * including GPU instance pages released after boot. */
+        const uint32_t first = pa / NC_PAGE, top = vm->title_limit ? vm->title_limit / NC_PAGE : UINT32_MAX;
+        if (first < top) {
+            memset(vm->page_used + first, 0, pages < top - first ? pages : top - first);
+        }
         memset(vm->pin + pa / NC_PAGE, 0, pages);
         if (nc_vm_free_hook) {
             nc_vm_free_hook(pa, pages * NC_PAGE);

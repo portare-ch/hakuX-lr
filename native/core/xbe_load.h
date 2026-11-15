@@ -18,6 +18,8 @@
 extern "C" {
 #endif
 
+#define NC_XBE_INIT_LIMIT_64MB 0x4u /* limit the game to 64 MiB */
+
 typedef struct NcXbe {
     HleXbeInfo info;
     NcDiscFile file;       /* on the disc (fd < 0); its size either way */
@@ -25,12 +27,14 @@ typedef struct NcXbe {
     uint32_t tls_dir;      /* VA of the IMAGE_TLS_DIRECTORY, or 0 */
     uint32_t stack_commit; /* PE stack commit size from the header */
     unsigned thunks;       /* kernel imports resolved */
+    uint32_t init_flags;   /* XBE initialization flags (NC_XBE_INIT_*) */
 } NcXbe;
 
-/* path: on the disc ("\default.xbe", or "\Device\CdRom0\..."), or on a hard
- * disk partition ("\Device\Harddisk0\Partition2\xboxdash.xbe": the host
- * file, kept open for XeLoadSection). */
-bool nc_xbe_load(NcVm *vm, const NcDisc *disc, const char *path, const NcKernel *k, NcXbe *out);
+/* Clear the 64 MiB limit on future XBE loads when extra RAM is available.
+ * Disabled by default; game files are not modified. */
+void nc_xbe_set_unlimit(bool on);
+/* Load from disc or a hard disk partition; keep host files open for XeLoadSection. */
+bool nc_xbe_load(NcVm *vm, const NcDisc *disc, const char *path, NcKernel *k, NcXbe *out);
 /* len bytes at off of the booted XBE's host file (fd, nc_xbe_load's), the
  * mods' patches of it over them ([$u\...]: a title update's). */
 bool nc_xbe_host_read(int fd, uint64_t off, void *buf, size_t len);

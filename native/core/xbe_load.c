@@ -65,7 +65,14 @@ static bool xbe_read(const NcDisc *disc, const NcXbe *x, uint64_t off, void *buf
     return nc_disc_read(disc, &x->file, off, buf, len);
 }
 
-bool nc_xbe_load(NcVm *vm, const NcDisc *disc, const char *path, const NcKernel *k, NcXbe *out)
+static bool g_unlimit;
+
+void nc_xbe_set_unlimit(bool on)
+{
+    g_unlimit = on;
+}
+
+bool nc_xbe_load(NcVm *vm, const NcDisc *disc, const char *path, NcKernel *k, NcXbe *out)
 {
     memset(out, 0, sizeof(*out));
     out->fd = -1;
@@ -90,6 +97,17 @@ bool nc_xbe_load(NcVm *vm, const NcDisc *disc, const char *path, const NcKernel 
     if (out->file.size < sizeof(probe) || !xbe_read(disc, out, 0, probe, sizeof(probe))) {
         return false;
     }
+    out->init_flags = nc_rd32(probe + 0x124);
+    /* Optionally clear the game's 64 MiB limit when extra RAM is available. */
+    const bool unlimit = g_unlimit && (out->init_flags & NC_XBE_INIT_LIMIT_64MB) && vm->ram_size > NC_RAM_RETAIL;
+    if (unlimit) {
+        out->init_flags &= ~NC_XBE_INIT_LIMIT_64MB;
+        nc_log("hakuX-native", "xbe: the 64 MiB limit (initialization flag 4) patched out: the title has the "
+               "console's %u MiB", vm->ram_size >> 20);
+    }
+    if (out->init_flags & NC_XBE_INIT_LIMIT_64MB) {
+        nc_mm_limit_title(k);       /* Reserve excess RAM before loading the image. */
+    }
     const uint32_t base = nc_rd32(probe + 0x104);
     const uint32_t hdr_size = nc_rd32(probe + 0x108);
     const uint32_t image_size = nc_rd32(probe + 0x10C);
@@ -105,6 +123,9 @@ bool nc_xbe_load(NcVm *vm, const NcDisc *disc, const char *path, const NcKernel 
     uint8_t *hdr = nc_vm_host(vm, base);
     if (!xbe_read(disc, out, 0, hdr, hdr_size)) {
         return false;
+    }
+    if (unlimit) {
+        nc_wr32(hdr + 0x124, out->init_flags);  /* Keep the guest-visible header consistent. */
     }
     int rc = hle_xbe_parse(hdr, hdr_size, &out->info);
     if (rc != HLE_XBE_OK) {

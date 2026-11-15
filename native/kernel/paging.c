@@ -80,7 +80,7 @@ static bool core_window(const NcKernel *k, unsigned i)
 {
     const uint32_t va = i << 22;
     return (va >= NC_CONTIG_WINDOW && va - NC_CONTIG_WINDOW < k->vm->ram_size) ||
-           (va >= NC_GPU_WINDOW && va - NC_GPU_WINDOW < k->vm->ram_size);
+           (va >= NC_GPU_WINDOW && va - NC_GPU_WINDOW < k->vm->gpu_size);
 }
 
 /* A page table no longer applied: its mapped entries go. */

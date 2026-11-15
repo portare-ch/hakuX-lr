@@ -149,6 +149,11 @@ if(NC_GUEST_TESTS)
            COMMAND "${Python3_EXECUTABLE}" "${NC_REPO}/tests/native/linux/kernel_share.py" "$<TARGET_FILE_DIR:xboxrun>"
                    "${CMAKE_C_COMPILER}")
   set_tests_properties(kernel-share PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
+  # 64, 128 and 256 MiB of console memory, and a title limited to 64 MiB.
+  add_test(NAME kernel-ram
+           COMMAND "${Python3_EXECUTABLE}" "${NC_REPO}/tests/native/linux/kernel_ram.py" "$<TARGET_FILE_DIR:xboxrun>"
+                   "${CMAKE_C_COMPILER}")
+  set_tests_properties(kernel-ram PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
   add_test(NAME kernel-smbus
            COMMAND "${Python3_EXECUTABLE}" "${NC_REPO}/tests/native/linux/kernel_smbus.py" "$<TARGET_FILE_DIR:xboxrun>"
                    "${CMAKE_C_COMPILER}")
