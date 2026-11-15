@@ -3230,7 +3230,8 @@ static bool tex_other_size(const PbObj *o, const HleFmtInfo *fi)
 /* A linear texture over a swizzled target must read its swizzled bytes
  * from memory. Targets drawn through object_view's linear view already
  * have the expected texel order (Fable's silhouette). */
-static bool tex_other_layout(const PbObj *o, const HleFmtInfo *fi, uint32_t fmt)
+static bool tex_other_layout(const PbObj *o, const HleFmtInfo *fi, uint32_t fmt, uint32_t pitch,
+                             uint32_t rect)
 {
     const HleFmtInfo *oi = fi ? hle_fmt_info(o->d.xfmt) : NULL;
     if (!oi || (oi->flags & HLE_FI_DEPTH) || (fi->flags & (HLE_FI_DEPTH | HLE_FI_DXT)) || o->cube ||
@@ -3238,7 +3239,16 @@ static bool tex_other_layout(const PbObj *o, const HleFmtInfo *fi, uint32_t fmt)
         return false;
     }
     if (fi->flags & HLE_FI_LIN) {
-        return oi->bpp == fi->bpp && !o->d.pitch && o->swz_bound;
+        if (!o->d.pitch) {
+            return oi->bpp == fi->bpp && o->swz_bound;
+        }
+        /* A small linear target of another pitch, or smaller than the
+         * texture: its rows are not the texture's (a 256 x 256 texture, 1024
+         * bytes a row, over an old 32 x 64 target of 128). Small: one written
+         * back at its unbind, whose memory holds its pixels; a larger one is
+         * the coherence's to judge (tex_target). */
+        return oi->bpp == fi->bpp && pitch && (uint64_t)o->d.pitch * o->d.h <= WRITEBACK_MAX &&
+               (o->d.pitch != pitch || o->d.w < (rect >> 16) || o->d.h < (rect & 0xFFFF));
     }
     /* A swizzled 2D texture of another size than the target at its address
      * reads memory too (a 256 x 256 texture over an old 32 x 64 target). */
@@ -3264,7 +3274,9 @@ static void tex_land(void)
         const uint32_t pa = (dma_base(hle_kdma_texture(fmt)) + R(NV097_SET_TEXTURE_OFFSET + b)) & 0x0FFFFFFFu;
         const HleFmtInfo *fi = hle_fmt_info(HLE_FMT_CODE(fmt));
         PbObj *o = fi && !(fi->flags & (HLE_FI_DEPTH | HLE_FI_DXT)) ? tex_target(pa, false) : NULL;
-        if (o && (tex_other_size(o, fi) || tex_other_layout(o, fi, fmt))) {
+        if (o && (tex_other_size(o, fi) ||
+                  tex_other_layout(o, fi, fmt, R(NV097_SET_TEXTURE_CONTROL1 + b) >> 16,
+                                   R(NV097_SET_TEXTURE_IMAGE_RECT + b)))) {
             src[s] = o;
         }
     }

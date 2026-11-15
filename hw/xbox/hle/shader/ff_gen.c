@@ -597,9 +597,13 @@ size_t hle_ff_ps_glsl(const HleFfPsKey *k, char *buf, size_t cap)
     /* a NaN factor is 1, unfogged; the distance signed, as D3D's fog modes
      * (psh.c) */
     case 1:  put(&b, "  float fogf = isnan(vFog) ? 1.0 : clamp(vFog, 0.0, 1.0);\n"); break;
-    case 2:  put(&b, "  float fogf = clamp(exp(-vFog * pc.fog.z), 0.0, 1.0);\n"); break;
-    case 3:  put(&b, "  float fd = vFog * pc.fog.z;\n"
-                     "  float fogf = clamp(exp(-fd * fd), 0.0, 1.0);\n"); break;
+    /* the exponential modes as psh.c's: x = pc.fog.x + pc.fog.y d */
+    case 2:  put(&b, "  float fx = pc.fog.x + pc.fog.y * vFog;\n"
+                     "  if (isnan(fx) || isinf(fx)) fx = 1.0e30;\n"
+                     "  float fogf = clamp(exp2(16.0 * fx), 0.0, 1.0);\n"); break;
+    case 3:  put(&b, "  float fx = pc.fog.x + pc.fog.y * vFog;\n"
+                     "  if (isnan(fx) || isinf(fx)) fx = 1.0e30;\n"
+                     "  float fogf = clamp(exp2(-32.0 * fx * fx), 0.0, 1.0);\n"); break;
     default: put(&b, "  float fogf = clamp((pc.fog.y - vFog) / "
                      "(pc.fog.y - pc.fog.x), 0.0, 1.0);\n"); break;
     }
