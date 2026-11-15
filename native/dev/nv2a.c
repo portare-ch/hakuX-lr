@@ -210,6 +210,10 @@ static void census_log(void)
     }
 }
 
+/* CACHE1_STATUS reads left that still say "not empty" after the pusher was
+ * read busy (nv2a_read_reg) */
+static unsigned g_cache1_busy_reads;
+
 /* The FIFO in push-buffer mode: empty when the HLE has consumed to PUT. */
 static bool fifo_empty(void)
 {
@@ -411,11 +415,31 @@ static uint64_t nv2a_read_reg(uint32_t off, unsigned size)
         uint32_t v;
         switch (word) {
         case NV_PFIFO_RUNOUT_STATUS:
-        case NV_PFIFO_CACHE1_STATUS:
             v = fifo_empty() ? PFIFO_LOW_MARK : 0;
             break;
+        case NV_PFIFO_CACHE1_STATUS:
+            /* Empty once the pusher was seen idle, or a few reads after it
+             * was seen busy: on the NV2A the cache drains after the pusher
+             * stops, here both end with the same store. pbkit's FIFO handler,
+             * having read the pusher busy and the cache not empty, loops
+             * while the cache reads empty; with the two turning idle between
+             * those reads it never left (nxdk_pgraph_tests' first Image blit
+             * test, some runs). */
+            if (fifo_empty() && g_cache1_busy_reads) {
+                g_cache1_busy_reads--;
+                v = 0;
+            } else {
+                v = fifo_empty() ? PFIFO_LOW_MARK : 0;
+            }
+            break;
         case NV_PFIFO_CACHE1_DMA_PUSH:
-            v = fifo_empty() ? ld(word) & ~PFIFO_DMA_BUSY : ld(word) | PFIFO_DMA_BUSY;
+            if (fifo_empty()) {
+                g_cache1_busy_reads = 0;
+                v = ld(word) & ~PFIFO_DMA_BUSY;
+            } else {
+                g_cache1_busy_reads = 8;
+                v = ld(word) | PFIFO_DMA_BUSY;
+            }
             break;
         case NV_USER_DMA_PUT:
         case NV_USER_DMA_GET:
