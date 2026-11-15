@@ -56,8 +56,7 @@ bool nc_xbe_host_read(int fd, uint64_t off, void *buf, size_t len)
     return true;
 }
 
-/* The XBE's bytes: from its host file, or the disc. */
-static bool xbe_read(const NcDisc *disc, const NcXbe *x, uint64_t off, void *buf, size_t len)
+bool nc_xbe_read(const NcDisc *disc, const NcXbe *x, uint64_t off, void *buf, size_t len)
 {
     if (x->fd >= 0) {
         return nc_xbe_host_read(x->fd, off, buf, len);
@@ -94,7 +93,7 @@ bool nc_xbe_load(NcVm *vm, const NcDisc *disc, const char *path, NcKernel *k, Nc
     }
 
     uint8_t probe[0x180];
-    if (out->file.size < sizeof(probe) || !xbe_read(disc, out, 0, probe, sizeof(probe))) {
+    if (out->file.size < sizeof(probe) || !nc_xbe_read(disc, out, 0, probe, sizeof(probe))) {
         return false;
     }
     out->init_flags = nc_rd32(probe + 0x124);
@@ -121,7 +120,7 @@ bool nc_xbe_load(NcVm *vm, const NcDisc *disc, const char *path, NcKernel *k, Nc
         return false;
     }
     uint8_t *hdr = nc_vm_host(vm, base);
-    if (!xbe_read(disc, out, 0, hdr, hdr_size)) {
+    if (!nc_xbe_read(disc, out, 0, hdr, hdr_size)) {
         return false;
     }
     if (unlimit) {
@@ -151,7 +150,7 @@ bool nc_xbe_load(NcVm *vm, const NcDisc *disc, const char *path, NcKernel *k, Nc
             return false;
         }
         uint32_t n = s->raw_size < s->vsize ? s->raw_size : s->vsize;
-        if (n && !xbe_read(disc, out, s->raw_off, nc_vm_host(vm, s->va), n)) {
+        if (n && !nc_xbe_read(disc, out, s->raw_off, nc_vm_host(vm, s->va), n)) {
             nc_log("hakuX-native", "xbe: read of section %s failed", s->name);
             return false;
         }

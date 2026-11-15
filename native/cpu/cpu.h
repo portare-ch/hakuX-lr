@@ -130,6 +130,9 @@ typedef struct NcCpuConfig {
     /* The hooked addresses, all of them (hook_query answers one at a time,
      * which a backend that never translates can't use). */
     unsigned (*hook_list)(void *opaque, uint32_t *eips, unsigned max);
+    /* The title's XBE file, whole (malloc'd, the caller's to free; NULL:
+     * none): an AMD host looks for its RSQRT instructions (optional). */
+    uint8_t *(*title_image)(void *opaque, uint32_t *size);
 } NcCpuConfig;
 
 /* Creates the JIT and its one host thread state: flat segments, FS at

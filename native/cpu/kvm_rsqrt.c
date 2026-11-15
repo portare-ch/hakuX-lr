@@ -124,47 +124,7 @@ uint32_t nc_rsqrt_intel(uint32_t bits)
     return (exponent << 23) | ((uint32_t)intel_rsqrt_mantissa[(bits >> 13) & 2047u] << 11);
 }
 
-bool nc_rsqrt_init(NcRsqrt *r)
+const uint16_t *nc_rsqrt_intel_mantissa(void)
 {
-    memset(r, 0, sizeof(*r));
-    r->index = malloc(1u << 21);
-    if (!r->index) {
-        return false;
-    }
-    /* O'Callahan's upper-21-bit XOR scheme, generated on the actual host.
-     * Check both ends of each bucket, including NaN/Inf boundaries. The
-     * exhaustive standalone check covers the intervening inputs as well.
-     * https://robert.ocallahan.org/2021/09/emulating-amd-rsqrtss-etc-on-intel.html */
-    for (uint32_t i = 0; i < (1u << 21); i++) {
-        const uint32_t lo = i << 11, hi = lo | 2047u;
-        const uint32_t delta = nc_rsqrt_native(lo) ^ nc_rsqrt_intel(lo);
-        if ((nc_rsqrt_native(hi) ^ nc_rsqrt_intel(hi)) != delta) {
-            nc_rsqrt_destroy(r);
-            return false;
-        }
-        unsigned j = 0;
-        while (j < r->ndelta && r->delta[j] != delta) {
-            j++;
-        }
-        if (j == r->ndelta) {
-            if (j == 256) {
-                nc_rsqrt_destroy(r);
-                return false;
-            }
-            r->delta[r->ndelta++] = delta;
-        }
-        r->index[i] = (uint8_t)j;
-    }
-    return true;
-}
-
-void nc_rsqrt_destroy(NcRsqrt *r)
-{
-    free(r->index);
-    memset(r, 0, sizeof(*r));
-}
-
-uint32_t nc_rsqrt_correct(const NcRsqrt *r, uint32_t bits)
-{
-    return nc_rsqrt_native(bits) ^ r->delta[r->index[bits >> 11]];
+    return intel_rsqrt_mantissa;
 }
