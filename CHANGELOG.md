@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## linux-v0.27.0 (Linux, aarch64 and x86-64, and Android)
+
 - **AMD CPUs** — On an AMD host the KVM backend gives `RSQRTSS` and
   `RSQRTPS` the Intel results the Xbox's CPU returns. It is on by default:
   the booted XBE is scanned for the instructions and each one is corrected,
