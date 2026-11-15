@@ -73,6 +73,7 @@ typedef struct HlePshKey {
      * range the r coordinate is in: 1 D24 (2^24 - 1), 2 D16, 3 F16's float
      * (511.9375), 0 F24's (an uploaded F24 texture, stored as its float). */
     uint8_t shadow;
+#define HLE_PSH_SHADOW_NEAREST 0x80u     /* shadow: its stages are point filtered, one compare */
     uint8_t shadow_fmt;
     uint8_t out_bgra;                   /* 8-bit (B8) target: it stores blue */
     uint8_t alpha_kill;                 /* stages with D3DTSS_ALPHAKILL (bits 0-3) */

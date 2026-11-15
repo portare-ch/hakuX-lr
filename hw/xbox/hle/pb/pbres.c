@@ -319,6 +319,9 @@ static bool tex_define(uint32_t id, const uint32_t h5[5], const HleResDesc *dp,
     const HleResInfo ri = *rip;
     const HleFmtInfo *fi = hle_fmt_info(d.fmt);
     bool p8 = d.fmt == HLE_XFMT_P8;
+    const bool border = sign & HLE_TEXDEF_BORDER;
+    const uint32_t lin_pitch = sign >> HLE_TEXDEF_PITCH_SHIFT;
+    sign &= HLE_TEXDEF_SIGN;
     if (!fi || (fi->flags & HLE_FI_YUV) || (p8 && !npal)) {
         /* YUV textures other than yuv_define's, P8 without a palette */
         for (unsigned i = 0; i < 8; i++) {
@@ -365,6 +368,12 @@ static bool tex_define(uint32_t id, const uint32_t h5[5], const HleResDesc *dp,
     /* a format the back end doesn't sample as stored: A8R8G8B8 as well, or
      * depth as a float (hle_tex_convert), a linear texture a linear one */
     bool conv = !p8 && !dxtd && !etc && !tex_native(d.fmt);
+    /* ... or one sampled with a border whose view would map the border
+     * colour (hle_tex_border_conv); not with a colour sign, whose channels
+     * the shader decodes as stored */
+    if (border && !p8 && !vol && hle_tex_border_conv(d.fmt) && !hle_fmt_sign_xor(d.fmt, sign)) {
+        conv = true;
+    }
     uint32_t oxfmt = p8 || dxtd ? HLE_XFMT_A8R8G8B8 : etc ? etc_fmt :
                      conv ? hle_tex_conv_xfmt(d.fmt) : d.fmt;
     const HleFmtInfo *ofi = hle_fmt_info(oxfmt);
@@ -429,7 +438,7 @@ static bool tex_define(uint32_t id, const uint32_t h5[5], const HleResDesc *dp,
             } else if (fi->flags & HLE_FI_DXT) {
                 memcpy(dst + pos, s, n);
             } else {
-                uint32_t sp = pitch ? pitch : orow;
+                uint32_t sp = lin_pitch ? lin_pitch : pitch ? pitch : orow;
                 for (uint32_t y = 0; y < h; y++) {
                     memcpy(out + y * orow, s + y * sp, orow);
                 }

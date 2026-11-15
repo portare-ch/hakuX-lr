@@ -313,7 +313,7 @@ typedef struct HleCmdDraw {
                                    against one HLE could not prepare */
     uint32_t tex_lin;           /* bit s: the stage's format is linear, sampled by texel
                                    coordinates (whatever the layout of a target there) */
-    uint32_t tex_ord;           /* bits 2s..2s+1: the stage's 32-bit byte order where it
+    uint32_t tex_ord;           /* bits 4s..4s+3: the stage's 32-bit byte order where it
                                    samples an A8R8G8B8 target of another (HLE_DRAW_ORD_*) */
     uint32_t tex_rect[HLE_TSS_STAGES];  /* a linear stage's own size, its IMAGE_RECT
                                            (width 28:16, height 12:0); 0 for the others */
@@ -348,6 +348,8 @@ typedef struct HleCmdDraw {
 #define HLE_DRAW_ORD_ABGR 1u        /* A8B8G8R8: bytes R G B A */
 #define HLE_DRAW_ORD_BGRA 2u        /* B8G8R8A8: bytes A R G B */
 #define HLE_DRAW_ORD_RGBA 3u        /* R8G8B8A8: bytes A B G R */
+#define HLE_DRAW_ORD_AZERO 4u       /* with one of them: the target is X8R8G8B8 rendered
+                                       as Z8, its unused byte (the texture's alpha) 0 */
 
 /* Vertex program microcode: nslots 4-dword instructions follow. */
 typedef struct HleCmdVsh {

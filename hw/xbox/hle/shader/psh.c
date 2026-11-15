@@ -389,23 +389,35 @@ static void shadow_sample(Buf *b, const HlePshKey *k, unsigned s, bool project3d
     }
     /* F24 compares at its precision: r's mantissa cut to 16 bits, as the
      * depth stored (nxdk_pgraph_tests' 0.5e30 matches its texel) */
-    const char *r = !project3d ? "0.0" : fmt ? "clamp(pq.z, 0.0, m)" :
-                    "uintBitsToFloat(floatBitsToUint(clamp(pq.z, 0.0, m)) & 0xFFFFFF80u)";
+    /* (r / q itself: nvproj keeps coordinates within 1e7, F24's depths
+     * reach 1e30 and more) */
+    const char *r = !project3d ? "0.0" : fmt ? "clamp(rq, 0.0, m)" :
+                    "uintBitsToFloat(floatBitsToUint(clamp(rq, 0.0, m)) & 0xFFFFFF80u)";
     put(b, "  vec4 t%u;\n  { uint ti = pc.tex[%u] & 0xFFFFu, si = (pc.tex[%u] >> 16) & 0xFFu;\n"
            "    vec3 pq = nvproj(vTex%u);\n"
+           "    float rq = abs(vTex%u.w) > 1.0e-30 ? vTex%u.z / vTex%u.w : pq.z;\n"
            "    vec2 uv = pq.xy;\n"
            "    vec2 sz = vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[0]), 0));\n"
            "    if ((pc.flags & (1u << %uu)) != 0u)\n"
            /* a scaled surface's texel coordinates: sz / the resolution scale */
            "      uv /= sz / ((pc.flags & (256u << %uu)) != 0u ? float(pc.flags >> 24) : 1.0);\n"
            "%s"
-           "    float m = %s, r = %s;\n"
-           "    vec4 d = textureGather(sampler2D(uTex2D[nonuniformEXT(ti)], "
-           "uSmp[nonuniformEXT(si)]), uv) * %s;\n"
-           "    vec4 p = vec4(%s(d, vec4(r)));\n"
-           "    vec2 f = fract(uv * sz - 0.5);\n"
-           "    t%u = vec4(mix(mix(p.w, p.z, f.x), mix(p.x, p.y, f.x), f.y));\n",
-        s, s, s, s, s, s, glcl, k_max[fmt], r, k_scale[fmt], k_op[func], s);
+           "    float m = %s, r = %s;\n",
+        s, s, s, s, s, s, s, s, s, glcl, k_max[fmt], r);
+    if (k->shadow & HLE_PSH_SHADOW_NEAREST) {
+        /* point filtering: the one texel's compare, no weighting
+         * (nxdk_pgraph_tests' depth formats: hard edges on the console) */
+        put(b, "    vec4 d = vec4(texture(sampler2D(uTex2D[nonuniformEXT(ti)], "
+               "uSmp[nonuniformEXT(si)]), uv).r * %s);\n"
+               "    t%u = vec4(float(%s(d, vec4(r)).x));\n", k_scale[fmt], s, k_op[func]);
+    } else {
+        put(b, "    vec4 d = textureGather(sampler2D(uTex2D[nonuniformEXT(ti)], "
+               "uSmp[nonuniformEXT(si)]), uv) * %s;\n"
+               "    vec4 p = vec4(%s(d, vec4(r)));\n"
+               "    vec2 f = fract(uv * sz - 0.5);\n"
+               "    t%u = vec4(mix(mix(p.w, p.z, f.x), mix(p.x, p.y, f.x), f.y));\n",
+            k_scale[fmt], k_op[func], s);
+    }
     if (k->debug == 17) {               /* debug view 17: stored depth, r, result */
         put(b, "    shdbg = vec4(d.x / m, r / m, t%u.x, 1.0);\n", s);
     }

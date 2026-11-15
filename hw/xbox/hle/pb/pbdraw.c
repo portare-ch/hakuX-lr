@@ -79,6 +79,7 @@
 #define NV097_SET_TEXTURE_OFFSET          0x1B00u   /* stage s at + 64 s */
 #define NV097_SET_TEXTURE_FORMAT          0x1B04u   /* a D3D header's Format */
 #define NV097_SET_TEXTURE_CONTROL0        0x1B0Cu   /* bit 30: enable */
+#define NV097_SET_TEXTURE_ADDRESS         0x1B08u   /* u 3:0, v 11:8, p 19:16: 4 border */
 #define NV097_SET_TEXTURE_CONTROL1        0x1B10u   /* linear pitch 31:16 */
 #define NV097_SET_TEXTURE_FILTER          0x1B14u   /* colour sign 31:28 (A R G B) */
 #define NV097_SET_TEXTURE_IMAGE_RECT      0x1B1Cu   /* linear width 31:16, height 15:0 */
@@ -133,6 +134,13 @@ typedef struct PbObj {
     HleSurfDesc d;
     uint64_t bound;                     /* when last bound as a target (g_pd.binds) */
     bool cube;                          /* a cube texture's image, its faces' targets views */
+    uint64_t z_wsum;                    /* depth: its whole pages' write counts when it was
+                                           last unbound (z_mem_sum); z_wsum_ok once taken */
+    bool z_wsum_ok;
+    bool swz_bound;                     /* a swizzled target last bound as one (not through
+                                           a linear view of its memory, object_view) */
+    bool x_zero;                        /* last bound as X8R8G8B8_Z8R8G8B8: the byte its
+                                           format leaves unused is 0 in memory (O8: 0xFF) */
     uint64_t written;                   /* g_pd.wseq at its last draw, clear or copy */
     uint64_t wb_written;                /* last image update copied back to guest memory */
     uint64_t edge_hash[2];              /* its bytes on its first and last page (rt_cpu_sync) */
@@ -168,7 +176,8 @@ typedef struct PbObj {
  * defined again when its memory was written (checked once a frame) or its
  * palette changed. */
 typedef struct PbTex {
-    uint32_t key[5];                    /* offset, format, size, palette, sign XOR; id 0:
+    uint32_t key[6];                    /* offset, format, size, palette, sign XOR, the
+                                           definition's other bits (HLE_TEXDEF_*); id 0:
                                            free */
     uint32_t id;
     uint32_t pa, bytes;                 /* the memory its texels came from */
@@ -1285,6 +1294,7 @@ static void mode_sync(void)
     g_pd.disp_h = h;
 }
 
+static uint64_t z_mem_sum(const PbObj *o);
 static void coh_drawn(PbObj *o);
 static void coh_first_write(PbObj *o, bool full);
 static bool coh_managed(const PbObj *o, uint32_t *len);
@@ -1361,6 +1371,19 @@ static void sync_rt(void)
     for (unsigned i = 0; i < g_pd.nobjs; i++) {
         if (g_pd.objs[i].id == rt || g_pd.objs[i].id == ds) {
             g_pd.objs[i].bound = g_pd.binds;
+        }
+        if (g_pd.objs[i].id == rt) {
+            g_pd.objs[i].swz_bound = swz;
+        }
+        if (g_pd.objs[i].id == rt && (cf == 4 || cf == 5)) {
+            g_pd.objs[i].x_zero = cf == 4;
+        }
+    }
+    if (ds != g_pd.ds && g_pd.ds) {
+        PbObj *was = obj_of(g_pd.ds);       /* unbound: what its memory's pages count now */
+        if (was) {
+            was->z_wsum = z_mem_sum(was);
+            was->z_wsum_ok = true;
         }
     }
     if (ds && ds != g_pd.ds) {
@@ -3155,6 +3178,31 @@ static uint32_t target_part(uint32_t pa, uint32_t code, const HleFmtInfo *fi, ui
     return dst->id;
 }
 
+/* The writes counted on a depth target's whole pages (its first and last
+ * page, where it shares them, left out: a neighbour's writes count there). */
+static uint64_t z_mem_sum(const PbObj *o)
+{
+    const HleFmtInfo *fi = hle_fmt_info(o->d.xfmt);
+    const uint32_t len = !fi ? 0 : o->d.pitch ? o->d.pitch * o->d.h : o->d.w * o->d.h * (fi->bpp / 8);
+    if (!len) {
+        return 0;
+    }
+    uint32_t w0, wl;
+    const uint64_t sum = hle_mem_wseq_sum(o->d.pa, len, &w0, &wl);
+    const uint32_t end = o->d.pa + len, p0 = o->d.pa & ~4095u, pl = (end - 1) & ~4095u;
+    const bool e0 = (o->d.pa & 4095) || (p0 == pl && (end & 4095)), el = pl != p0 && (end & 4095);
+    return sum - (e0 ? w0 : 0) - (el ? wl : 0);
+}
+
+/* A depth target no longer bound whose memory was written since: the
+ * title's data now (nxdk_pgraph_tests' depth-format textures, generated on
+ * the CPU in memory an earlier suite rendered depth into: they sampled that
+ * suite's depth image, a rectangle for the rings). */
+static bool z_mem_newer(const PbObj *o)
+{
+    return o->id != g_pd.ds && o->z_wsum_ok && z_mem_sum(o) != o->z_wsum;
+}
+
 /* The target a texture over pa samples: of the texture's kind, colour or
  * depth, the one bound last; not a colour target whose memory is newer than
  * its image (coh_mem_newer: a copy into it, its twin's image landed there,
@@ -3167,7 +3215,7 @@ static PbObj *tex_target(uint32_t pa, bool want_depth)
         PbObj *o = &g_pd.objs[i];
         const HleFmtInfo *oi = o->d.pa == pa && !o->cube ? hle_fmt_info(o->d.xfmt) : NULL;
         if (oi && !!(oi->flags & HLE_FI_DEPTH) == want_depth && (!best || o->bound > best->bound) &&
-            (want_depth || !coh_mem_newer(o))) {
+            (want_depth ? !z_mem_newer(o) : !coh_mem_newer(o))) {
             best = o;
         }
     }
@@ -3184,8 +3232,24 @@ static bool tex_other_size(const PbObj *o, const HleFmtInfo *fi)
            oi->bpp != fi->bpp && o->d.pitch && !past_block(&o->d);
 }
 
+/* A swizzled colour target, drawn into as one, under a linear texture of
+ * its texel size: the texture's rows are the target's texels in swizzled
+ * order, whatever their sizes (nxdk_pgraph_tests' Surface pitch: a 64 x 64
+ * swizzled target's 4096 texels are the first 32 rows of the 128 x 128
+ * linear texture over its memory, the rows below what that memory held). Not
+ * one drawn through a linear view of its memory (object_view: Fable's
+ * silhouette), which a linear texture reads as drawn. */
+static bool tex_other_layout(const PbObj *o, const HleFmtInfo *fi)
+{
+    const HleFmtInfo *oi = fi ? hle_fmt_info(o->d.xfmt) : NULL;
+    return oi && !(oi->flags & HLE_FI_DEPTH) && (fi->flags & HLE_FI_LIN) &&
+           !(fi->flags & (HLE_FI_DEPTH | HLE_FI_DXT)) && oi->bpp == fi->bpp && !o->d.pitch &&
+           o->swz_bound && !o->cube && !o->d.parent;
+}
+
 /* Before a draw allocates its data (a wait completes the submission they
- * would be tagged with), land colour targets sampled at another texel size.
+ * would be tagged with), land colour targets sampled at another texel size or
+ * in another texel order.
  * Pick all the sources before any landing can change the memory's writer.
  * Each stage keeps its landing even if a later upload changes the target. */
 static void tex_land(void)
@@ -3201,7 +3265,7 @@ static void tex_land(void)
         const uint32_t pa = (dma_base(hle_kdma_texture(fmt)) + R(NV097_SET_TEXTURE_OFFSET + b)) & 0x0FFFFFFFu;
         const HleFmtInfo *fi = hle_fmt_info(HLE_FMT_CODE(fmt));
         PbObj *o = fi && !(fi->flags & (HLE_FI_DEPTH | HLE_FI_DXT)) ? tex_target(pa, false) : NULL;
-        if (o && tex_other_size(o, fi)) {
+        if (o && (tex_other_size(o, fi) || tex_other_layout(o, fi))) {
             src[s] = o;
         }
     }
@@ -3210,18 +3274,31 @@ static void tex_land(void)
         if (!o) {
             continue;
         }
-        rt_cpu_sync(o->id);
-        if (!o->fb_wb_v || o->fb_wb_w != o->written) {
-            o->fb_wb_v = writeback_ex(o->id, true);
-            o->fb_wb_w = o->written;
-        }
-        if (o->fb_wb_v > hle_tl_completed()) {
-            coh_wait(o->fb_wb_v);
-            coh_adopt();
+        uint64_t lv = 0;
+        if (!o->d.pitch) {
+            /* a swizzled one: its image into its memory (nothing to land
+             * where the two match, or the memory is the newer) */
+            const uint64_t v = coh_land(o);
+            if (v > hle_tl_completed()) {
+                coh_wait(v);
+                coh_adopt();
+            }
+            lv = v ? v : o->land_last ? o->land_last : 1;
+        } else {
+            rt_cpu_sync(o->id);
+            if (!o->fb_wb_v || o->fb_wb_w != o->written) {
+                o->fb_wb_v = writeback_ex(o->id, true);
+                o->fb_wb_w = o->written;
+            }
+            if (o->fb_wb_v > hle_tl_completed()) {
+                coh_wait(o->fb_wb_v);
+                coh_adopt();
+            }
+            lv = o->fb_wb_v;
         }
         for (unsigned t = s; t < ARRAY_SIZE(src); t++) {
             if (src[t] == o) {
-                g_pd.tex_landing[t] = o->fb_wb_v;
+                g_pd.tex_landing[t] = lv;
                 src[t] = NULL;
             }
         }
@@ -3314,7 +3391,24 @@ static uint32_t texture(unsigned s, bool *unset, bool *lin)
      * object apart from the texture read unsigned */
     const uint32_t sign = R(NV097_SET_TEXTURE_FILTER + b) >> 28;
     const uint32_t sxor = hle_fmt_sign_xor(code, sign);
-    uint32_t key[5] = { off, fmt, size, pal_key, sxor };
+    /* sampled with a border (address mode 4 on an axis): its border colour
+     * is the register's whatever the format, so a format whose view maps its
+     * channels is converted (hle_tex_border_conv); and a linear texture's
+     * pitch where the header's 64-byte steps can't say it (the Texture border
+     * color test's 8 x 8 textures: 32 bytes a row and less) */
+    const uint32_t addr = R(NV097_SET_TEXTURE_ADDRESS + b);
+    uint32_t def = 0;
+    if (((addr & 0xF) == 4 || ((addr >> 8) & 0xF) == 4 || ((addr >> 16) & 0xF) == 4) &&
+        hle_tex_border_conv(code) && !sxor) {
+        def |= HLE_TEXDEF_BORDER;
+    }
+    if (*lin) {
+        const uint32_t pitch = R(NV097_SET_TEXTURE_CONTROL1 + b) >> 16;
+        if (pitch && (pitch < 64 || pitch % 64)) {
+            def |= pitch << HLE_TEXDEF_PITCH_SHIFT;
+        }
+    }
+    uint32_t key[6] = { off, fmt, size, pal_key, sxor, def };
     uint32_t h = hash32(key, sizeof(key)) % TEX_SLOTS;
     PbTex *t = &g_pd.tex[h];
     while (t->id && memcmp(t->key, key, sizeof(key))) {
@@ -3390,7 +3484,7 @@ static uint32_t texture(unsigned s, bool *unset, bool *lin)
         const uint32_t h5[5] = { HLE_COMMON_TYPE_TEXTURE | 1, off, 0, fmt, size };
         uint32_t bytes = 0, host_bytes = 0;
         coh_pend_wait(pa, hle_draw_tex_bytes(h5));  /* a copy queued into its texels lands first */
-        t->ok = hle_draw_tex_define(t->id, h5, pal, npal, sxor ? sign : 0, &bytes, &host_bytes) != 0;
+        t->ok = hle_draw_tex_define(t->id, h5, pal, npal, (sxor ? sign : 0) | def, &bytes, &host_bytes) != 0;
         if (t->ok) {                    /* failed: the back end keeps the image it had */
             g_pd.tex_bytes -= t->host_bytes;
             g_pd.tex_bytes += host_bytes;
@@ -3436,8 +3530,12 @@ static uint32_t tex_order(unsigned s, uint32_t id)
         return 0;
     }
     switch (o->d.xfmt) {
-    case HLE_XFMT_A8R8G8B8: case HLE_XFMT_X8R8G8B8:
-    case HLE_XFMT_LIN_A8R8G8B8: case HLE_XFMT_LIN_X8R8G8B8:
+    case HLE_XFMT_X8R8G8B8: case HLE_XFMT_LIN_X8R8G8B8:
+        /* the texture's alpha is the byte the target's format leaves unused:
+         * 0 where it was rendered as Z8, 0xFF as O8 (the Clear tests' surface
+         * formats, sampled as A8B8G8R8 and blended by that alpha) */
+        return ord | (o->x_zero ? HLE_DRAW_ORD_AZERO : 0);
+    case HLE_XFMT_A8R8G8B8: case HLE_XFMT_LIN_A8R8G8B8:
         return ord;
     default:
         return 0;
@@ -3862,7 +3960,7 @@ static void emit(HleCmdDraw *d)
         d->tex_lin |= (uint32_t)lin << s;
         /* per draw: the state cache isn't rebuilt when only a texture changes */
         d->tex_rect[s] = lin ? R(NV097_SET_TEXTURE_IMAGE_RECT + 64 * s) : 0;
-        d->tex_ord |= tex_order(s, d->tex[s]) << 2 * s;
+        d->tex_ord |= tex_order(s, d->tex[s]) << 4 * s;
     }
     state();
     uint32_t zf = (R(NV097_SET_SURFACE_FORMAT) >> 4) & 0xF;

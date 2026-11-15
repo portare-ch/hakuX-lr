@@ -792,7 +792,8 @@ VkImageView hle_surf_order_view(HleVkSurf *s, uint32_t ord)
     static const VkComponentSwizzle k_chan[4] = {   /* byte -> the image's channel */
         VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_G, VK_COMPONENT_SWIZZLE_R,
         VK_COMPONENT_SWIZZLE_A };
-    if (!ord || ord > HLE_DRAW_ORD_RGBA || s->d.parent || !s->img || s->fmt != VK_FORMAT_B8G8R8A8_UNORM ||
+    const uint32_t order = ord & 3;
+    if (!order || s->d.parent || !s->img || s->fmt != VK_FORMAT_B8G8R8A8_UNORM ||
         !(s->aspect & VK_IMAGE_ASPECT_COLOR_BIT)) {
         return VK_NULL_HANDLE;
     }
@@ -804,9 +805,11 @@ VkImageView hle_surf_order_view(HleVkSurf *s, uint32_t ord)
     s->oview = VK_NULL_HANDLE;
     VkComponentSwizzle c[4];
     for (unsigned i = 0; i < 4; i++) {
-        c[i] = k_chan[k_byte[ord][i]];
+        c[i] = k_chan[k_byte[order][i]];
         if (c[i] == VK_COMPONENT_SWIZZLE_A && hle_surf_x_alpha(s)) {
-            c[i] = VK_COMPONENT_SWIZZLE_ONE;    /* X8R8G8B8: alpha 1, as its own view */
+            /* X8R8G8B8's unused byte: 0xFF, or 0 where it was rendered as Z8
+             * (HLE_DRAW_ORD_AZERO) */
+            c[i] = ord & HLE_DRAW_ORD_AZERO ? VK_COMPONENT_SWIZZLE_ZERO : VK_COMPONENT_SWIZZLE_ONE;
         }
     }
     VkImageViewCreateInfo vci = {

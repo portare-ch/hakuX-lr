@@ -192,6 +192,97 @@ bool hle_tex_convert(uint32_t code, const void *src, uint32_t n, void *dst)
             memcpy(o + 4 * i, &f, 4);
         }
         return true;
+    /* the formats a border colour can't meet as the view maps them
+     * (hle_tex_border_conv): the texel the view's mapping gives */
+    case HLE_XFMT_X8R8G8B8: case HLE_XFMT_LIN_X8R8G8B8:
+        for (uint32_t i = 0; i < n; i++) {
+            put32(o, i, ld32(s + 4 * i) | 0xFF000000u);
+        }
+        return true;
+    case HLE_XFMT_B8G8R8A8: case HLE_XFMT_LIN_B8G8R8A8:
+        for (uint32_t i = 0; i < n; i++) {
+            uint32_t v = ld32(s + 4 * i);
+            put32(o, i, (v & 0xFF) << 24 | (v >> 8 & 0xFF) << 16 | (v >> 16 & 0xFF) << 8 | v >> 24);
+        }
+        return true;
+    case HLE_XFMT_R8G8B8A8: case HLE_XFMT_LIN_R8G8B8A8:
+        for (uint32_t i = 0; i < n; i++) {
+            uint32_t v = ld32(s + 4 * i);
+            put32(o, i, (v & 0xFF) << 24 | v >> 8);
+        }
+        return true;
+    case HLE_XFMT_R5G6B5: case HLE_XFMT_LIN_R5G6B5:
+        for (uint32_t i = 0; i < n; i++) {
+            uint32_t v = ld16(s + 2 * i);
+            put32(o, i, 0xFFu << 24 | bits8(v >> 11, 5) << 16 | bits8(v >> 5 & 63, 6) << 8 |
+                        bits8(v & 31, 5));
+        }
+        return true;
+    case HLE_XFMT_X1R5G5B5: case HLE_XFMT_LIN_X1R5G5B5:
+        for (uint32_t i = 0; i < n; i++) {
+            uint32_t v = ld16(s + 2 * i);
+            put32(o, i, 0xFFu << 24 | bits8(v >> 10 & 31, 5) << 16 | bits8(v >> 5 & 31, 5) << 8 |
+                        bits8(v & 31, 5));
+        }
+        return true;
+    case HLE_XFMT_L8: case HLE_XFMT_LIN_L8:
+        for (uint32_t i = 0; i < n; i++) {
+            put32(o, i, 0xFFu << 24 | s[i] * 0x010101u);
+        }
+        return true;
+    case HLE_XFMT_AL8: case HLE_XFMT_LIN_AL8:
+        for (uint32_t i = 0; i < n; i++) {
+            put32(o, i, s[i] * 0x01010101u);
+        }
+        return true;
+    case HLE_XFMT_A8: case HLE_XFMT_LIN_A8:
+        for (uint32_t i = 0; i < n; i++) {
+            put32(o, i, (uint32_t)s[i] << 24 | 0xFFFFFFu);
+        }
+        return true;
+    case HLE_XFMT_A8L8: case HLE_XFMT_LIN_A8L8:
+        for (uint32_t i = 0; i < n; i++) {
+            put32(o, i, (uint32_t)s[2 * i + 1] << 24 | s[2 * i] * 0x010101u);
+        }
+        return true;
+    case HLE_XFMT_G8B8: case HLE_XFMT_LIN_G8B8:         /* (low, high, low, high) */
+        for (uint32_t i = 0; i < n; i++) {
+            uint32_t lo = s[2 * i], hi = s[2 * i + 1];
+            put32(o, i, hi << 24 | lo << 16 | hi << 8 | lo);
+        }
+        return true;
+    case HLE_XFMT_R8B8: case HLE_XFMT_LIN_R8B8:         /* (high, low, low, high) */
+        for (uint32_t i = 0; i < n; i++) {
+            uint32_t lo = s[2 * i], hi = s[2 * i + 1];
+            put32(o, i, hi << 24 | hi << 16 | lo << 8 | lo);
+        }
+        return true;
+    case HLE_XFMT_L16: case HLE_XFMT_LIN_L16:           /* (1, high, low, 1) */
+        for (uint32_t i = 0; i < n; i++) {
+            put32(o, i, 0xFFFF0000u | (uint32_t)s[2 * i + 1] << 8 | s[2 * i]);
+        }
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool hle_tex_border_conv(uint32_t code)
+{
+    switch (code) {
+    case HLE_XFMT_X8R8G8B8: case HLE_XFMT_LIN_X8R8G8B8:
+    case HLE_XFMT_B8G8R8A8: case HLE_XFMT_LIN_B8G8R8A8:
+    case HLE_XFMT_R8G8B8A8: case HLE_XFMT_LIN_R8G8B8A8:
+    case HLE_XFMT_R5G6B5: case HLE_XFMT_LIN_R5G6B5:
+    case HLE_XFMT_X1R5G5B5: case HLE_XFMT_LIN_X1R5G5B5:
+    case HLE_XFMT_L8: case HLE_XFMT_LIN_L8:
+    case HLE_XFMT_AL8: case HLE_XFMT_LIN_AL8:
+    case HLE_XFMT_A8: case HLE_XFMT_LIN_A8:
+    case HLE_XFMT_A8L8: case HLE_XFMT_LIN_A8L8:
+    case HLE_XFMT_G8B8: case HLE_XFMT_LIN_G8B8:
+    case HLE_XFMT_R8B8: case HLE_XFMT_LIN_R8B8:
+    case HLE_XFMT_L16: case HLE_XFMT_LIN_L16:
+        return true;
     default:
         return false;
     }

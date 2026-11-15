@@ -16,6 +16,13 @@ uint32_t hle_draw_arena_alloc16(uint32_t len, uint8_t **ptr);
  * object id's image (HLE_OP_TEX), the colour-sign channels of sign
  * offset binary (tex/xdk_res.h); id, or 0 if they can't be. *bytes: the
  * span of guest memory they came from. *host_bytes: the image's texels as uploaded (DXT decoded: more). */
+/* sign's other bits: HLE_TEXDEF_BORDER, the texture is sampled with a
+ * border, so a format of hle_tex_border_conv is converted to A8R8G8B8; and
+ * in the top half a linear texture's row pitch in bytes where the header's
+ * 64-byte steps can't say it (the NV2A takes any: 0 for the header's). */
+#define HLE_TEXDEF_SIGN         0xFu
+#define HLE_TEXDEF_BORDER       0x100u
+#define HLE_TEXDEF_PITCH_SHIFT  16
 uint32_t hle_draw_tex_define(uint32_t id, const uint32_t h5[5], const uint32_t *pal, uint32_t npal,
                              uint32_t sign, uint32_t *bytes, uint32_t *host_bytes);
 /* The span of guest memory header words h5's texels take (0: not a texture) */
