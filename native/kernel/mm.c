@@ -52,9 +52,12 @@ typedef struct Contig {
 } Contig;
 
 static Contig g_contig[MAX_CONTIG];
+/* Track freed contiguous pages until reallocation so stale render targets
+ * cannot write over memory the game has reused. */
+static uint8_t g_contig_freed[NC_RAM_MAX / NC_PAGE];
 static unsigned g_ncontig;
-/* Held for each change to g_contig and g_ncontig, and by nc_mm_contig_end,
- * which the decode thread calls: the guest's thread reads them without it. */
+/* Protect contiguous allocations and freed-page tracking across the guest
+ * and GPU decoder threads. */
 static pthread_mutex_t g_contig_mu = PTHREAD_MUTEX_INITIALIZER;
 static uint32_t g_gpu_instance_end;
 
@@ -808,9 +811,21 @@ static uint32_t contig_alloc(NcKernel *k, uint32_t size, uint32_t lo, uint32_t h
     }
     const uint32_t va = NC_CONTIG_WINDOW | pa;
     pthread_mutex_lock(&g_contig_mu);
+    memset(g_contig_freed + pa / NC_PAGE, 0, (size + slack) / NC_PAGE);
     g_contig[g_ncontig++] = (Contig){va, size, ra, slack, protect};
     pthread_mutex_unlock(&g_contig_mu);
     return va;
+}
+
+bool nc_mm_contig_freed(uint32_t pa, uint32_t limit)
+{
+    bool freed = false;
+    pthread_mutex_lock(&g_contig_mu);
+    for (uint32_t p = pa / NC_PAGE; !freed && p < NC_RAM_MAX / NC_PAGE && (uint64_t)p * NC_PAGE < limit; p++) {
+        freed = g_contig_freed[p];
+    }
+    pthread_mutex_unlock(&g_contig_mu);
+    return freed;
 }
 
 static Contig *contig_at(uint32_t va)
@@ -840,6 +855,7 @@ static void contig_free(NcKernel *k, uint32_t va, uint32_t ra)
     if (c) {
         nc_vm_free_phys(k->vm, va & ~NC_CONTIG_WINDOW, c->size + c->slack);
         pthread_mutex_lock(&g_contig_mu);
+        memset(g_contig_freed + (va & ~NC_CONTIG_WINDOW) / NC_PAGE, 1, (c->size + c->slack) / NC_PAGE);
         *c = g_contig[--g_ncontig];
         pthread_mutex_unlock(&g_contig_mu);
     } else if (va) {
@@ -1310,6 +1326,7 @@ void nc_mm_reset(void)
     g_nregions = 0;
     pthread_mutex_lock(&g_contig_mu);
     memset(g_contig, 0, sizeof(g_contig));
+    memset(g_contig_freed, 0, sizeof(g_contig_freed));
     g_ncontig = 0;
     pthread_mutex_unlock(&g_contig_mu);
     g_gpu_instance_end = 0;
