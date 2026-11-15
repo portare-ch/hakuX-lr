@@ -2,14 +2,34 @@
 
 ## Unreleased
 
-- **Street Fighter Anniversary Collection** (#156) — Update every cached
-  copy of a texture when the game rewrites its memory, not only the first
-  one checked. This fixes the missing menu letters and the garbled
-  sprites on the Super Arts select and VS screens of 3rd Strike.
-- **Shin Sangoku Musou 3** (#121) — Place thread stacks, system memory
-  and kernel pool pages at the addresses the console's allocator gives
-  them, so that memory just above a stack is what a game finds there on
-  a console. This fixes the crash when the first battle loads.
+## linux-v0.28.0 (Linux, aarch64 and x86-64, and Android)
+
+This release improves game compatibility with more reliable texture-cache
+updates and a kernel memory layout closer to the original Xbox.
+
+### Game fixes
+
+- **Street Fighter Anniversary Collection (3rd Strike)** (#156) —
+  Refresh every cached texture when the game updates a shared texture
+  atlas. This restores missing menu text and fixes corrupted sprites on
+  the Super Arts selection and VS screens.
+- **Samurai Shodown V** (#116) — The same texture-cache fix restores
+  complete stage backgrounds and the round timer.
+- **Shin Sangoku Musou 3** (#121) — Allocate thread stacks, system memory
+  and kernel pool pages in a shared, console-like address range. This
+  fixes a crash when the first battle loads.
+
+### Testing and limitations
+
+- The fixes were tested on Linux x86-64 (KVM). The two pull requests
+  report 34 passing local CTest checks each and short game smoke tests.
+- The new system-memory layout affects all games. A broad compatibility
+  pass and loading older savestates have not yet been verified. The
+  changes have not been tested on an ARM64 device.
+- Tomb Raider: Legend still has an intermittent heap-corruption crash.
+  It was seen during testing of the new memory layout, but was also
+  present in earlier builds. Samurai Shodown V may still log
+  "texture table full" messages without visible rendering problems.
 
 ## linux-v0.27.0 (Linux, aarch64 and x86-64, and Android)
 
