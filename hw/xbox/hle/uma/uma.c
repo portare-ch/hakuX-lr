@@ -288,10 +288,8 @@ int hle_uma_ram_fd(size_t size)
         usage_probe();
     }
     if (g_uma_fd >= 0 && g_uma_size != size) {
-        /* The console's memory changed size between boots (the Console
-         * Memory option): a buffer of the new size. Kept, the old one was
-         * still what Vulkan imported while the VM fell back to a memfd, the
-         * GPU reading the last boot's memory. */
+        /* Recreate the buffer after a RAM size change so Vulkan and the VM
+         * use the same memory on the next boot. */
         UMA_LOG("uma: guest RAM was %zu MiB, now %zu MiB: a new buffer", g_uma_size >> 20, size >> 20);
         close(g_uma_fd);
         g_uma_fd = -1;

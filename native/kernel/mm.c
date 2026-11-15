@@ -58,10 +58,8 @@ static unsigned g_ncontig;
 static pthread_mutex_t g_contig_mu = PTHREAD_MUTEX_INITIALIZER;
 static uint32_t g_gpu_instance_end;
 
-/* Reserve 128 KiB at boot at the top of the RAM the NV2A reaches (all of
- * it on a console of 64 or 128 MiB): the 64 KiB page-frame database and
- * 16 GPU instance pages. This keeps early contiguous allocations below
- * RAM's limit, where some titles write a guard just past their heap. */
+/* Reserve 128 KiB at the top of GPU-visible RAM for the page-frame database
+ * and 16 instance pages. This leaves room for games' heap-end guards. */
 #define TOP_PAD        0x10000u
 #define INSTANCE_PAGES 16u
 static uint32_t g_instance_held;    /* bit i: instance page i (from the lowest) still held */
@@ -72,15 +70,12 @@ void nc_mm_limit_title(NcKernel *k)
     if (vm->ram_size <= NC_RAM_RETAIL) {
         return;
     }
-    /* The memory above is kept from the title as the kernel keeps it on a
-     * console with more: its free pages are never handed out. What the
-     * kernel itself put there at boot (its pool, the GPU's instance pages)
-     * stays. */
+    /* Reserve free pages above 64 MiB; existing kernel allocations stay put. */
     uint32_t held = 0;
     for (uint32_t p = NC_RAM_RETAIL / NC_PAGE; p < vm->ram_size / NC_PAGE; p++) {
         held += nc_vm_claim_phys(vm, p * NC_PAGE, NC_PAGE);
     }
-    vm->title_limit = NC_RAM_RETAIL;    /* and what is freed there later (nc_vm_free_phys) */
+    vm->title_limit = NC_RAM_RETAIL;    /* nc_vm_free_phys preserves the limit. */
     nc_log("hakuX-native", "mm: the title limits itself to 64 MiB (XBE initialization flag 4): %u MiB of the "
            "console's %u MiB kept from it", held / (0x100000u / NC_PAGE), vm->ram_size >> 20);
 }
@@ -749,9 +744,8 @@ static uint32_t contig_alloc(NcKernel *k, uint32_t size, uint32_t lo, uint32_t h
                              uint32_t protect, uint32_t ra)
 {
     size = nc_align_up(size ? size : 1, NC_PAGE);
-    /* Contiguous memory is what a title gives the GPU (textures, vertex and
-     * push buffers), so it comes from the RAM the NV2A reaches: on a console
-     * of 256 MiB the half above it serves virtual memory only. */
+    /* Contiguous allocations can be passed to the GPU, so keep them within
+     * GPU-visible RAM. Upper RAM remains available for virtual memory. */
     if (k->vm->gpu_size < k->vm->ram_size && (!hi || hi > k->vm->gpu_size)) {
         hi = k->vm->gpu_size;
     }
@@ -1216,8 +1210,7 @@ static uint64_t MmQueryStatistics(NcKernel *k, NcFrame *f, const uint32_t *a)
     if (nc_vm_rd32(k->vm, a[0]) != 0x24) {
         return NC_STATUS_INVALID_PARAMETER;
     }
-    /* the memory the title has: all of it, or the 64 MiB it limited itself
-     * to (nc_mm_limit_title) */
+    /* Report the game's RAM limit rather than installed RAM when limited. */
     const uint32_t total = (k->vm->title_limit ? k->vm->title_limit : k->vm->ram_size) / NC_PAGE;
     uint32_t used = 0;
     for (uint32_t p = 0; p < total; p++) {

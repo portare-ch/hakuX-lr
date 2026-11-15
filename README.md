@@ -244,8 +244,8 @@ take effect immediately.
 | Combiner Precision | **Accurate** is the default on AMD64 Linux; **Fast** on ARM64 Linux and Android. Fast omits 9-bit combiner rounding to reduce GPU work. Restart the game after changing it. |
 | Audio Processing | Defaults to **Full DSP (experimental)**, which runs Xbox audio effects. Try **Fast** if audio crackles or a game runs slowly. |
 | Audio Resampler | Defaults to **Sinc**. Try **Linear** to reduce CPU use at the cost of some audio quality. |
-| Console Memory | **64 MB** is the retail console and the default. **128 MB** and **256 MB** are upgraded consoles, for homebrew and patched games that use the extra memory; most games limit themselves to 64 MB and are unaffected. Restart the game after changing it. |
-| Patch Games for Console Memory | Off by default. **On** removes each game's 64 MB limit as it loads, so it has all of the memory set in Console Memory, as game files were patched for upgraded consoles. The game's files are not changed. A game not written for more memory may misbehave. Restart the game after changing it. |
+| Console Memory | **64 MB** (default), **128 MB**, or **256 MB**. Extra RAM is available to homebrew and compatible games. Most games keep their 64 MB limit unless the patch option below is enabled. Restart the game after changing it. |
+| Patch Games for Console Memory | Off by default. Removes the game's 64 MB limit when using 128 MB or 256 MB of console RAM. Some games may not work with extra memory. Game files are not changed. Restart the game after changing it. |
 | Frame Pacing | Off by default (experimental). If a game runs slowly and the controls feel delayed, **On** holds the game to the pace the GPU draws at, so it can't run ahead of the picture. **Lowest Latency** waits one frame less but may lower the frame rate. |
 
 ## Saves

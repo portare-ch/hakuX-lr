@@ -162,17 +162,16 @@ static struct retro_core_option_v2_definition g_defs[OPT_COUNT + 1] = {
         "disabled"},
     [OPT_RAM] = {
         "hakux_console_ram", "Console Memory", NULL,
-        "Sets the console's memory. 64 MB is the retail console and what games expect. 128 MB and 256 MB are "
-        "upgraded consoles (128 MB is also the debug kit's), for homebrew and patched games that use the extra "
-        "memory. Games that limit themselves to 64 MB, as most do, see 64 MB either way." NEXT,
+        "Sets console RAM. 64 MB matches a retail Xbox. 128 MB and 256 MB provide extra memory for homebrew "
+        "and compatible games. Most games keep their 64 MB limit unless Patch Games for Console Memory is "
+        "enabled." NEXT,
         NULL, NULL,
         {{"64", "64 MB (retail)"}, {"128", "128 MB"}, {"256", "256 MB"}, {NULL, NULL}},
         "64"},
     [OPT_RAM_PATCH] = {
         "hakux_ram_patch", "Patch Games for Console Memory", NULL,
-        "Removes each game's 64 MB limit as it loads, so it has all of the console's memory, as game files "
-        "were patched for upgraded consoles. It has no effect with 64 MB. A game not written for more memory "
-        "may misbehave; the game's files are not changed." NEXT,
+        "Removes the game's 64 MB limit when using 128 MB or 256 MB of console RAM. Some games may not work "
+        "with extra memory. Game files are not changed." NEXT,
         NULL, NULL,
         {{"disabled", "Off"}, {"enabled", "On"}, {NULL, NULL}},
         "disabled"},

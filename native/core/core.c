@@ -29,7 +29,7 @@ static bool g_relaunch;
 static bool g_dashboard;        /* boot the dashboard (nc_core_set_dashboard) */
 static char g_loadstate[512];   /* boot into this savestate (nc_core_set_loadstate) */
 static bool g_loaded;
-static uint32_t g_ram = NC_RAM_RETAIL;  /* the console's memory (nc_core_set_ram) */
+static uint32_t g_ram = NC_RAM_RETAIL;  /* RAM size for subsequent boots */
 
 void nc_core_set_ram(unsigned mib)
 {
@@ -134,15 +134,13 @@ bool nc_core_boot(NcCore *c, int disc_fd)
     nc_dev_nv2a_vblank_multiply(1);
     /* Some games check for the dashboard during startup. */
     nc_dash_install(nc_io_hdd_root());
-    /* The console's memory: the retail 64 MiB, or an upgraded console's
-     * 128 or 256 MiB (nc_core_set_ram). NC_RAM_MB=64|128|256 sets it for
-     * the tools that have no setting. */
+    /* CLI override for tools without core options: NC_RAM_MB=64|128|256. */
     const char *mb = getenv("NC_RAM_MB");
     if (mb && *mb) {
         nc_core_set_ram((unsigned)atoi(mb));
     }
     const uint32_t ram = g_ram;
-    const char *all = getenv("NC_RAM_UNLIMIT");     /* the tools' again: =1 patches the titles' limit out */
+    const char *all = getenv("NC_RAM_UNLIMIT");     /* CLI override for the game's 64 MiB limit */
     if (all && *all) {
         nc_xbe_set_unlimit(atoi(all) != 0);
     }

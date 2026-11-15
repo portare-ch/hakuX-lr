@@ -264,15 +264,15 @@ const char *nc_state_save(const char *path)
 
 /* ------------------------------------------------------------------ load */
 
-/* The header against the running game, then every section's version. */
 static const char *ram_mismatch(uint32_t state, uint32_t console)
 {
     static char why[128];
-    snprintf(why, sizeof(why), "the state was made on a console with %u MiB of memory, and this one is set to "
-             "%u MiB", state >> 20, console >> 20);
+    snprintf(why, sizeof(why), "the state uses %u MiB of RAM, but the console is set to %u MiB",
+             state >> 20, console >> 20);
     return why;
 }
 
+/* Check the savestate's identity against the running game. */
 static const char *identity_check(const NcStateInfo *info, const NcStateInfo *want)
 {
     static char why[256];

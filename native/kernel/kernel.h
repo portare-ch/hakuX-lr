@@ -400,9 +400,7 @@ void nc_ex_free(NcKernel *k, uint32_t p);
 void nc_mm_register(NcKernel *k);
 /* Reserve the page-frame database and GPU instance pages at boot. */
 bool nc_mm_hold_top(NcKernel *k);
-/* The title's XBE limits it to the retail console's 64 MiB (initialization
- * flag 4): on a console with more, the rest is kept from it. Before the
- * title's image is loaded. */
+/* Reserve RAM above 64 MiB for a limited XBE, before loading its image. */
 void nc_mm_limit_title(NcKernel *k);
 void nc_mm_note_image(uint32_t base, uint32_t size);
 void nc_ex_register(NcKernel *k);

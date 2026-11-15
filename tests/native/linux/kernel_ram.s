@@ -1,9 +1,6 @@
 /* Copyright (C) 2026-present PortareOS */
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/* Console memory test (kernel_ram.py: 64, 128 and 256 MiB, and a title
- * limited to 64 MiB). Reports what the title has and uses it: the totals,
- * the NV2A's memory size, a contiguous block and its view in the GPU's
- * window, and nearly all of the free memory committed and written.
+/* RAM size, GPU aperture and allocation tests (kernel_ram.py).
  * Code: 0x11000; thunks: 0x10f00, in IMPORTS order. Print and halt. */
 .intel_syntax noprefix
 .set THUNK, 0x10f00
@@ -17,7 +14,7 @@
 .set GPU_WINDOW,     0x70000000     /* 0xF0000000 - 0x80000000 */
 .set MEM_COMMIT,     0x1000
 .set PAGE_READWRITE, 0x04
-.set SPARE_PAGES,    1024           /* left free: page tables and the like */
+.set SPARE_PAGES,    1024           /* leave room for page tables */
 
 /* push imm32 (LLVM's Intel syntax makes "push offset sym" a 16-bit push) */
 .macro PUSHI sym
@@ -32,7 +29,7 @@
 .text
 .globl _start
 _start:
-    /* 1. The totals. */
+    /* 1. Query memory totals. */
     STEP 1
     mov dword ptr [stats], 0x24
     PUSHI stats
@@ -40,7 +37,7 @@ _start:
     test eax, eax
     jnz fail
 
-    /* 2. A contiguous block, the same bytes through the GPU's window. */
+    /* 2. Verify that a contiguous block aliases the GPU aperture. */
     STEP 2
     push 0x100000
     call dword ptr [MmAllocateContiguousMemory]
@@ -54,9 +51,7 @@ _start:
     cmp dword ptr [eax], 0x5A5A1234
     jne fail
 
-    /* The GPU's instance memory claimed, a page of it: the kernel frees
-     * the rest of what it held, and a block allocated next is still in the
-     * memory the title has. */
+    /* Releasing unused instance pages must not bypass the game's RAM limit. */
     STEP 6
     PUSHI pad
     push 0x1000
@@ -67,7 +62,7 @@ _start:
     jz fail
     mov dword ptr [block2], eax
 
-    /* 3. All the free memory but a spare, committed. */
+    /* 3. Commit free memory, leaving spare pages for the kernel. */
     STEP 3
     mov dword ptr [stats], 0x24
     PUSHI stats
@@ -88,7 +83,7 @@ _start:
     test eax, eax
     jnz fail
 
-    /* 4. Every page written, then read back. */
+    /* 4. Write and verify every committed page. */
     STEP 4
     mov edi, dword ptr [base]
     xor ecx, ecx
@@ -113,7 +108,7 @@ read:
     cmp ecx, dword ptr [pages]
     jb read
 
-    /* total pages, the NV2A's memory, the blocks, pages committed */
+    /* Report total pages, GPU RAM, contiguous blocks and committed pages. */
     push dword ptr [pages]
     push dword ptr [block2]
     push dword ptr [block]

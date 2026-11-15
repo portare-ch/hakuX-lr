@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (C) 2026-present PortareOS
 # SPDX-License-Identifier: GPL-2.0-or-later
-"""Run the console memory test on xboxrun: 64, 128 and 256 MiB, and a title
-whose XBE limits it to 64 MiB on a console with more, as it is and with the
-limit patched out as it loads.
+"""Test 64, 128 and 256 MiB of RAM, including the XBE limit and patch option.
 
 Assembles kernel_ram.s for i386 with clang and ld.lld; skips (exit 77) if
 either tool is unavailable.
@@ -37,9 +35,10 @@ def tool(*names):
 
 
 def boot(build, iso, data, mib, unlimit=False):
-    """The test's totals on a console of mib: (total pages, the NV2A's memory, the lower and the higher of its
-    two contiguous blocks (the second allocated after the GPU's instance memory was claimed), pages committed).
-    unlimit: the titles' 64 MiB limit patched out as they load."""
+    """Return total pages, GPU bytes, low/high block addresses, committed pages and output.
+
+    unlimit clears the XBE's 64 MiB limit at load time.
+    """
     env = dict(os.environ, NC_TIMEOUT='30', NC_RAM_MB=str(mib), NC_RAM_UNLIMIT='1' if unlimit else '0')
     result = subprocess.run([str(build / 'xboxrun'), '--headless', str(iso), str(data)], env=env,
                             capture_output=True, text=True, timeout=60)
@@ -75,7 +74,7 @@ def main():
         for mib in (64, 128, 256):
             total, gpu, block, high, committed, out = boot(build, root / 'kernel_ram.iso', root / 'data', mib)
             reach = min(mib, GPU_REACH) << 20
-            # nearly all of it is the title's: the kernel's own and the spare are a few MiB
+            # Allow up to 8 MiB for kernel allocations and spare pages.
             ok = (total == mib * 256 and gpu == reach and 0x80000000 <= block and high + 0x1000 <= 0x80000000 + reach
                   and committed >= (mib - 8) * 256 and 'limits itself' not in out)
             if not ok:

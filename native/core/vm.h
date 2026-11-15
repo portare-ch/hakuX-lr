@@ -17,10 +17,9 @@ extern "C" {
 #endif
 
 #define NC_RAM_RETAIL    (64u << 20)
-#define NC_RAM_MAX       (256u << 20) /* a console with every memory upgrade */
-/* What the NV2A reaches: its DMA objects' bases are 27 bits, and its BAR1
- * aperture ends where the devices' registers begin. Memory above it is the
- * CPU's alone. */
+#define NC_RAM_MAX       (256u << 20) /* maximum supported console RAM */
+/* Emulated GPU limit: current DMA bases use 27 bits, and the BAR1 aperture
+ * must stay below device registers. Higher RAM is reserved for CPU use. */
 #define NC_GPU_REACH     (128u << 20)
 #define NC_CONTIG_WINDOW 0x80000000u
 #define NC_GPU_WINDOW    0xF0000000u /* NV2A BAR1: another view of RAM */
@@ -31,9 +30,8 @@ typedef struct NcVm {
     size_t reservation_len;
     int ram_fd;            /* guest physical RAM */
     uint32_t ram_size;
-    uint32_t gpu_size;     /* the RAM the NV2A reaches, from 0: all of it up to NC_GPU_REACH */
-    uint32_t title_limit;  /* 0, or the RAM a title limited to less has: pages freed above it stay
-                              kept from it (nc_vm_free_phys) */
+    uint32_t gpu_size;     /* GPU-visible RAM, capped at NC_GPU_REACH */
+    uint32_t title_limit;  /* 0 or the game's RAM limit; freed pages above it stay reserved */
     uint8_t *ram;          /* host view of all of physical RAM (== base + 0x80000000) */
     uint8_t *page_used;    /* physical page allocator: one byte per page */
     uint32_t *pte;         /* per guest page: physical address | NC_PTE_VALID, or 0 */

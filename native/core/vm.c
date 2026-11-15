@@ -123,9 +123,8 @@ bool nc_vm_init(NcVm *vm, uint32_t ram_size)
     }
     vm->phys = phys;
 
-    /* The contiguous window: VA 0x80000000 + pa for all of RAM. And the
-     * NV2A's BAR1 aperture at 0xF0000000, another view of the RAM it
-     * reaches, where D3D's tiled locks point (D3DLOCK_TILED). */
+    /* Map all RAM at 0x80000000 and GPU-visible RAM at 0xF0000000.
+     * D3DLOCK_TILED uses the latter BAR1 aperture. */
     if (!nc_vm_map(vm, NC_CONTIG_WINDOW, 0, ram_size) || !nc_vm_map(vm, NC_GPU_WINDOW, 0, vm->gpu_size)) {
         return false;
     }
@@ -543,9 +542,8 @@ void nc_vm_free_phys(NcVm *vm, uint32_t pa, uint32_t len)
                 }
             }
         }
-        /* Above a limited title's memory a freed page stays out of the
-         * allocator: what the kernel gives back there (the GPU's instance
-         * pages a title didn't claim) isn't the title's to have. */
+        /* Keep freed pages above the game's RAM limit out of the allocator,
+         * including GPU instance pages released after boot. */
         const uint32_t first = pa / NC_PAGE, top = vm->title_limit ? vm->title_limit / NC_PAGE : UINT32_MAX;
         if (first < top) {
             memset(vm->page_used + first, 0, pages < top - first ? pages : top - first);

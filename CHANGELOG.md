@@ -17,14 +17,11 @@
 - **Video** (#215) — A frame the game wrote into its frame buffer itself is
   shown as the video mode lays it out, whatever render target is still
   bound. Aquaman: Battle for Atlantis shows its intro movies.
-- **Console memory** (#184) — Add a **Console Memory** core option: 64 MB
-  (the retail console, the default), 128 MB or 256 MB, as on an upgraded
-  console. A game whose XBE limits it to 64 MB, as most do, keeps 64 MB.
-  The NV2A reaches the first 128 MB, so on 256 MB the upper half serves
-  the CPU only. The memory size the NV2A reports follows the option.
-  **Patch Games for Console Memory** (off by default) removes a game's
-  64 MB limit as it loads, as game files were patched for upgraded
-  consoles; the files themselves are not changed.
+- **Console memory** (#184) — Add **Console Memory** options for 64 MB
+  (default), 128 MB or 256 MB. Games keep their XBE's 64 MB limit unless
+  **Patch Games for Console Memory** is enabled (off by default).
+  GPU access is capped at 128 MB; additional RAM is available to the CPU.
+  Both options require a game restart and leave game files unchanged.
 
 ## linux-v0.26.0 (Linux, aarch64 and x86-64, and Android)
 
