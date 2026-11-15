@@ -140,10 +140,14 @@ static void out_write(Buf *b, const Nv2aVshOutput *o, const char *val, bool *fog
         break;
     case NV2ART_OUTPUT:
         if (m[0] && (o->index & 15) == 5) {
-            /* oFog: the fog coordinate is x, which takes the most
-             * significant masked component (a ".w" write lands in x) */
+            /* oFog is one value: the instruction's result's x, whatever the
+             * write mask names (the result: its sources as swizzled, so
+             * "mov oFog.w, r0.w" is r0.w and "mov oFog.yw, c.yw" is c.y).
+             * nxdk_pgraph_tests' Fog coord vec4 writes each mask from a
+             * constant (x, y, z, w): the console fogs by x for every mask
+             * with x, by y for .y, .yz, .yw and .yzw, by z for .z and .zw. */
             *fogw = true;
-            put(b, "    oFog.x = %s.%c;\n", val, m[strlen(m) - 1]);
+            put(b, "    oFog.x = %s.x;\n", val);
         } else if (m[0]) {
             put(b, "    %s.%s = %s.%s;\n", k_out[o->index & 15], m, val, m);
         }
