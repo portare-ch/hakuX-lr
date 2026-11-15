@@ -31,6 +31,7 @@
 #define USER_LO   0x00010000u
 #define USER_HI   0x7FFE0000u
 #define VA_GRAIN  0x10000u
+#define NC_SYS_BASE 0xD0000000u            /* the system range (sys_reserve) */
 #define MAX_REGIONS 4096
 /* One allocation per 4 KiB page of a 128 MiB console. */
 #define MAX_CONTIG  ((128u << 20) / NC_PAGE)
@@ -144,7 +145,7 @@ void nc_mm_usage(NcKernel *k, uint32_t *contig_bytes, uint32_t *virtual_bytes, u
     }
     for (unsigned i = 0; i < g_nregions; i++) {
         const Region *r = &g_regions[i];
-        for (uint32_t p = r->base; p < r->base + r->size; p += NC_PAGE) {
+        for (uint32_t p = r->base; p < r->base + r->size && r->base < NC_SYS_BASE; p += NC_PAGE) {
             v += nc_vm_phys(k->vm, p) != UINT32_MAX ? NC_PAGE : 0;
         }
     }
@@ -376,6 +377,78 @@ static void decommit(NcKernel *k, uint32_t va, uint32_t size)
         k->vm_decommits += n;
         p += n * NC_PAGE;
     }
+}
+
+/* ---------------------------------------------------- the system range
+ *
+ * Kernel stacks, MmAllocateSystemMemory and pool pages share one range of
+ * addresses, as on the console (its system PTEs, 0xD0000000-0xEFFFFFFF):
+ * a request takes the lowest free run that holds it, a stack one more page
+ * below its own, left unmapped as its guard. What lies over a stack's top
+ * is therefore the next allocation made, or nothing: titles that read past
+ * StackBase read that (Shin Sangoku Musou 3 reads 8 to 12 KiB over its main
+ * thread's as a battle loads, into the stack of the thread created after
+ * it). Each allocation is a region here (guard included), so a savestate
+ * keeps them; pages mapped without one (a stack from an older state) are
+ * stepped over. */
+#define SYS_BASE NC_SYS_BASE
+#define SYS_END  NC_GPU_WINDOW
+
+static uint32_t sys_reserve(NcKernel *k, uint32_t len)
+{
+    uint32_t va = SYS_BASE;
+    while (len <= SYS_END - va) {
+        uint32_t past = 0;
+        for (unsigned i = 0; i < g_nregions; i++) {
+            const Region *r = &g_regions[i];
+            if (va < r->base + r->size && r->base < va + len && r->base + r->size > past) {
+                past = r->base + r->size;
+            }
+        }
+        for (uint32_t p = va; !past && p < va + len; p += NC_PAGE) {
+            if (nc_vm_phys(k->vm, p) != UINT32_MAX) {
+                past = p + NC_PAGE;
+            }
+        }
+        if (!past) {
+            return va;
+        }
+        va = past;
+    }
+    return 0;
+}
+
+uint32_t nc_mm_sys_alloc(NcKernel *k, uint32_t size, bool guard, bool zero)
+{
+    size = nc_align_up(size ? size : 1, NC_PAGE);
+    const uint32_t len = size + (guard ? NC_PAGE : 0);
+    const uint32_t base = sys_reserve(k, len);
+    if (!base || !add_region(base, len, PAGE_READWRITE, false)) {
+        return 0;
+    }
+    const uint32_t va = base + len - size;
+    if (!commit(k, va, size, zero)) {
+        g_nregions--;                   /* the one just added */
+        return 0;
+    }
+    return va;
+}
+
+void nc_mm_decommit(NcKernel *k, uint32_t va, uint32_t size)
+{
+    decommit(k, va, size);
+}
+
+uint32_t nc_mm_sys_free(NcKernel *k, uint32_t va, bool guard)
+{
+    Region *r = va >= SYS_BASE && va < SYS_END ? region_at(va) : NULL;
+    if (!r || r->base != va - (guard ? NC_PAGE : 0)) {
+        return 0;
+    }
+    const uint32_t pages = (r->base + r->size - va) / NC_PAGE;
+    decommit(k, va, pages * NC_PAGE);
+    *r = g_regions[--g_nregions];
+    return pages;
 }
 
 /* debug: NC_MM_WATCH="lo-hi" (hex VAs) logs every virtual allocation and free
@@ -918,13 +991,22 @@ static uint64_t MmFreeContiguousMemory(NcKernel *k, NcFrame *f, const uint32_t *
 /* MmAllocateSystemMemory(NumberOfBytes, Protect) */
 static uint64_t MmAllocateSystemMemory(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
-    return contig_alloc(k, a[0], 0, 0, NC_PAGE, a[1], caller_of(k, f));
+    const uint32_t va = nc_mm_sys_alloc(k, a[0], false, true);
+    Region *r = va ? region_at(va) : NULL;
+    if (r) {
+        r->protect = a[1];
+    }
+    return va;
 }
 
 /* MmFreeSystemMemory(BaseAddress, NumberOfBytes) -> pages freed */
 static uint64_t MmFreeSystemMemory(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
-    Contig *c = contig_at(a[0]);
+    const uint32_t freed = nc_mm_sys_free(k, a[0], false);
+    if (freed) {
+        return freed;
+    }
+    Contig *c = contig_at(a[0]);        /* one from a state before the system range */
     uint32_t pages = c ? c->size / NC_PAGE : 0;
     contig_free(k, a[0], caller_of(k, f));
     return pages;
@@ -1211,7 +1293,6 @@ static uint64_t MmCreateKernelStack(NcKernel *k, NcFrame *f, const uint32_t *a)
 /* MmDeleteKernelStack(StackBase, StackLimit) */
 static uint64_t MmDeleteKernelStack(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
-    decommit(k, a[1], a[0] - a[1] + NC_PAGE);   /* include the extra stack page */
     if (a[0] > a[1]) {
         nc_ps_stack_free(k, a[1], a[0] - a[1]);
     }
@@ -1234,6 +1315,9 @@ static uint64_t MmQueryStatistics(NcKernel *k, NcFrame *f, const uint32_t *a)
     }
     uint32_t committed = 0, reserved = 0, image = 0;
     for (unsigned i = 0; i < g_nregions; i++) {
+        if (g_regions[i].base >= NC_SYS_BASE) { /* the system range: not the title's virtual memory */
+            continue;
+        }
         reserved += g_regions[i].size;
         for (uint32_t p = g_regions[i].base; p < g_regions[i].base + g_regions[i].size; p += NC_PAGE) {
             if (nc_vm_phys(k->vm, p) != UINT32_MAX) {

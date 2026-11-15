@@ -34,10 +34,8 @@ static uint32_t pool_alloc(NcKernel *k, uint32_t size)
 {
     if (size + POOL_HDR > NC_PAGE) {
         const uint32_t len = nc_align_up(size + POOL_HDR, NC_PAGE);
-        const uint32_t pa = nc_vm_alloc_phys_high(k->vm, len);
-        if (pa != UINT32_MAX) {
-            const uint32_t p = NC_CONTIG_WINDOW | pa;
-            memset(nc_vm_host(k->vm, p), 0, len);
+        const uint32_t p = nc_mm_sys_alloc(k, len, false, true);
+        if (p) {
             nc_vm_wr32(k->vm, p, size);
             nc_vm_wr32(k->vm, p + 4, POOL_PAGES);
             k->pool_ex += len;
@@ -88,7 +86,9 @@ static uint64_t ExFreePool(NcKernel *k, NcFrame *f, const uint32_t *a)
             const uint32_t len = nc_align_up(size, NC_PAGE);
             nc_vm_wr32(k->vm, hdr + 4, 0);
             k->pool_ex -= len;
-            nc_vm_free_phys(k->vm, hdr & ~NC_CONTIG_WINDOW, len);
+            if (!nc_mm_sys_free(k, hdr, false)) {   /* one from a state before the system range */
+                nc_vm_free_phys(k->vm, hdr & ~NC_CONTIG_WINDOW, len);
+            }
         } else {
             k->pool_ex -= size;
             nc_pool_free(k, hdr, size);
