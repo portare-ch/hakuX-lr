@@ -141,6 +141,7 @@ typedef struct PbObj {
     bool x_zero;                        /* X8R8G8B8's unused byte: 0 for Z8, 0xFF for O8. */
     uint64_t written;                   /* g_pd.wseq at its last draw, clear or copy */
     uint64_t wb_written;                /* last image update copied back to guest memory */
+    uint64_t wb_v;                      /* ... that copy's value (landed once completed) */
     uint64_t edge_hash[2];              /* its bytes on its first and last page (rt_cpu_sync) */
     bool cpu_used;                      /* the CPU wrote its memory (writeback) */
     uint64_t mem_seq;                   /* g_pd.wseq when a texture took its memory as the
@@ -1229,6 +1230,7 @@ static uint64_t writeback_ex(uint32_t id, bool force)
     g_pd.writebacks++;
     if (o) {
         o->wb_written = o->written;
+        o->wb_v = v;
     }
     return v;
 }
@@ -3228,12 +3230,21 @@ static bool tex_other_size(const PbObj *o, const HleFmtInfo *fi)
 /* A linear texture over a swizzled target must read its swizzled bytes
  * from memory. Targets drawn through object_view's linear view already
  * have the expected texel order (Fable's silhouette). */
-static bool tex_other_layout(const PbObj *o, const HleFmtInfo *fi)
+static bool tex_other_layout(const PbObj *o, const HleFmtInfo *fi, uint32_t fmt)
 {
     const HleFmtInfo *oi = fi ? hle_fmt_info(o->d.xfmt) : NULL;
-    return oi && !(oi->flags & HLE_FI_DEPTH) && (fi->flags & HLE_FI_LIN) &&
-           !(fi->flags & (HLE_FI_DEPTH | HLE_FI_DXT)) && oi->bpp == fi->bpp && !o->d.pitch &&
-           o->swz_bound && !o->cube && !o->d.parent;
+    if (!oi || (oi->flags & HLE_FI_DEPTH) || (fi->flags & (HLE_FI_DEPTH | HLE_FI_DXT)) || o->cube ||
+        o->d.parent) {
+        return false;
+    }
+    if (fi->flags & HLE_FI_LIN) {
+        return oi->bpp == fi->bpp && !o->d.pitch && o->swz_bound;
+    }
+    /* A swizzled 2D texture of another size than the target at its address
+     * reads memory too (a 256 x 256 texture over an old 32 x 64 target). */
+    const uint32_t tw = 1u << ((fmt >> 20) & 0xF), th = 1u << ((fmt >> 24) & 0xF);
+    return (fi->flags & HLE_FI_SWZ) && !(fmt & 4) && ((fmt >> 4) & 0xF) == 2 &&
+           (o->d.w != tw || o->d.h != th);
 }
 
 /* Write back targets sampled at another texel size or layout before
@@ -3253,7 +3264,7 @@ static void tex_land(void)
         const uint32_t pa = (dma_base(hle_kdma_texture(fmt)) + R(NV097_SET_TEXTURE_OFFSET + b)) & 0x0FFFFFFFu;
         const HleFmtInfo *fi = hle_fmt_info(HLE_FMT_CODE(fmt));
         PbObj *o = fi && !(fi->flags & (HLE_FI_DEPTH | HLE_FI_DXT)) ? tex_target(pa, false) : NULL;
-        if (o && (tex_other_size(o, fi) || tex_other_layout(o, fi))) {
+        if (o && (tex_other_size(o, fi) || tex_other_layout(o, fi, fmt))) {
             src[s] = o;
         }
     }
@@ -3271,6 +3282,11 @@ static void tex_land(void)
                 coh_adopt();
             }
             lv = v ? v : o->land_last ? o->land_last : 1;
+        } else if (o->wb_written && o->written <= o->wb_written && !o->fb_wb_v) {
+            /* written back when it was unbound and not drawn into since: its
+             * memory has had its pixels, and what was written there after
+             * them (landing it again would put them over that) */
+            lv = 1;
         } else {
             rt_cpu_sync(o->id);
             if (!o->fb_wb_v || o->fb_wb_w != o->written) {
@@ -4370,6 +4386,150 @@ static void draw_arrays(void)
 }
 
 /* The draw gathered since SET_BEGIN_END. */
+/* One vertex's attribute of an array's format fmt at p, as the four floats
+ * the NV2A's register holds; false for a format not read here. */
+static bool attr_decode(uint32_t fmt, const uint8_t *p, float x[4])
+{
+    const uint32_t type = fmt & 0xF, size = (fmt >> 4) & 0xF;
+    x[0] = x[1] = x[2] = 0.0f;
+    x[3] = 1.0f;
+    switch (type) {
+    case 0:                                 /* UB_D3D: a D3DCOLOR, bytes B G R A */
+        if (size != 4) {
+            return false;
+        }
+        x[0] = p[2] / 255.0f;
+        x[1] = p[1] / 255.0f;
+        x[2] = p[0] / 255.0f;
+        x[3] = p[3] / 255.0f;
+        return true;
+    case 4:                                 /* UB_OGL */
+        for (uint32_t c = 0; c < MIN(size, 4u); c++) {
+            x[c] = p[c] / 255.0f;
+        }
+        return true;
+    case 1: case 5:                         /* S1: normalized; S32K: as it is */
+        for (uint32_t c = 0; c < MIN(size, 4u); c++) {
+            int16_t v;
+            memcpy(&v, p + 2 * c, 2);
+            x[c] = type == 1 ? MAX(v / 32767.0f, -1.0f) : (float)v;
+        }
+        return true;
+    case 2:                                 /* F */
+        memcpy(x, p, 4 * MIN(size, 4u));
+        return true;
+    case 6: {                               /* CMP: 11, 11 and 10 signed bits */
+        uint32_t v;
+        memcpy(&v, p, 4);
+        x[0] = (float)((int32_t)(v << 21) >> 21) / 1023.0f;
+        x[1] = (float)((int32_t)(v << 10) >> 21) / 1023.0f;
+        x[2] = (float)((int32_t)v >> 22) / 511.0f;
+        return true;
+    }
+    default:
+        return false;
+    }
+}
+
+/* The NV2A's attribute registers hold the last vertex it fetched: after a
+ * draw from vertex arrays (or an inline array), an attribute a later draw
+ * supplies no array for has that vertex's value, not the one set before
+ * (nxdk_pgraph_tests' Lighting normals and Attrib carryover: a triangle
+ * drawn without normals is lit by the last normal of the draw before it).
+ * carry[a]: that value, where the draw about to go out has one; applied
+ * after it (its own constants are the registers as they are). */
+static uint32_t carry_take(float carry[ATTRS][4])
+{
+    uint32_t mask = 0;
+    if (g_pd.nimm || (!g_pd.ninl && !g_pd.nidx)) {
+        return 0;
+    }
+    uint32_t vsize = 0, aoff[ATTRS];
+    for (unsigned a = 0; a < ATTRS; a++) {
+        const uint32_t fmt = R(NV097_SET_VERTEX_DATA_ARRAY_FORMAT + 4 * a);
+        aoff[a] = vsize;
+        if ((fmt >> 4) & 0xF) {
+            vsize += (attr_bytes(fmt) + 3) & ~3u;
+        }
+    }
+    const uint32_t n = g_pd.ninl && vsize ? g_pd.ninl * 4 / vsize : 0;
+    for (unsigned a = 1; a < ATTRS; a++) {  /* (the position: no register a draw reads) */
+        const uint32_t fmt = R(NV097_SET_VERTEX_DATA_ARRAY_FORMAT + 4 * a), bytes = attr_bytes(fmt);
+        if (!((fmt >> 4) & 0xF)) {
+            continue;
+        }
+        const uint8_t *p = NULL;
+        if (g_pd.ninl) {
+            p = n ? (const uint8_t *)g_pd.inl + (size_t)(n - 1) * vsize + aoff[a] : NULL;
+        } else {
+            const uint32_t stride = fmt >> 8, last = g_pd.idx[g_pd.nidx - 1];
+            p = hle_pa_ptr(array_pa(a) + stride * last, bytes);
+        }
+        if (p && attr_decode(fmt, p, carry[a])) {
+            mask |= 1u << a;
+        }
+    }
+    return mask;
+}
+
+/* A colour target whose memory a vertex array starts in: the array is the
+ * target's pixels (nxdk_pgraph_tests' Surface as vertex array renders the
+ * colours a later draw's diffuse stream reads). Its image lands in its
+ * memory before the draw's data is taken, as a texture of another layout
+ * has it land (tex_land); a wait, so before the draw allocates anything.
+ * Arrays start outside every target otherwise: one range compare a draw. */
+static void vb_land(void)
+{
+    static uint64_t key = ~0ull;
+    static uint32_t lo, hi;
+    if (g_pd.nimm || g_pd.ninl || !g_pd.nidx) {
+        return;
+    }
+    const uint64_t k = g_pd.binds << 8 | g_pd.nobjs;
+    if (k != key) {                         /* the targets' memory, all of it: [lo, hi) */
+        key = k;
+        lo = UINT32_MAX;
+        hi = 0;
+        for (unsigned i = 0; i < g_pd.nobjs; i++) {
+            uint32_t len;
+            if (coh_len(&g_pd.objs[i], &len)) {
+                lo = MIN(lo, g_pd.objs[i].d.pa);
+                hi = MAX(hi, g_pd.objs[i].d.pa + len);
+            }
+        }
+    }
+    for (unsigned a = 0; a < ATTRS; a++) {
+        if (!((R(NV097_SET_VERTEX_DATA_ARRAY_FORMAT + 4 * a) >> 4) & 0xF)) {
+            continue;
+        }
+        const uint32_t pa = array_pa(a);
+        if (pa < lo || pa >= hi) {
+            continue;
+        }
+        for (unsigned i = 0; i < g_pd.nobjs; i++) {
+            PbObj *o = &g_pd.objs[i];
+            uint32_t len;
+            if (!coh_len(o, &len) || pa < o->d.pa || pa >= o->d.pa + len || !o->written ||
+                o == g_pd.rt_obj) {
+                continue;
+            }
+            uint64_t v = 0;
+            if (coh_managed(o, &len)) {
+                v = coh_land(o);
+            } else if (o->d.pitch && o->written > o->wb_written) {
+                rt_cpu_sync(o->id);
+                v = writeback_ex(o->id, true);
+            } else if (o->d.pitch) {
+                v = o->wb_v;                /* written back at its unbind: landed by now? */
+            }
+            if (v > hle_tl_completed()) {
+                coh_wait(v);
+                coh_adopt();
+            }
+        }
+    }
+}
+
 static void draw(void)
 {
     sync_rt();
@@ -4399,12 +4559,21 @@ static void draw(void)
     }
     rt_first_land(false);
     tex_land();
+    vb_land();
+    float carry[ATTRS][4];
+    const uint32_t carried = carry_take(carry);
     if (g_pd.nimm) {
         draw_imm();
     } else if (g_pd.ninl) {
         draw_inline();
     } else {
         draw_arrays();
+    }
+    for (unsigned a = 1; a < ATTRS; a++) {
+        if (((carried >> a) & 1) && memcmp(g_pd.cur[a], carry[a], 16)) {
+            memcpy(g_pd.cur[a], carry[a], 16);
+            g_pd.cgen++;                    /* (the draws' constant block holds cur) */
+        }
     }
 }
 

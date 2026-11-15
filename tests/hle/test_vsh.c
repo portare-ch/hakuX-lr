@@ -50,7 +50,7 @@ static void test_program(void)
                          "    oD0.xyzw = m.xyzw;\n    R1.w = i.w;") != NULL);
     HT_CHECK(strstr(buf, "oPos.z = m.z;") != NULL);
     HT_CHECK(strstr(buf, "mulz(oPos.xyzz, c[58].xyzz)") != NULL);   /* R12 reads oPos */
-    HT_CHECK(strstr(buf, "oFog.x = i.w;") != NULL);     /* the top masked component */
+    HT_CHECK(strstr(buf, "oFog.x = i.x;") != NULL);     /* the result's x, whatever the mask */
     HT_CHECK(strstr(buf, "vFog = oFog.x;") != NULL);
     HT_CHECK(strstr(buf, "A0 = int(floor(m.x + 1.0 / 1024.0));") != NULL);
     HT_CHECK(strstr(buf, "c[clamp(A0 + 121, 0, 191)].zwww") != NULL);
