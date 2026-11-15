@@ -3285,8 +3285,13 @@ static void tex_land(void)
         } else if (o->wb_written && o->written <= o->wb_written && !o->fb_wb_v) {
             /* written back when it was unbound and not drawn into since: its
              * memory has had its pixels, and what was written there after
-             * them (landing it again would put them over that) */
-            lv = 1;
+             * them (landing it again would put them over that). That copy
+             * may still be on its way: the texture is read after it. */
+            if (o->wb_v > hle_tl_completed()) {
+                coh_wait(o->wb_v);
+                coh_adopt();
+            }
+            lv = o->wb_v ? o->wb_v : 1;
         } else {
             rt_cpu_sync(o->id);
             if (!o->fb_wb_v || o->fb_wb_w != o->written) {
@@ -4463,7 +4468,9 @@ static uint32_t carry_take(float carry[ATTRS][4])
             p = n ? (const uint8_t *)g_pd.inl + (size_t)(n - 1) * vsize + aoff[a] : NULL;
         } else {
             const uint32_t stride = fmt >> 8, last = g_pd.idx[g_pd.nidx - 1];
-            p = hle_pa_ptr(array_pa(a) + stride * last, bytes);
+            const uint32_t pa = array_pa(a) + stride * last;
+            coh_pend_wait(pa, bytes);       /* a copy queued into it lands first */
+            p = hle_pa_ptr(pa, bytes);
         }
         if (p && attr_decode(fmt, p, carry[a])) {
             mask |= 1u << a;
