@@ -50,6 +50,7 @@
 #define NV_PMC_BOOT_0       0x000000u
 #define NV_PMC_INTR_0       0x000100u
 #define NV_PMC_INTR_EN_0    0x000140u
+#define NV_PFIFO_INTR_0     0x002100u
 #define NV_PFIFO_RUNOUT_STATUS 0x002400u
 #define NV_PFIFO_CACHE1_STATUS 0x003214u
 #define NV_PFIFO_CACHE1_DMA_PUSH 0x003220u
@@ -530,6 +531,16 @@ static void nv2a_write(void *opaque, uint32_t off, uint64_t value, unsigned size
         hle_host_gpu_trace(HLE_GTR_FIFO, (uint32_t)value);
         __atomic_store_n(reg(off), (uint32_t)value, __ATOMIC_RELEASE);
         hle_pb_kick();                              /* access back: the decoder goes on */
+        return;
+    }
+    if (size == 4 && off == NV_PFIFO_INTR_0) {
+        /* PFIFO's pending interrupts: a 1 written clears its bit, as on the
+         * NV2A. Stored as written, a handler's acknowledge (pbkit writes
+         * ACQUIRE_TIMEOUT_RESET, 0x01000000) left that bit pending for good,
+         * and pbkit's FIFO handler, once it found the FIFO busy, waited for
+         * the register to read 0 forever (nxdk_pgraph_tests' first Image blit
+         * test hung there in most runs). Nothing here raises a PFIFO interrupt. */
+        __atomic_fetch_and(reg(off), ~(uint32_t)value, __ATOMIC_ACQ_REL);
         return;
     }
     if (g_pbmode && size == 4 && (off == NV_PGRAPH_INTR || off == NV_PGRAPH_INTR_EN)) {
