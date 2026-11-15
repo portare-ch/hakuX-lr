@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+## linux-v0.29.0 (Linux, aarch64 and x86-64, and Android)
+
+The AMD64 (x86-64) KVM backend now passes all 15 tests and all 183 checks
+in `nxdk_low_level_cpu_tests`, covering FPU, SSE, MMX and TestFloat.
+See the [CPU test results](https://hakuxlr.portareos.org/cputests/)
+for the full breakdown.
+
+### Fixes
+
+- **AMD64 CPU accuracy** (#230) — Start each thread with the Xbox's
+  default 53-bit x87 precision. This fixes double-rounding errors and an
+  incorrect underflow flag in TestFloat F64, completing the CPU test pass.
+- **Spartan: Total Warrior** (#229, #125) — Correct the bump-mapping
+  matrix order. In-engine intro scenes now show their normal colours
+  instead of green and purple.
+
+### Testing
+
+The CPU test pass was verified on Linux x86-64 (KVM) with a Ryzen 7
+9800X3D. The CPU fix also passed 34 CTest checks and short smoke runs of
+Spartan: Total Warrior and Street Fighter Anniversary Collection.
+The CPU result above applies to the AMD64 KVM backend.
+
 ## linux-v0.28.0 (Linux, aarch64 and x86-64, and Android)
 
 This release improves game compatibility with more reliable texture-cache

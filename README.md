@@ -7,6 +7,10 @@ is based on [hakuX](https://github.com/rfandango/hakuX) and comes with
 
 See the [game compatibility list](https://hakuxlr.portareos.org/) for per-title results.
 
+The AMD64 (x86-64) KVM backend passes all 15 tests and 183 checks in
+`nxdk_low_level_cpu_tests`. See the [CPU test results](https://hakuxlr.portareos.org/cputests/)
+for the full breakdown.
+
 You need your own game images. To play games, you do not need a BIOS,
 MCPX ROM or Xbox hard disk image. hakuX creates its storage when you first
 start a game.
