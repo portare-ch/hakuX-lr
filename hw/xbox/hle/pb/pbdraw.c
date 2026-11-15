@@ -134,7 +134,7 @@ typedef struct PbObj {
     uint64_t bound;                     /* when last bound as a target (g_pd.binds) */
     bool cube;                          /* a cube texture's image, its faces' targets views */
     uint64_t written;                   /* g_pd.wseq at its last draw, clear or copy */
-    uint64_t wb_written;                /* written, when it last went back to memory (writeback) */
+    uint64_t wb_written;                /* last image update copied back to guest memory */
     uint64_t edge_hash[2];              /* its bytes on its first and last page (rt_cpu_sync) */
     bool cpu_used;                      /* the CPU wrote its memory (writeback) */
     uint64_t mem_seq;                   /* g_pd.wseq when a texture took its memory as the
@@ -1161,8 +1161,7 @@ static void wb_note(uint32_t pa, uint32_t len, uint64_t v)
  * screen. HAKUX_HLE_PB_CPUWB=0: small targets only (A/B). */
 static uint64_t writeback_ex(uint32_t id, bool force);
 
-/* Not again while nothing was drawn into it since it last went back: by
- * then its memory may be the title's for something else (below). */
+/* Avoid copying an unchanged target over memory the game may have reused. */
 static void writeback(uint32_t id)
 {
     const PbObj *o = id ? obj_of(id) : NULL;
@@ -1172,18 +1171,14 @@ static void writeback(uint32_t id)
     writeback_ex(id, false);
 }
 
-/* The bound target, when it is a small one drawn since it last went back:
- * as the decoder runs out of commands (hle_pbd_idle). The NV2A has the
- * pixels in memory as it draws them; waiting for the frame to move off the
- * target put them there whenever that was. Tony Hawk's American Wasteland
- * draws each graffiti tag into a 64 x 64 texture, frees the texture's
- * memory and allocates the next one over part of it before it binds that:
- * the first one's pixels then landed on the second's heap header, and the
- * title crashed freeing it. */
+/* Flush small targets at decoder idle rather than waiting for a target
+ * switch. THAW reuses graffiti texture memory before the next bind, and a
+ * late writeback can overwrite its heap metadata. */
 static void writeback_drawn(void)
 {
     const PbObj *o = g_pd.rt_obj;
-    if (o && o->d.pitch && (uint64_t)o->d.pitch * o->d.h <= WRITEBACK_MAX && o->written > o->wb_written) {
+    if (o && o->d.pitch && (uint64_t)o->d.pitch * o->d.h <= WRITEBACK_MAX &&
+        o->written > o->wb_written) {
         writeback_ex(o->id, false);
     }
 }
@@ -3767,7 +3762,7 @@ void hle_pbd_idle(void)
     }
     g_pd.rt_fresh = true;                   /* the CPU may write the target now (rt_first_write) */
     if (g_pd.on) {
-        writeback_drawn();                  /* a small target's pixels are in memory by now */
+        writeback_drawn();                  /* small targets are visible in guest memory */
     }
     hle_pbd_fence();                        /* the guest may read the targets now */
     keep_serve();
