@@ -32,6 +32,8 @@ typedef struct NcVm {
     int ram_fd;            /* guest physical RAM */
     uint32_t ram_size;
     uint32_t gpu_size;     /* the RAM the NV2A reaches, from 0: all of it up to NC_GPU_REACH */
+    uint32_t title_limit;  /* 0, or the RAM a title limited to less has: pages freed above it stay
+                              kept from it (nc_vm_free_phys) */
     uint8_t *ram;          /* host view of all of physical RAM (== base + 0x80000000) */
     uint8_t *page_used;    /* physical page allocator: one byte per page */
     uint32_t *pte;         /* per guest page: physical address | NC_PTE_VALID, or 0 */

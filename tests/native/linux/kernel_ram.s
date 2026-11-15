@@ -11,6 +11,7 @@
 .set MmAllocateContiguousMemory, THUNK + 4*1
 .set MmQueryStatistics,          THUNK + 4*2
 .set NtAllocateVirtualMemory,    THUNK + 4*3
+.set MmClaimGpuInstanceMemory,   THUNK + 4*4
 
 .set NV_PFB_CSTATUS, 0xFD10020C
 .set GPU_WINDOW,     0x70000000     /* 0xF0000000 - 0x80000000 */
@@ -52,6 +53,19 @@ _start:
     mov dword ptr [eax + GPU_WINDOW], 0x5A5A1234
     cmp dword ptr [eax], 0x5A5A1234
     jne fail
+
+    /* The GPU's instance memory claimed, a page of it: the kernel frees
+     * the rest of what it held, and a block allocated next is still in the
+     * memory the title has. */
+    STEP 6
+    PUSHI pad
+    push 0x1000
+    call dword ptr [MmClaimGpuInstanceMemory]
+    push 0x1000
+    call dword ptr [MmAllocateContiguousMemory]
+    test eax, eax
+    jz fail
+    mov dword ptr [block2], eax
 
     /* 3. All the free memory but a spare, committed. */
     STEP 3
@@ -99,15 +113,16 @@ read:
     cmp ecx, dword ptr [pages]
     jb read
 
-    /* total pages, the NV2A's memory, the block, pages committed */
+    /* total pages, the NV2A's memory, the blocks, pages committed */
     push dword ptr [pages]
+    push dword ptr [block2]
     push dword ptr [block]
     mov eax, NV_PFB_CSTATUS
     push dword ptr [eax]
     push dword ptr [stats + 4]
     PUSHI passed
     call dword ptr [DbgPrint]
-    add esp, 20
+    add esp, 24
     hlt
 fail:
     push dword ptr [step]
@@ -119,9 +134,11 @@ fail:
 .align 4
 step: .long 0
 block: .long 0
+block2: .long 0
+pad: .long 0
 base: .long 0
 size: .long 0
 pages: .long 0
 stats: .fill 9, 4, 0
-passed: .asciz "kram: total %u pages, gpu %08x, block %08x, committed %u pages"
+passed: .asciz "kram: total %u pages, gpu %08x, block %08x, after the instance claim %08x, committed %u pages"
 failed: .asciz "kram: failed at step %d"

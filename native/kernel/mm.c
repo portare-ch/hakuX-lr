@@ -66,10 +66,6 @@ static uint32_t g_gpu_instance_end;
 #define INSTANCE_PAGES 16u
 static uint32_t g_instance_held;    /* bit i: instance page i (from the lowest) still held */
 
-/* The RAM a title limited to the retail console's has (nc_mm_limit_title),
- * or 0: all of it. */
-static uint32_t g_title_limit;
-
 void nc_mm_limit_title(NcKernel *k)
 {
     NcVm *vm = k->vm;
@@ -84,7 +80,7 @@ void nc_mm_limit_title(NcKernel *k)
     for (uint32_t p = NC_RAM_RETAIL / NC_PAGE; p < vm->ram_size / NC_PAGE; p++) {
         held += nc_vm_claim_phys(vm, p * NC_PAGE, NC_PAGE);
     }
-    g_title_limit = NC_RAM_RETAIL;
+    vm->title_limit = NC_RAM_RETAIL;    /* and what is freed there later (nc_vm_free_phys) */
     nc_log("hakuX-native", "mm: the title limits itself to 64 MiB (XBE initialization flag 4): %u MiB of the "
            "console's %u MiB kept from it", held / (0x100000u / NC_PAGE), vm->ram_size >> 20);
 }
@@ -1222,7 +1218,7 @@ static uint64_t MmQueryStatistics(NcKernel *k, NcFrame *f, const uint32_t *a)
     }
     /* the memory the title has: all of it, or the 64 MiB it limited itself
      * to (nc_mm_limit_title) */
-    const uint32_t total = (g_title_limit ? g_title_limit : k->vm->ram_size) / NC_PAGE;
+    const uint32_t total = (k->vm->title_limit ? k->vm->title_limit : k->vm->ram_size) / NC_PAGE;
     uint32_t used = 0;
     for (uint32_t p = 0; p < total; p++) {
         used += k->vm->page_used[p] != 0;
@@ -1324,7 +1320,6 @@ void nc_mm_reset(void)
     g_ncontig = 0;
     pthread_mutex_unlock(&g_contig_mu);
     g_gpu_instance_end = 0;
-    g_title_limit = 0;
     memset(g_kept, 0, sizeof(g_kept));      /* a relaunch's come back from kept.bin, as in a new process */
     g_nkept = 0;
     g_holders_logged = false;

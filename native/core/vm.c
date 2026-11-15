@@ -543,7 +543,13 @@ void nc_vm_free_phys(NcVm *vm, uint32_t pa, uint32_t len)
                 }
             }
         }
-        memset(vm->page_used + pa / NC_PAGE, 0, pages);
+        /* Above a limited title's memory a freed page stays out of the
+         * allocator: what the kernel gives back there (the GPU's instance
+         * pages a title didn't claim) isn't the title's to have. */
+        const uint32_t first = pa / NC_PAGE, top = vm->title_limit ? vm->title_limit / NC_PAGE : UINT32_MAX;
+        if (first < top) {
+            memset(vm->page_used + first, 0, pages < top - first ? pages : top - first);
+        }
         memset(vm->pin + pa / NC_PAGE, 0, pages);
         if (nc_vm_free_hook) {
             nc_vm_free_hook(pa, pages * NC_PAGE);
