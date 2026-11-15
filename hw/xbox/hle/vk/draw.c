@@ -1458,9 +1458,22 @@ unsigned hle_draw_fb_stages(const HleCmdDraw *c, uint32_t rt_id)
         return ff_fb_stages(c, rt_id);
     }
     unsigned m = 0, conv = 0;
+    const HleVkSurf *target = NULL;
     for (unsigned st = 0; st < HLE_TSS_STAGES; st++) {
         unsigned mode = (g_dr.st.rs[HLE_PS_TEXMODES] >> (5 * st)) & 0x1F;
         if (c->tex[st] == rt_id && (mode == HLE_PST_PROJECT2D || mode == HLE_PST_PROJECT3D)) {
+            /* Resized projective reads need a snapshot, not a per-pixel
+             * framebuffer fetch (Prince of Persia's glow passes). */
+            if (c->tex_rect[st] && snap_ok(rt_id)) {
+                if (!target) {
+                    target = hle_surf_get(rt_id);
+                }
+                const uint32_t tex_w = (c->tex_rect[st] >> 16) & 0x1FFFu;
+                const uint32_t tex_h = c->tex_rect[st] & 0x1FFFu;
+                if (target && (tex_w != target->d.w || tex_h != target->d.h)) {
+                    continue;
+                }
+            }
             if (conv_kernel(&g_dr.st, c, st)) {
                 conv |= 1u << st;
             } else {

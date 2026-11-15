@@ -134,6 +134,7 @@ typedef struct PbObj {
     uint64_t bound;                     /* when last bound as a target (g_pd.binds) */
     bool cube;                          /* a cube texture's image, its faces' targets views */
     uint64_t written;                   /* g_pd.wseq at its last draw, clear or copy */
+    uint64_t wb_written;                /* last image update copied back to guest memory */
     uint64_t edge_hash[2];              /* its bytes on its first and last page (rt_cpu_sync) */
     bool cpu_used;                      /* the CPU wrote its memory (writeback) */
     uint64_t mem_seq;                   /* g_pd.wseq when a texture took its memory as the
@@ -1160,9 +1161,26 @@ static void wb_note(uint32_t pa, uint32_t len, uint64_t v)
  * screen. HAKUX_HLE_PB_CPUWB=0: small targets only (A/B). */
 static uint64_t writeback_ex(uint32_t id, bool force);
 
+/* Avoid copying an unchanged target over memory the game may have reused. */
 static void writeback(uint32_t id)
 {
+    const PbObj *o = id ? obj_of(id) : NULL;
+    if (o && o->wb_written && o->written <= o->wb_written) {
+        return;
+    }
     writeback_ex(id, false);
+}
+
+/* Flush small targets at decoder idle rather than waiting for a target
+ * switch. THAW reuses graffiti texture memory before the next bind, and a
+ * late writeback can overwrite its heap metadata. */
+static void writeback_drawn(void)
+{
+    const PbObj *o = g_pd.rt_obj;
+    if (o && o->d.pitch && (uint64_t)o->d.pitch * o->d.h <= WRITEBACK_MAX &&
+        o->written > o->wb_written) {
+        writeback_ex(o->id, false);
+    }
 }
 
 /* force: whatever its size (a frame buffer a copy reads); the landing's
@@ -1176,7 +1194,7 @@ static uint64_t writeback_ex(uint32_t id, bool force)
     }
     const HleSurfDesc *d = id ? object_desc(id) : NULL;
     const HleFmtInfo *fi = d ? hle_fmt_info(d->xfmt) : NULL;
-    const PbObj *o = d ? obj_of(id) : NULL;
+    PbObj *o = d ? obj_of(id) : NULL;
     if (!fi || !d->pitch || (fi->flags & (HLE_FI_DEPTH | HLE_FI_DXT)) || past_block(d) ||
         (!force && (uint64_t)d->pitch * d->h > WRITEBACK_MAX && !(cpu_wb && o && o->cpu_used))) {
         return 0;
@@ -1199,6 +1217,9 @@ static uint64_t writeback_ex(uint32_t id, bool force)
     const uint64_t v = hle_fe_last_value() + 1;
     wb_note(d->pa, len, v);
     g_pd.writebacks++;
+    if (o) {
+        o->wb_written = o->written;
+    }
     return v;
 }
 
@@ -3740,6 +3761,9 @@ void hle_pbd_idle(void)
         kick();
     }
     g_pd.rt_fresh = true;                   /* the CPU may write the target now (rt_first_write) */
+    if (g_pd.on) {
+        writeback_drawn();                  /* small targets are visible in guest memory */
+    }
     hle_pbd_fence();                        /* the guest may read the targets now */
     keep_serve();
 }

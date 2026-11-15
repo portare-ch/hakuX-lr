@@ -22,6 +22,13 @@
   **Patch Games for Console Memory** is enabled (off by default).
   GPU access is capped at 128 MB; additional RAM is available to the CPU.
   Both options require a game restart and leave game files unchanged.
+- **Small render target writebacks** (#119, #147) — Write drawn small
+  targets back at decoder idle, before the game reuses their memory.
+  This fixes crashes in The Sims and Tony Hawk's American Wasteland.
+- **Render target self-sampling** (#97, #98) — Sample a snapshot when a
+  projective texture stage reads the active target at a different size.
+  This fixes washed-out menus in Prince of Persia: Warrior Within and
+  The Two Thrones.
 
 ## linux-v0.26.0 (Linux, aarch64 and x86-64, and Android)
 
