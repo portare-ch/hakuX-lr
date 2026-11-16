@@ -263,6 +263,9 @@ size_t hle_ff_vs_glsl(const HleFfVsKey *k, char *buf, size_t cap)
         put(&b, "  vSpecular = %s;\n",
             (k->fvf & HLE_FVF_SPECULAR) ? "iSpecular" : "vec4(0.0)");
     }
+    /* bytes on the NV2A, rounded before they are interpolated (vsh.c) */
+    put(&b, "  vDiffuse = floor(vDiffuse * 255.0 + 0.5) / 255.0;\n"
+            "  vSpecular = floor(vSpecular * 255.0 + 0.5) / 255.0;\n");
     /* fog coordinate: the fog factor (specular alpha) or the distance the
      * pixel side turns into one; pre-transformed vertices: their w */
     const char *spec_a = (k->fvf & HLE_FVF_SPECULAR) ? "iSpecular.a" : "1.0";
@@ -614,7 +617,8 @@ size_t hle_ff_ps_glsl(const HleFfPsKey *k, char *buf, size_t cap)
         put(&b, "  cur.a *= pcov;\n");          /* before the alpha test, as psh.c */
     }
     if (k->alpha_test && k->alpha_func < 8) {
-        put(&b, "  { float a = cur.a, r = pc.alpha_ref; if (!(%s)) discard; }\n",
+        put(&b, "  { int a = int(clamp(cur.a, 0.0, 1.0) * 255.0 + 0.5), r = int(pc.alpha_ref * 255.0 + 0.5);\n"
+                "    if (!(%s)) discard; }\n",
             k_cmp[k->alpha_func]);
     }
     if (k->fbfetch & HLE_FB_ZEQ) {

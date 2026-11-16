@@ -587,62 +587,6 @@ uint32_t hle_draw_overlay_upload(const uint32_t h5[5], const HlePvideoColor *col
     return off;
 }
 
-/* ---- primitives ---------------------------------------------------------------- */
-
-enum {
-    PT_POINTLIST = 1, PT_LINELIST, PT_LINELOOP, PT_LINESTRIP, PT_TRIANGLELIST,
-    PT_TRIANGLESTRIP, PT_TRIANGLEFAN, PT_QUADLIST, PT_QUADSTRIP, PT_POLYGON,
-};
-/* VkPrimitiveTopology (no Vulkan headers here) */
-enum { VT_POINTS = 0, VT_LINES = 1, VT_LINE_STRIP = 2, VT_TRIS = 3, VT_TRI_STRIP = 4,
-       VT_TRI_FAN = 5 };
-
-uint32_t hle_draw_prim_topology(uint32_t pt)
-{
-    switch (pt) {
-    case PT_POINTLIST:     return VT_POINTS;
-    case PT_LINELIST:      return VT_LINES;
-    case PT_LINELOOP:
-    case PT_LINESTRIP:     return VT_LINE_STRIP;
-    case PT_TRIANGLESTRIP:
-    case PT_QUADSTRIP:     return VT_TRI_STRIP;    /* same vertex order */
-    case PT_TRIANGLEFAN:
-    case PT_POLYGON:       return VT_TRI_FAN;
-    default:               return VT_TRIS;         /* lists; quads become triangles */
-    }
-}
-
-uint32_t hle_draw_prim_count(uint32_t pt, uint32_t n)
-{
-    if (pt == PT_QUADLIST) {
-        return n / 4 * 6;
-    }
-    if (pt == PT_LINELOOP) {
-        return n ? n + 1 : 0;
-    }
-    return n;
-}
-
-void hle_draw_prim_indices(uint32_t pt, const uint16_t *in, uint32_t n, uint32_t base,
-                           uint16_t *out)
-{
-#define IN(i) ((uint16_t)((in ? in[i] : (i)) - base))
-    if (pt == PT_QUADLIST) {
-        for (uint32_t q = 0; q + 3 < n; q += 4) {
-            *out++ = IN(q); *out++ = IN(q + 1); *out++ = IN(q + 2);
-            *out++ = IN(q); *out++ = IN(q + 2); *out++ = IN(q + 3);
-        }
-        return;
-    }
-    for (uint32_t i = 0; i < n; i++) {
-        *out++ = IN(i);
-    }
-    if (pt == PT_LINELOOP && n) {
-        *out = IN(0);
-    }
-#undef IN
-}
-
 /* ---- render targets ---------------------------------------------------------------- */
 
 bool hle_res_upload(uint32_t id, uint32_t pa, uint32_t pitch, uint32_t n,
