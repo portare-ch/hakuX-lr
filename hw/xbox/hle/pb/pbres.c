@@ -380,12 +380,18 @@ static bool tex_define(uint32_t id, const uint32_t h5[5], const HleResDesc *dp,
     if (border && !p8 && !vol && hle_tex_border_conv(d.fmt) && !hle_fmt_sign_xor(d.fmt, sign)) {
         conv = true;
     }
+    /* signed channels of a 16-bit format: widened, then offset binary */
+    const uint32_t wide = !p8 && !dxtd && !etc ? hle_fmt_sign_wide(d.fmt, sign) : 0;
+    if (wide) {
+        conv = true;
+    }
     uint32_t oxfmt = p8 || dxtd ? HLE_XFMT_A8R8G8B8 : etc ? etc_fmt :
                      conv ? hle_tex_conv_xfmt(d.fmt) : d.fmt;
     const HleFmtInfo *ofi = hle_fmt_info(oxfmt);
     /* colour sign: those 8-bit channels offset binary (the texels as stored,
      * not a conversion's) */
-    const uint32_t sxor = oxfmt == d.fmt ? hle_fmt_sign_xor(d.fmt, sign) : 0;
+    const uint32_t sxor = oxfmt == d.fmt ? hle_fmt_sign_xor(d.fmt, sign) :
+                          wide ? hle_fmt_sign_xor(oxfmt, wide) : 0;
     uint32_t faces = d.kind == HLE_RK_CUBE ? 6 : 1, levels = MAX(ri.levels, 1u), total = 0;
     uint32_t depth = vol ? MAX(d.d, 1u) : 1;
     for (uint32_t l = 0; l < levels; l++) {
@@ -505,7 +511,7 @@ static bool tex_define(uint32_t id, const uint32_t h5[5], const HleResDesc *dp,
     c->faces = faces;
     c->arena_off = off;
     c->arena_len = total;
-    c->sign = sxor ? sign : 0;
+    c->sign = !sxor ? 0 : wide ? wide : sign;
     return true;
 }
 

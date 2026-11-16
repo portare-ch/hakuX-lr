@@ -97,6 +97,21 @@ uint32_t hle_fmt_sign_rgba(uint32_t code, uint32_t sign)
     return m;
 }
 
+uint32_t hle_fmt_sign_wide(uint32_t code, uint32_t sign)
+{
+    switch (code) {
+    case HLE_XFMT_A4R4G4B4: case HLE_XFMT_LIN_A4R4G4B4:
+    case HLE_XFMT_A1R5G5B5: case HLE_XFMT_LIN_A1R5G5B5:
+        return sign & 15;
+    case HLE_XFMT_R5G6B5: case HLE_XFMT_LIN_R5G6B5:
+    case HLE_XFMT_X1R5G5B5: case HLE_XFMT_LIN_X1R5G5B5:
+    case HLE_XFMT_R6G5B5: case HLE_XFMT_LIN_R6G5B5:
+        return sign & 14;
+    default:
+        return 0;
+    }
+}
+
 static uint32_t ld16(const uint8_t *p)
 {
     return (uint32_t)p[0] | (uint32_t)p[1] << 8;
@@ -223,6 +238,13 @@ bool hle_tex_convert(uint32_t code, const void *src, uint32_t n, void *dst)
             uint32_t v = ld16(s + 2 * i);
             put32(o, i, 0xFFu << 24 | bits8(v >> 10 & 31, 5) << 16 | bits8(v >> 5 & 31, 5) << 8 |
                         bits8(v & 31, 5));
+        }
+        return true;
+    case HLE_XFMT_A1R5G5B5: case HLE_XFMT_LIN_A1R5G5B5:
+        for (uint32_t i = 0; i < n; i++) {
+            uint32_t v = ld16(s + 2 * i);
+            put32(o, i, (v & 0x8000 ? 0xFFu : 0) << 24 | bits8(v >> 10 & 31, 5) << 16 |
+                        bits8(v >> 5 & 31, 5) << 8 | bits8(v & 31, 5));
         }
         return true;
     case HLE_XFMT_L8: case HLE_XFMT_LIN_L8:

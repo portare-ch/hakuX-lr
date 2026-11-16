@@ -36,6 +36,12 @@ uint32_t hle_fmt_sign_xor(uint32_t code, uint32_t sign);
  * stored. 0 for the formats without (DXT, 16-bit channels, P8, YUV): by
  * the guest's format, not a conversion's. */
 uint32_t hle_fmt_sign_rgba(uint32_t code, uint32_t sign);
+/* A 16-bit colour format's channels among sign's (0 for other formats).
+ * The NV2A reads such a channel widened to eight bits as two's complement
+ * (nxdk_pgraph_tests' Bump map: R5G6B5's green 31 and 32 are +125 and
+ * -126), so the texture uploads as A8R8G8B8 with those channels offset
+ * binary. */
+uint32_t hle_fmt_sign_wide(uint32_t code, uint32_t sign);
 
 /* Convert n unswizzled texels to a format the backend can sample.
  * Colour becomes A8R8G8B8 (bytes B, G, R, A). R6G5B5 always converts with

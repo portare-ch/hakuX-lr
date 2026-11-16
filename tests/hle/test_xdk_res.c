@@ -201,6 +201,27 @@ static void test_sign(void)
     HT_EQ_U32(hle_fmt_sign_xor(HLE_XFMT_G8B8, 0x8), 0x0080u);               /* B: du */
     HT_EQ_U32(hle_fmt_sign_rgba(HLE_XFMT_G8B8, 0x8), 1 | 4);
     HT_EQ_U32(hle_fmt_sign_rgba(HLE_XFMT_G8B8, 0xC), 0xF);
+    /* 16-bit colour formats: their channels, for the upload as A8R8G8B8 */
+    HT_EQ_U32(hle_fmt_sign_wide(HLE_XFMT_R5G6B5, 0xF), 0xE);                /* no alpha */
+    HT_EQ_U32(hle_fmt_sign_wide(HLE_XFMT_LIN_X1R5G5B5, 0x5), 0x4);
+    HT_EQ_U32(hle_fmt_sign_wide(HLE_XFMT_R6G5B5, 0xC), 0xC);
+    HT_EQ_U32(hle_fmt_sign_wide(HLE_XFMT_A4R4G4B4, 0xF), 0xF);
+    HT_EQ_U32(hle_fmt_sign_wide(HLE_XFMT_LIN_A1R5G5B5, 0x1), 0x1);
+    HT_EQ_U32(hle_fmt_sign_wide(HLE_XFMT_A8R8G8B8, 0xF), 0);
+    HT_EQ_U32(hle_fmt_sign_wide(HLE_XFMT_G8B8, 0xC), 0);
+    HT_EQ_U32(hle_fmt_sign_xor(HLE_XFMT_R5G6B5, 0xF), 0);                   /* not as stored */
+    {
+        /* A1R5G5B5 widened: R5G6B5's green 31 and 32 are 125 and 130 */
+        const uint8_t a1[4] = { 0x1F, 0x80, 0xE0, 0x7F };
+        const uint8_t g6[4] = { 0xE0, 0x03, 0x00, 0x04 };
+        uint32_t o[2];
+        HT_CHECK(hle_tex_convert(HLE_XFMT_A1R5G5B5, a1, 2, o));
+        HT_EQ_U32(o[0], 0xFF0000FFu);
+        HT_EQ_U32(o[1], 0x00FFFF00u);
+        HT_CHECK(hle_tex_convert(HLE_XFMT_R5G6B5, g6, 2, o));
+        HT_EQ_U32(o[0], 0xFF007D00u);
+        HT_EQ_U32(o[1], 0xFF008200u);
+    }
     HT_EQ_U32(hle_fmt_sign_rgba(HLE_XFMT_R8B8, 0x2), 1 | 8);
     HT_EQ_U32(hle_fmt_sign_xor(HLE_XFMT_DXT1, 0xF), 0);                    /* no bytes */
     HT_EQ_U32(hle_fmt_sign_xor(HLE_XFMT_R5G6B5, 0xF), 0);
