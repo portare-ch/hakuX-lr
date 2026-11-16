@@ -4174,6 +4174,9 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
             const uint32_t *ts = stage_tss(s, c, st, tt);   /* sampk's border too */
             const uint32_t slot = stage_slot(c, st, rt_id, &pc.flags);
             pc.tex[st] = slot | sampler_index(ts, stage_lod_down(c, st, rt_id), slot_sw(slot)) << 16;
+            if ((ts[TSS_MAGFILTER] & 7) == 1 && (ts[TSS_MINFILTER] & 7) == 1) {
+                pc.flags |= 16u << st;      /* point sampled (psh.c samp) */
+            }
             if (conv_kernel(s, c, st)) {
                 pc.tex[st] |= sampler_lod0(ts, slot_sw(slot)) << 24;   /* sampk's taps */
             }

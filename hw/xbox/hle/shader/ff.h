@@ -168,7 +168,10 @@ typedef struct HleFfPush {
                                          pair) */
     float alpha_ref;                  /* ALPHAREF / 255 */
     uint32_t flags;                   /* bit s: stage s samples a linear texture
-                                         (texel coordinates); bit 8 + s: that
+                                         (texel coordinates); bit 4 + s: stage s
+                                         is point sampled (pixel shaders: a
+                                         coordinate on a texel's edge takes the
+                                         texel after it); bit 8 + s: that
                                          texture is a surface rendered at the
                                          resolution scale (not a small target,
                                          at 1x: vk/draw.c stage_slot); bits

@@ -594,9 +594,17 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "vec4 samp(uint s, vec2 uv) {\n"
             "  uint ti = pc.tex[s] & 0xFFFFu, si = (pc.tex[s] >> 16) & 0xFFu;\n"
             "%s"
+            "  vec2 sz = vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[0]), 0));\n"
             "  if ((pc.flags & (1u << s)) != 0u)\n"
-            "    uv /= vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[0]), 0)) /\n"
-            "          ((pc.flags & (256u << s)) != 0u ? float(pc.flags >> 24) : 1.0);\n"
+            "    uv /= sz / ((pc.flags & (256u << s)) != 0u ? float(pc.flags >> 24) : 1.0);\n"
+            /* Point sampling, a coordinate on a texel's edge: the texel after
+             * it. The NV2A's plane equations land such a coordinate on the
+             * edge or a hair past it (nxdk_pgraph_tests' checkerboard, 256
+             * texels over 640 pixels: every column and most rows at an
+             * edge); interpolated here it falls a few units in the last place
+             * to either side, by the triangle. 1/4096 texel settles it. */
+            "  if ((pc.flags & (16u << s)) != 0u)\n"
+            "    uv += 0.000244140625 / sz;\n"
             "  return %s;\n"
             "}\n"
             "vec4 samp3(uint s, vec3 uvw) {\n"
