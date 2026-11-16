@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+## linux-v0.30.0 (Linux, aarch64 and x86-64, and Android)
+
+This release improves NV2A rendering accuracy, with fixes for shadows,
+fog, texture formats and render-target reuse. It also fixes a GPU FIFO
+wait that could hang nxdk graphics tests.
+See the [graphics test results](https://hakuxlr.portareos.org/nv2atests/)
+for the current breakdown.
+
+### Fixes
+
+- **Shadows and textures** (#231) — Correct depth-texture comparisons,
+  per-stage shadow filtering, texture border colours and linear row
+  pitches, including YUY2/UYVY textures.
+- **Render-target reuse** (#231, #232, #234) — Read updated memory when
+  a texture differs from the render target at the same address. Wait for
+  pending GPU copies before reading that memory as textures or vertices.
+- **Vertex attributes and lighting** (#232) — Preserve the last vertex's
+  attributes for later draws that omit them, and use the correct component
+  of a vertex shader's fog output.
+- **Fog** (#234) — Match the Xbox's exponential fog calculations and
+  handling of infinite and NaN fog terms.
+- **GPU FIFO** (#233) — Clear acknowledged PFIFO interrupt bits and
+  preserve the cache-drain state expected by pbkit. The Image blit suite
+  now completes during full graphics-test runs.
+
+### Testing
+
+The latest full-disc comparison against Xbox reference captures matches
+2,113 of 3,556 tests, excluding deprecated cases. Native tests pass 35/35
+and HLE tests pass 28/28. Validation used Linux x86-64 (KVM), render scale
+1x and synchronous pipeline compilation.
+
+Earlier changes passed short game smoke runs. The final fog changes have
+not yet been retested in retail games or on ARM64 devices.
+
 ## linux-v0.29.0 (Linux, aarch64 and x86-64, and Android)
 
 The AMD64 (x86-64) KVM backend now passes all 15 tests and all 183 checks
