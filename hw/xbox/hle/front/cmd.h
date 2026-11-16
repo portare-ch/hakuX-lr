@@ -48,6 +48,9 @@ enum HleOp {
  * 16-bit float, not a fixed-point fraction. Or'd into map[0] of a 32-bit
  * read, map[1] of a D16 one. */
 #define HLE_ZREAD_FLOAT  0x80
+/* A 24-bit float depth image holds the depth over 2^HLE_ZFLOAT24_EXP
+ * (pb/pbdraw.c zfloat_scale; the read back's 2^100 in vk/zread.c is this) */
+#define HLE_ZFLOAT24_EXP 100
 typedef struct HleCmdZRead {
     uint32_t dst, src;          /* object ids */
     uint8_t map[4];

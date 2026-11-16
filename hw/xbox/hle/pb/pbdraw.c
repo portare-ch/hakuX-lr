@@ -835,7 +835,7 @@ static bool past_block(const HleSurfDesc *d)
 
 static bool d16_padded(const HleSurfDesc *d)
 {
-    return d->xfmt == HLE_XFMT_LIN_D16 && d->w && d->h && d->pitch > d->w * 2;
+    return (d->xfmt == HLE_XFMT_LIN_D16 || d->xfmt == HLE_XFMT_LIN_F16) && d->w && d->h && d->pitch > d->w * 2;
 }
 
 /* Dirty pages and contiguous spans include the gaps between depth rows.
@@ -1506,23 +1506,32 @@ static void rt_first_land(bool full)
 /* A float depth buffer (CONTROL0 bit 12) holds the depth itself: D3D's range
  * is 0 .. 1e30 for F24S8 and 0 .. 511.9375 (the format's maximum) for F16,
  * its far plane what it sets as CLIP_MAX. The image (D32_SFLOAT) holds it
- * over that maximum, as the shadow-buffer compares read it (psh.c k_max):
- * the largest scale whose product with the maximum stays within 1.0, so a
- * vertex on the far plane does not clip. Unscaled, Touge R's scene (F24S8,
- * the far plane at 1e30) clipped or clamped to 1.0 against its clear at 0.0
- * and failed its LESSEQUAL test: the screen black under the HUD. */
+ * scaled into 0 .. 1, so a vertex on the far plane does not clip. Unscaled,
+ * Touge R's scene (F24S8, the far plane at 1e30) clipped or clamped to 1.0
+ * against its clear at 0.0 and failed its LESSEQUAL test: the screen black
+ * under the HUD. F16's scale is 1 / its maximum, as the shadow-buffer
+ * compares read it (psh.c k_max): the largest whose product with the
+ * maximum stays within 1.0. F24's is 2^-100 (HLE_ZFLOAT24_EXP, 1e30 at
+ * 0.79): a power of two, so the image's value is the depth's own mantissa
+ * and the read back (vk/zread.c) gets the word that was cleared or drawn.
+ * Over 1e30, the product and the read back's each rounded: 1.8 million of
+ * the clear words came back one higher (0xE193E5, D3D's 0.5e30, as
+ * 0xE193E6). */
 static float zfloat_scale(bool z24)
 {
-    static float s[2];
-    if (!s[z24]) {
-        const float m = z24 ? 1.0e30f : 511.9375f;
+    static float s;
+    if (z24) {
+        return ldexpf(1.0f, -HLE_ZFLOAT24_EXP);
+    }
+    if (!s) {
+        const float m = 511.9375f;
         float v = 1.0f / m;
         while (m * v > 1.0f) {
             v = nextafterf(v, 0.0f);
         }
-        s[z24] = v;
+        s = v;
     }
-    return s[z24];
+    return s;
 }
 
 /* A float depth buffer's clear value (F24: 8-bit exponent, 16-bit mantissa;
@@ -1574,8 +1583,25 @@ static void ds_twin_clear(void)
             x = q;
         }
     }
-    if (!x) {
+    if (!x || obj_superseded(x)) {          /* the memory defined as data since */
         return;
+    }
+    /* the memory's last writer: a colour target over it written since the
+     * clear holds what the words are now (zwrite_from_colour brings a
+     * 32-bit one's in before this), not the clear */
+    const HleFmtInfo *xi = hle_fmt_info(x->d.xfmt);
+    const uint32_t len = x->d.pitch ? x->d.pitch * x->d.h : x->d.w * x->d.h * (xi ? xi->bpp / 8 : 4);
+    for (unsigned i = 0; i < g_pd.nobjs; i++) {
+        const PbObj *q = &g_pd.objs[i];
+        const HleFmtInfo *fi = q->id && q != x && q != o && !q->cube && q->written > x->written ?
+                               hle_fmt_info(q->d.xfmt) : NULL;
+        if (!fi) {
+            continue;
+        }
+        const uint32_t qlen = q->d.pitch ? q->d.pitch * q->d.h : q->d.w * q->d.h * (fi->bpp / 8);
+        if (q->d.pa < x->d.pa + len && q->d.pa + qlen > x->d.pa) {
+            return;
+        }
     }
     const uint32_t zs = x->zclr_val;
     HleCmdClear *c = begin(HLE_OP_CLEAR, sizeof(*c));
@@ -1603,7 +1629,8 @@ static void ds_twin_clear(void)
  * buffer at its readback, the conversion skipped as older (cmd_zread). */
 static void zbase(PbObj *o)
 {
-    if (!o->d.pitch || (o->d.xfmt != HLE_XFMT_LIN_D24S8 && o->d.xfmt != HLE_XFMT_LIN_D16) || past_block(&o->d)) {
+    if (!o->d.pitch || (o->d.xfmt != HLE_XFMT_LIN_D24S8 && o->d.xfmt != HLE_XFMT_LIN_D16 &&
+                        o->d.xfmt != HLE_XFMT_LIN_F24S8 && o->d.xfmt != HLE_XFMT_LIN_F16) || past_block(&o->d)) {
         return;
     }
     if (d16_padded(&o->d)) {
@@ -1690,7 +1717,12 @@ static void clear(uint32_t flags)
     }
     if (c->flags & (HLE_CLEAR_ZBUFFER | HLE_CLEAR_STENCIL)) {
         ds_written();
-        if (g_pd.ds_obj && whole && (c->flags & HLE_CLEAR_ZBUFFER)) {
+        /* all of the depth object: the clear is over what the two targets
+         * share, and a depth buffer may be larger than the colour target
+         * bound with it (object(): its rows below stay as they were) */
+        const PbObj *co = g_pd.rt_obj;
+        if (g_pd.ds_obj && whole && (c->flags & HLE_CLEAR_ZBUFFER) &&
+            (!co || (co->d.w >= g_pd.ds_obj->d.w && co->d.h >= g_pd.ds_obj->d.h))) {
             g_pd.ds_obj->zclr_seq = g_pd.ds_obj->written;
             g_pd.ds_obj->zclr_val = zs;
             g_pd.ds_obj->zclr_flags = c->flags & (HLE_CLEAR_ZBUFFER | HLE_CLEAR_STENCIL);

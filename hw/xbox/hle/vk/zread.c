@@ -51,11 +51,13 @@ static const char k_fs[] =
     "  float z = clamp(texelFetch(zt, q, 0).r, 0.0, 1.0);\n"
     "  uint d = min(uint(round(z * 16777215.0)), 16777215u);\n"
     /* a float buffer (HLE_ZREAD_FLOAT): the depth itself, the image's over
-     * 1e30 (pb/pbdraw.c zfloat_scale), as the NV2A's 24 bits: a float's
-     * exponent and the top 16 of its mantissa. An image at its maximum
-     * holds what was more (a clear to 0xFFFFFF, D3D's far): that word */
+     * 2^100 (HLE_ZFLOAT24_EXP, pb/pbdraw.c zfloat_scale: the product exact,
+     * so a cleared word comes back as it was), as the NV2A's 24 bits: a
+     * float's exponent and the top 16 of its mantissa. An image at its
+     * maximum holds what was more (a clear to 0xFFFFFF, D3D's far): that
+     * word */
     "  if ((pc.map.x & 0x80u) != 0u)\n"
-    "    d = z >= 1.0 ? 0xFFFFFFu : floatBitsToUint(z * 1.0e30) >> 7;\n"
+    "    d = z >= 1.0 ? 0xFFFFFFu : floatBitsToUint(z * 1267650600228229401496703205376.0) >> 7;\n"
     "  uint w = d << 8 | (texelFetch(st, q, 0).r & 0xFFu);\n"
     "  if (halves) {\n"
     "    uint h = pc.map.y > 1u || ((uint(p.x) / max(pc.map.y, 1u)) & 1u) != 0u ? w >> 16\n"
