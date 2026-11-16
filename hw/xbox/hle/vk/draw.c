@@ -1328,13 +1328,12 @@ static unsigned shadow_fmt(uint32_t id)
 }
 
 /* The draw blends with a signed equation the shader does (sblend): 1
- * ADDSIGNED, 2 REVSUBTRACTSIGNED; 0 none (or factors other than ONE / ONE,
- * drawn unsigned). */
+ * ADDSIGNED, 2 REVSUBTRACTSIGNED; 0 none. Whatever the factors: the NV2A
+ * ignores them for these two. */
 static unsigned signed_blend(const HleCmdState *s)
 {
     uint32_t op = s->rs[RS_BLENDOP];
-    if (!g_hvk.caps.fbfetch || !s->rs[RS_ALPHABLENDENABLE] || (op != 0xF005 && op != 0xF006) ||
-        s->rs[RS_SRCBLEND] != 1 || s->rs[RS_DESTBLEND] != 1) {
+    if (!g_hvk.caps.fbfetch || !s->rs[RS_ALPHABLENDENABLE] || (op != 0xF005 && op != 0xF006)) {
         return 0;
     }
     return op == 0xF006 ? 1 : 2;
@@ -4540,16 +4539,19 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
     k.dst = s->rs[RS_DESTBLEND];
     k.op = s->rs[RS_BLENDOP];
     /* The NV2A's signed equations, ADDSIGNED (0xF006) and REVSUBTRACTSIGNED
-     * (0xF005), add and subtract the colours as two's-complement bytes,
-     * saturating: Midnight Club 3 counts its headlight volumes' front and back
-     * faces into the alpha of a cleared light mask, so the faces in front of
-     * the road cancel to 0 (an unsigned subtract clamps at 0 and the add then
-     * lights everything in front of the volume). With ONE / ONE the shader
-     * does the equation on the target's pixel (fbfetch), the blend is off. */
+     * (0xF005), add the source to the target's byte, or subtract it, as a
+     * two's-complement byte, and keep the result in 0 .. 255; the blend
+     * factors play no part (nxdk_pgraph_tests' Blend tests, every source
+     * and destination factor: 0x33 + 0xDD is 0x10, 0 + 0xDD is 0, 0xFF +
+     * 0x7F is 0xFF). Midnight Club 3 counts its headlight volumes' front
+     * and back faces into the alpha of a cleared light mask, 0xFF for -1
+     * (an unsigned add of it lights everything in front of the volume).
+     * The shader does the equation on the target's pixel (fbfetch), the
+     * blend is off. */
     /* On 16-bit targets, shader blending normally precedes dithering.
      * Smooth-line coverage is applied after the shader, so those draws
      * dither first and use fixed-function blending instead.
-     * Signed ONE/ONE blending ignores source alpha. */
+     * Signed blending ignores source alpha. */
     const bool vk_cov = lsmooth && g_hvk.caps.smooth_lines;
     if (k.blend_en && s->psh && k.pk.dither && k.op != 0xF005 && k.op != 0xF006 && !vk_cov) {
         if (dither_blend(s, rt_id)) {

@@ -46,6 +46,29 @@ static struct {
     uint64_t after;
 } g_vretire[HLE_MAX_VIEW_RETIRE];
 
+/* Guest-size scratch images that readbacks of scaled surfaces are blitted
+ * down into, and uploads into a target go through: one per format and
+ * size, the most recently used kept. A title with more sizes than slots
+ * takes the one unused longest: with none to take, every upload of a new
+ * size was skipped for the rest of the session (nxdk_pgraph_tests' Blend
+ * tests after Antialiasing tests and Blend surface: the target's
+ * CPU-written background never reached its image). The image replaced
+ * goes once the recording that may still use it has completed. */
+#define HLE_MAX_DOWN 16
+static struct {
+    VkImage img;
+    VkDeviceMemory mem;
+    VkFormat fmt;
+    uint32_t w, h;
+    uint64_t used;
+} g_down[HLE_MAX_DOWN];
+static uint64_t g_down_seq;
+static struct {
+    VkImage img;
+    VkDeviceMemory mem;
+    uint64_t after;
+} g_dretire[HLE_MAX_DOWN];
+
 static void retire_view(VkImageView v)
 {
     if (!v) {
@@ -460,6 +483,11 @@ void hle_surf_stamp_parked(uint64_t value)
             g_vretire[i].after = value;
         }
     }
+    for (unsigned i = 0; i < HLE_MAX_DOWN; i++) {
+        if (g_dretire[i].img && g_dretire[i].after == HLE_SURF_PARKED) {
+            g_dretire[i].after = value;
+        }
+    }
 }
 
 void hle_surf_reap(uint64_t completed)
@@ -478,28 +506,45 @@ void hle_surf_reap(uint64_t completed)
             g_vretire[i].v = VK_NULL_HANDLE;
         }
     }
+    for (unsigned i = 0; i < HLE_MAX_DOWN; i++) {
+        if (g_dretire[i].img && g_dretire[i].after != HLE_SURF_PARKED &&
+            g_dretire[i].after <= completed) {
+            T.vkDestroyImage(g_hvk.dev, g_dretire[i].img, NULL);
+            T.vkFreeMemory(g_hvk.dev, g_dretire[i].mem, NULL);
+            g_dretire[i].img = VK_NULL_HANDLE;
+        }
+    }
 }
-
-/* Guest-size scratch images that readbacks of scaled surfaces are blitted
- * down into: one per format and size, kept until the surfaces go. */
-#define HLE_MAX_DOWN 8
-static struct {
-    VkImage img;
-    VkDeviceMemory mem;
-    VkFormat fmt;
-    uint32_t w, h;
-} g_down[HLE_MAX_DOWN];
 
 static VkImage down_image(VkFormat fmt, uint32_t w, uint32_t h)
 {
-    unsigned i = 0;
-    for (; i < HLE_MAX_DOWN && g_down[i].img; i++) {
-        if (g_down[i].fmt == fmt && g_down[i].w == w && g_down[i].h == h) {
-            return g_down[i].img;
+    unsigned i = HLE_MAX_DOWN, old = 0;
+    for (unsigned k = 0; k < HLE_MAX_DOWN; k++) {
+        if (!g_down[k].img) {
+            i = i == HLE_MAX_DOWN ? k : i;
+            continue;
+        }
+        if (g_down[k].fmt == fmt && g_down[k].w == w && g_down[k].h == h) {
+            g_down[k].used = ++g_down_seq;
+            return g_down[k].img;
+        }
+        if (!g_down[old].img || g_down[k].used < g_down[old].used) {
+            old = k;
         }
     }
     if (i == HLE_MAX_DOWN) {
-        return VK_NULL_HANDLE;
+        unsigned r = 0;
+        while (r < HLE_MAX_DOWN && g_dretire[r].img) {
+            r++;
+        }
+        if (r == HLE_MAX_DOWN) {
+            return VK_NULL_HANDLE;          /* (as many replaced within one recording) */
+        }
+        g_dretire[r].img = g_down[old].img;
+        g_dretire[r].mem = g_down[old].mem;
+        g_dretire[r].after = HLE_SURF_PARKED;
+        g_down[old].img = VK_NULL_HANDLE;
+        i = old;
     }
     VkImageCreateInfo ici = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D,
@@ -528,6 +573,7 @@ static VkImage down_image(VkFormat fmt, uint32_t w, uint32_t h)
     g_down[i].fmt = fmt;
     g_down[i].w = w;
     g_down[i].h = h;
+    g_down[i].used = ++g_down_seq;
     return img;
 }
 
@@ -584,6 +630,13 @@ void hle_surf_destroy_all(void)
         }
     }
     memset(g_down, 0, sizeof(g_down));
+    for (unsigned i = 0; i < HLE_MAX_DOWN; i++) {
+        if (g_dretire[i].img) {
+            T.vkDestroyImage(g_hvk.dev, g_dretire[i].img, NULL);
+            T.vkFreeMemory(g_hvk.dev, g_dretire[i].mem, NULL);
+        }
+    }
+    memset(g_dretire, 0, sizeof(g_dretire));
     for (unsigned i = 0; i < HLE_MAX_VK_SURF; i++) {
         if (g_surf[i].alive) {
             destroy_now(&g_surf[i]);

@@ -24,15 +24,15 @@ static unsigned edge_add(int32_t *e, unsigned n, int32_t v)
  * each, the runs of x the clip lets through, a run continuing one of the
  * band above (same x) making that rectangle taller. An inclusive clip of one
  * rectangle is one; an exclusive one up to 4 (above, left, right, below). */
-int hle_pb_window_clip(const uint32_t *horiz, const uint32_t *vert, bool exclusive, uint32_t ax,
-                       uint32_t ay, const HleRect *area, HleRect *out)
+int hle_pb_window_clip(const uint32_t *horiz, const uint32_t *vert, unsigned count, bool exclusive,
+                       uint32_t ax, uint32_t ay, const HleRect *area, HleRect *out)
 {
     HleRect r[8];
     unsigned nr = 0;
     bool used = false;
-    for (unsigned i = 0; i < 8; i++) {
+    for (unsigned i = 0; i < (count ? MIN(count, 8u) : 8u); i++) {
         const uint32_t x = horiz[i], y = vert[i];
-        if (!x && !y) {
+        if (!count && !x && !y) {
             continue;
         }
         used = true;
