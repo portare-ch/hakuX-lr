@@ -147,6 +147,13 @@ typedef struct PbObj {
     uint64_t mem_seq;                   /* g_pd.wseq when a texture took its memory as the
                                            title's data: superseded while written <= it */
     bool zbase;                         /* depth: cleared whole, the CPU's writes before taken */
+    uint64_t zclr_seq;                  /* depth: its last write (written) when that was a
+                                           clear of all of it, to zclr_val
+                                           (ZSTENCIL_CLEAR_VALUE) by zclr_flags: what the
+                                           same memory bound as the other of fixed and
+                                           float takes over (ds_twin_clear) */
+    uint32_t zclr_val;
+    uint8_t zclr_flags;
     uint64_t zedge[2];                  /* depth: its first and last pages' bytes then */
     uint64_t z_rows;                     /* padded D16: the last known RAM depth pixels */
     /* its memory against its image (coh_*, colour targets) */
@@ -1297,6 +1304,7 @@ static void mode_sync(void)
 
 static uint64_t z_mem_sum(const PbObj *o);
 static void coh_drawn(PbObj *o);
+static void ds_twin_clear(void);
 static void coh_first_write(PbObj *o, bool full);
 static bool coh_managed(const PbObj *o, uint32_t *len);
 static void coh_land_over(const PbObj *o, uint32_t len);
@@ -1407,6 +1415,7 @@ static void sync_rt(void)
         s->ds = ds;
         hle_fe_commit();
         rt_cpu_sync(rt);
+        ds_twin_clear();
         g_pd.rt_fresh = true;
         g_pd.vp_key[0] = g_pd.vp_key[1] = ~0u;
     }
@@ -1533,6 +1542,58 @@ static float zfloat_clear(uint32_t v, bool z24)
 
 static bool zsync_stencil(PbObj *o);
 
+/* A depth buffer's memory is one to the NV2A whether CONTROL0 says its words
+ * are fixed point or floats; here each reading is an object with an image of
+ * its own. Bound as one right after the other was cleared whole, it has that
+ * clear's words: cleared too, the value read its own way. nxdk_pgraph_tests'
+ * W buffering clears to 0xFFFFFF as fixed point and then draws with float
+ * depth: the float image kept the test before's depths, nearer than the
+ * scene, and nothing was drawn. */
+static void ds_twin_clear(void)
+{
+    PbObj *o = g_pd.ds_obj;
+    if (!o) {
+        return;
+    }
+    static const uint8_t k_twin[4][2] = {
+        { HLE_XFMT_LIN_D24S8, HLE_XFMT_LIN_F24S8 }, { HLE_XFMT_D24S8, HLE_XFMT_F24S8 },
+        { HLE_XFMT_LIN_D16, HLE_XFMT_LIN_F16 }, { HLE_XFMT_D16, HLE_XFMT_F16 } };
+    unsigned t = 0, me = 0;
+    for (; t < 4 && k_twin[t][0] != o->d.xfmt && k_twin[t][1] != o->d.xfmt; t++) {
+    }
+    if (t == 4) {
+        return;
+    }
+    me = k_twin[t][1] == o->d.xfmt;
+    const PbObj *x = NULL;
+    for (unsigned i = 0; i < g_pd.nobjs; i++) {
+        const PbObj *q = &g_pd.objs[i];
+        if (q->id && q != o && q->d.xfmt == k_twin[t][!me] && q->d.pa == o->d.pa && q->d.w == o->d.w &&
+            q->d.h == o->d.h && q->d.pitch == o->d.pitch && q->zclr_seq && q->zclr_seq == q->written &&
+            q->written > o->written) {
+            x = q;
+        }
+    }
+    if (!x) {
+        return;
+    }
+    const uint32_t zs = x->zclr_val;
+    HleCmdClear *c = begin(HLE_OP_CLEAR, sizeof(*c));
+    memset(c, 0, sizeof(*c));
+    c->flags = x->zclr_flags;
+    if (t < 2) {
+        c->z = me ? zfloat_clear(zs >> 8, true) : (zs >> 8) / 16777215.0f;
+        c->stencil = zs & 0xFF;
+    } else {
+        c->z = me ? zfloat_clear(zs & 0xFFFF, false) : (zs & 0xFFFF) / 65535.0f;
+    }
+    hle_fe_commit();
+    o->written = ++g_pd.wseq;
+    o->zclr_seq = o->written;
+    o->zclr_val = zs;
+    o->zclr_flags = x->zclr_flags;
+}
+
 /* A linear depth buffer cleared whole: the CPU's writes into its memory
  * before are older than its image. Its pages' dirty bits taken now (the
  * first and last page by their bytes, which other data shares), so a later
@@ -1629,6 +1690,11 @@ static void clear(uint32_t flags)
     }
     if (c->flags & (HLE_CLEAR_ZBUFFER | HLE_CLEAR_STENCIL)) {
         ds_written();
+        if (g_pd.ds_obj && whole && (c->flags & HLE_CLEAR_ZBUFFER)) {
+            g_pd.ds_obj->zclr_seq = g_pd.ds_obj->written;
+            g_pd.ds_obj->zclr_val = zs;
+            g_pd.ds_obj->zclr_flags = c->flags & (HLE_CLEAR_ZBUFFER | HLE_CLEAR_STENCIL);
+        }
     }
     /* A depth-only clear can reset the RAM baseline once its stencil
      * is current in the image. */
@@ -2975,13 +3041,15 @@ static uint32_t zread(uint32_t pa, uint32_t w, uint32_t h, const uint8_t map[4],
                       uint32_t pitch, const PbObj *want)
 {
     const bool halves = map[0] == HLE_ZREAD_HALVES, d16 = map[0] == HLE_ZREAD_D16;
+    const bool zfl = (d16 ? map[1] : map[0]) & HLE_ZREAD_FLOAT;
     const uint32_t bpp = halves || d16 ? 2 : 4;
     pitch = pitch ? pitch : w * bpp;
     const PbObj *src = NULL;
     for (unsigned i = 0; i < g_pd.nobjs; i++) {
         const PbObj *o = &g_pd.objs[i];
         if (o->d.pa == pa && o->d.w * (halves ? 2 : 1) == w && o->d.h == h &&
-            (d16 ? o->d.xfmt == HLE_XFMT_LIN_D16 :
+            (d16 ? o->d.xfmt == (zfl ? HLE_XFMT_LIN_F16 : HLE_XFMT_LIN_D16) :
+             zfl ? o->d.xfmt == HLE_XFMT_LIN_F24S8 :
                    o->d.xfmt == HLE_XFMT_D24S8 || o->d.xfmt == HLE_XFMT_LIN_D24S8) &&
             (!want || o == want) && (!src || o->bound > src->bound)) {
             src = o;
@@ -5601,8 +5669,10 @@ uint64_t hle_pbd_copy_begin(uint32_t slo, uint32_t sp, uint32_t dlo, uint32_t dp
     for (unsigned i = 0; i < g_pd.nobjs; i++) {
         PbObj *o = &g_pd.objs[i];
         const uint32_t zlen = o->d.pitch * o->d.h;
-        const bool lin = o->d.xfmt == HLE_XFMT_LIN_D24S8 ? o->d.pitch == o->d.w * 4 :
-                         o->d.xfmt == HLE_XFMT_LIN_D16 && o->d.pitch >= o->d.w * 2 && !(o->d.pitch & 1);
+        const bool z24 = o->d.xfmt == HLE_XFMT_LIN_D24S8 || o->d.xfmt == HLE_XFMT_LIN_F24S8;
+        const bool z16 = o->d.xfmt == HLE_XFMT_LIN_D16 || o->d.xfmt == HLE_XFMT_LIN_F16;
+        const bool lin = z24 ? o->d.pitch == o->d.w * 4 :
+                         z16 && o->d.pitch >= o->d.w * 2 && !(o->d.pitch & 1);
         if (lin && o->d.pitch && !past_block(&o->d) &&
             o->d.pa <= s0 && s1 <= o->d.pa + zlen && (!zb || o->written > zb->written)) {
             zb = o;                         /* the newest drawn one holding the source */
@@ -5625,11 +5695,17 @@ uint64_t hle_pbd_copy_begin(uint32_t slo, uint32_t sp, uint32_t dlo, uint32_t dp
         PbObj *o = zb;
         const uint32_t zlen = o->d.pitch * o->d.h;
         if (o->fb_wb_w != o->written) {
-            uint8_t map[4] = { HLE_ZREAD_D16, 0, 0, 0 };
-            const bool d16 = o->d.xfmt == HLE_XFMT_LIN_D16;
-            const uint32_t zid = d16 ? zread(o->d.pa, o->d.w, o->d.h, map, HLE_XFMT_LIN_L16, o->d.pitch, o) :
-                                 hle_res_zread_map(HLE_XFMT_LIN_A8R8G8B8, map) ?
-                                 zread(o->d.pa, o->d.w, o->d.h, map, HLE_XFMT_LIN_A8R8G8B8, 0, o) : 0;
+            /* a float buffer's words are the NV2A's floats (HLE_ZREAD_FLOAT) */
+            const bool zfl = o->d.xfmt == HLE_XFMT_LIN_F16 || o->d.xfmt == HLE_XFMT_LIN_F24S8;
+            uint8_t map[4] = { HLE_ZREAD_D16, zfl ? HLE_ZREAD_FLOAT : 0, 0, 0 };
+            const bool d16 = o->d.xfmt == HLE_XFMT_LIN_D16 || o->d.xfmt == HLE_XFMT_LIN_F16;
+            uint32_t zid = 0;
+            if (d16) {
+                zid = zread(o->d.pa, o->d.w, o->d.h, map, HLE_XFMT_LIN_L16, o->d.pitch, o);
+            } else if (hle_res_zread_map(HLE_XFMT_LIN_A8R8G8B8, map)) {
+                map[0] |= zfl ? HLE_ZREAD_FLOAT : 0;
+                zid = zread(o->d.pa, o->d.w, o->d.h, map, HLE_XFMT_LIN_A8R8G8B8, 0, o);
+            }
             o->fb_wb_v = 0;
             const bool direct = hle_res_ram_direct();
             if (zid && (direct || hle_tl_land_room(2))) {

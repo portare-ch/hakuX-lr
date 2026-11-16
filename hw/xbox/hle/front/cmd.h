@@ -44,6 +44,10 @@ enum HleOp {
  * words, as 16-bit luminance. */
 #define HLE_ZREAD_HALVES 5
 #define HLE_ZREAD_D16    6
+/* A float depth buffer: its words are the depth as the NV2A's 24-bit or
+ * 16-bit float, not a fixed-point fraction. Or'd into map[0] of a 32-bit
+ * read, map[1] of a D16 one. */
+#define HLE_ZREAD_FLOAT  0x80
 typedef struct HleCmdZRead {
     uint32_t dst, src;          /* object ids */
     uint8_t map[4];
