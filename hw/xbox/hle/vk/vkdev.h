@@ -94,6 +94,11 @@ typedef struct HleCaps {
                                    pipelines (vk/draw.c PipeKey.ds) */
     bool eds2;                  /* extended dynamic state 2, else depth bias and primitive
                                    restart enables are too, and strips aren't batched */
+    bool dbias_float;           /* VK_EXT_depth_bias_control with the float representation:
+                                   a polygon offset on a float depth image is a depth of
+                                   its own (vk/draw.c), else steps of the image's format,
+                                   whose size follows each primitive's depth */
+    bool dbias_exact;           /* ... and the driver adds it unscaled (depthBiasExact) */
     /* Plus tier, opportunistic (§5.1) */
     bool gpl, eds3, descriptor_buffer, maint5, sscaled, local_read;
     bool fbfetch;               /* local read (+ push descriptors or pooled sets):

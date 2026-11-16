@@ -163,6 +163,12 @@ static VKAPI_ATTR void VKAPI_CALL w_vkCmdSetDepthBias(VkCommandBuffer commandBuf
     R.vkCmdSetDepthBias(commandBuffer, depthBiasConstantFactor, depthBiasClamp, depthBiasSlopeFactor);
 }
 
+static VKAPI_ATTR void VKAPI_CALL w_vkCmdSetDepthBias2EXT(VkCommandBuffer commandBuffer, const VkDepthBiasInfoEXT* pDepthBiasInfo)
+{
+    batch_before(commandBuffer);
+    R.vkCmdSetDepthBias2EXT(commandBuffer, pDepthBiasInfo);
+}
+
 static VKAPI_ATTR void VKAPI_CALL w_vkCmdSetDepthBiasEnable(VkCommandBuffer commandBuffer, VkBool32 depthBiasEnable)
 {
     batch_before(commandBuffer);
@@ -353,6 +359,9 @@ static void wrap_table(struct VolkDeviceTable *t)
     }
     if (t->vkCmdSetDepthBias) {
         t->vkCmdSetDepthBias = w_vkCmdSetDepthBias;
+    }
+    if (t->vkCmdSetDepthBias2EXT) {
+        t->vkCmdSetDepthBias2EXT = w_vkCmdSetDepthBias2EXT;
     }
     if (t->vkCmdSetDepthBiasEnable) {
         t->vkCmdSetDepthBiasEnable = w_vkCmdSetDepthBiasEnable;

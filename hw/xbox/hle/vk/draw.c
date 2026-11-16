@@ -3750,7 +3750,7 @@ static struct {
     uint32_t cull, ff, topo, zt, zw, zop, bias_en, stn, sop[4], smask, swmask, sref;
     float lw;                           /* line width (target pixels) */
     uint32_t sraw[4];               /* the registers sop was translated from */
-    float bias[2], bc[4];
+    float bias[3], bc[4];
     bool bc_lost;                   /* a pipeline without colour zeroed the driver's
                                        blend constants (HLE_QUIRK_BLEND_CONST_RESET) */
     uint32_t nbd, nad;
@@ -4647,6 +4647,7 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
     const uint32_t ofs_en = s->rs[RS_SOLIDOFFSETENABLE - fl.offset];
     bool bias = zt && tris && !(dbgf & 4) && ofs_en && isfinite(zslope) &&
                 isfinite(zofs) && (zslope != 0.0f || zofs != 0.0f);
+    const bool gbias = bias;            /* the title's own, not a pass's step added below */
     /* Passes that test without writing (LESSEQUAL / GREATEREQUAL) redraw
      * surfaces already in the depth buffer: the NV2A gives the same program
      * math the same depth on every pass, ours can come out a step off (the
@@ -4692,6 +4693,22 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         memcpy(&pc.psc[18], bias ? &zofs : &(float){ 0.0f }, 4);
         memcpy(&pc.psc[19], bias ? &zslope : &(float){ 0.0f }, 4);
         bias = false;
+    }
+    /* A float depth image (D24S8 where the device has none, the float
+     * formats): Vulkan's constant factor counts steps of the largest depth
+     * in the primitive, half the size under each power of two, where the
+     * NV2A's offset is the same depth everywhere. With depth bias control
+     * the offset is given as that depth: one step of a 24-bit buffer, or the
+     * float buffer's own scale (the offset is added to the depth the buffer
+     * stores). nxdk_pgraph_tests' W buffering draws its D24 floor with an
+     * offset of 16 and got 8 under 0.5, 4 under 0.25. A float buffer with
+     * only the passes' own step above keeps the image's steps: one of the
+     * depth's is under its precision. */
+    const bool fixed24 = c->zscale == 1.0f / 16777216.0f;
+    const bool bias_abs = bias && g_hvk.caps.dbias_float && ds && (fixed24 || gbias) &&
+                          (ds->fmt == VK_FORMAT_D32_SFLOAT || ds->fmt == VK_FORMAT_D32_SFLOAT_S8_UINT);
+    if (bias_abs) {
+        zofs *= fixed24 ? 1.0f / 16777215.0f : c->zscale;
     }
     if (!g_hvk.caps.vids) {
         vi_key(&k.vi, c, k.vs.fvf, cur_diffuse, ad, na);
@@ -4919,10 +4936,23 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         g_dr.emits[EM_DYN]++;
     }
     {
-        float bv[2] = { bias ? zofs : 0.0f, bias ? zslope : 0.0f };
+        float bv[3] = { bias ? zofs : 0.0f, bias ? zslope : 0.0f, bias && bias_abs ? 1.0f : 0.0f };
         if (!g_rec.valid || memcmp(g_rec.bias, bv, sizeof(bv))) {
             memcpy(g_rec.bias, bv, sizeof(bv));
-            T.vkCmdSetDepthBias(cb, bv[0], 0.0f, bv[1]);
+            if (g_hvk.caps.dbias_float) {
+                const VkDepthBiasRepresentationInfoEXT rep = {
+                    .sType = VK_STRUCTURE_TYPE_DEPTH_BIAS_REPRESENTATION_INFO_EXT,
+                    .depthBiasRepresentation = bv[2] != 0.0f ?
+                        VK_DEPTH_BIAS_REPRESENTATION_FLOAT_EXT :
+                        VK_DEPTH_BIAS_REPRESENTATION_LEAST_REPRESENTABLE_VALUE_FORMAT_EXT,
+                    .depthBiasExact = bv[2] != 0.0f && g_hvk.caps.dbias_exact };
+                const VkDepthBiasInfoEXT bi = {
+                    .sType = VK_STRUCTURE_TYPE_DEPTH_BIAS_INFO_EXT, .pNext = &rep,
+                    .depthBiasConstantFactor = bv[0], .depthBiasSlopeFactor = bv[1] };
+                T.vkCmdSetDepthBias2EXT(cb, &bi);
+            } else {
+                T.vkCmdSetDepthBias(cb, bv[0], 0.0f, bv[1]);
+            }
             g_dr.emits[EM_DYN]++;
         }
     }
