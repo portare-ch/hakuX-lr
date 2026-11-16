@@ -352,11 +352,17 @@ static inline const char *hle_push_glsl(void)
  * it (other vertices) tilted against each other by up to 1/16 of the depth
  * slope per pixel, at a grazing angle more than the decal stands off, and it
  * flickered out as the camera moved (Burnout 3's road stains and manhole
- * covers, Dead or Alive 2's eaves shadows). debug.hakux.snap=trunc: the
- * truncation (HLE_SNAP_TRUNC_FLAG), for A/B. */
+ * covers, Dead or Alive 2's eaves shadows). A coordinate already on the
+ * 1/16 grid stays where it is, as the truncation leaves it: moved, its
+ * depth at every pixel was that of a point 1/32 pixel away, 1/32 of the
+ * slope per pixel off (nxdk_pgraph_tests' Depth buffer, whose vertices are
+ * whole pixels: 437 of 2^24 on its large quad). A position D3D gives is
+ * never on the grid (its offset ends in 1/32).
+ * debug.hakux.snap=trunc: the truncation (HLE_SNAP_TRUNC_FLAG), for A/B. */
 #define HLE_SNAP_TRUNC_FLAG 8192u
 #define HLE_SUBPIXEL_GLSL(v) \
-    "  " v " = (pc.flags & 8192u) != 0u ? trunc(" v " * 16.0) / 16.0 : " v " - 0.03125;\n"
+    "  " v " = (pc.flags & 8192u) != 0u ? trunc(" v " * 16.0) / 16.0 :\n" \
+    "      " v " - 0.03125 * vec2(notEqual(fract(" v " * 16.0), vec2(0.0)));\n"
 
 /* Screen positions v (D3D screen pixels, after HLE_SUBPIXEL_GLSL) at a
  * resolution scale s > 1 (HleFfPush.flags bits 16-23; bit 12: the NV2A's

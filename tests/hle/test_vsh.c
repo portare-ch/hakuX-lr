@@ -120,6 +120,16 @@ static void test_overflow(void)
     HT_CHECK(hle_vsh_glsl(&k_prog[0][0], NSLOTS, &k, buf, 512) == 0);
 }
 
+/* Screen positions move by the truncation's mean, 1/32 pixel; a coordinate
+ * already on the NV2A's 1/16 grid stays, as its truncation leaves it */
+static void test_subpixel(void)
+{
+    HleVshKey k = { 0 };
+    HT_CHECK(hle_vsh_glsl(&k_prog[0][0], NSLOTS, &k, buf, sizeof(buf)) > 0);
+    HT_CHECK(strstr(buf, "scr - 0.03125 * vec2(notEqual(fract(scr * 16.0), vec2(0.0)));") != NULL);
+    HT_CHECK(strstr(buf, "trunc(scr * 16.0) / 16.0") != NULL);
+}
+
 int main(void)
 {
     HT_RUN(test_program);
@@ -127,6 +137,7 @@ int main(void)
     HT_RUN(test_no_final);
     HT_RUN(test_stops_at_final);
     HT_RUN(test_unwritten_fog);
+    HT_RUN(test_subpixel);
     HT_RUN(test_overflow);
     HT_DONE();
 }

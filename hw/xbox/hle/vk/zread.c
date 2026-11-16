@@ -48,8 +48,16 @@ static const char k_fs[] =
      * wrap a far plane past 2^24 - 1 to 0 (Mercenaries' sky dome,
      * depth-tested against its copied scene depth, then failed wherever the
      * scene was empty) */
-    "  uint d = min(uint(round(clamp(texelFetch(zt, q, 0).r, 0.0, 1.0) * 16777215.0)),\n"
-    "               16777215u);\n"
+    "  float z = clamp(texelFetch(zt, q, 0).r, 0.0, 1.0);\n"
+    "  uint d = min(uint(round(z * 16777215.0)), 16777215u);\n"
+    /* a float buffer (HLE_ZREAD_FLOAT): the depth itself, the image's over
+     * 2^100 (HLE_ZFLOAT24_EXP, pb/pbdraw.c zfloat_scale: the product exact,
+     * so a cleared word comes back as it was), as the NV2A's 24 bits: a
+     * float's exponent and the top 16 of its mantissa. An image at its
+     * maximum holds what was more (a clear to 0xFFFFFF, D3D's far): that
+     * word */
+    "  if ((pc.map.x & 0x80u) != 0u)\n"
+    "    d = z >= 1.0 ? 0xFFFFFFu : floatBitsToUint(z * 1267650600228229401496703205376.0) >> 7;\n"
     "  uint w = d << 8 | (texelFetch(st, q, 0).r & 0xFFu);\n"
     "  if (halves) {\n"
     "    uint h = pc.map.y > 1u || ((uint(p.x) / max(pc.map.y, 1u)) & 1u) != 0u ? w >> 16\n"
@@ -57,17 +65,27 @@ static const char k_fs[] =
     "    o = vec4(float(h) / 65535.0);\n"
     "    return;\n"
     "  }\n"
-    "  o = vec4(ch(w, pc.map.x), ch(w, pc.map.y), ch(w, pc.map.z), ch(w, pc.map.w));\n"
+    "  o = vec4(ch(w, pc.map.x & 0x7Fu), ch(w, pc.map.y), ch(w, pc.map.z), ch(w, pc.map.w));\n"
     "}\n";
 
 /* HLE_ZREAD_D16: a D16 target's words, as 16-bit luminance (no stencil) */
 static const char k_fs16[] =
     "#version 450\n"
     "layout(set = 0, binding = 0) uniform sampler2D zt;\n"
+    "layout(push_constant) uniform P { uvec4 map; } pc;\n"
     "layout(location = 0) out vec4 o;\n"
     "void main() {\n"
     "  float d = clamp(texelFetch(zt, ivec2(gl_FragCoord.xy), 0).r, 0.0, 1.0);\n"
-    "  o = vec4(float(uint(d * 65535.0 + 0.5)) / 65535.0);\n"
+    "  uint v = uint(d * 65535.0 + 0.5);\n"
+    /* a float buffer (map[1] = HLE_ZREAD_FLOAT): the depth, the image's over
+     * 511.9375, as the NV2A's 16 bits: a 4-bit exponent from 2^-7 and 12
+     * bits of mantissa. A depth of exponent 0 (below 2^-6) is stored 0
+     * (nxdk_pgraph_tests' Depth buffer: every word under 0x1000) */
+    "  if (pc.map.y == 0x80u) {\n"
+    "    uint b = floatBitsToUint(d * 511.9375);\n"
+    "    v = b < 0x3C800000u ? 0u : min((b - 0x3C000000u) >> 11, 65535u);\n"
+    "  }\n"
+    "  o = vec4(float(v) / 65535.0);\n"
     "}\n";
 
 /* HLE_OP_ZWRITE: a colour surface's 32-bit words a.r.g.b as D24S8 depth << 8 |
