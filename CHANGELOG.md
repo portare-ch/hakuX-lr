@@ -2,6 +2,46 @@
 
 ## Unreleased
 
+## linux-v0.31.0 (Linux, aarch64 and x86-64, and Android)
+
+This release improves NV2A blending, bump mapping, lighting and depth
+handling. In the full graphics-test run, 2,727 of 3,556 tests now meet
+the comparison threshold against Xbox reference captures, up from 2,113
+in 0.30.0. See the [graphics test results](https://hakuxlr.portareos.org/nv2atests/)
+for the breakdown.
+
+### Fixes
+
+- **Blending and render targets** (#237) — Correct signed blend
+  equations and recycle temporary upload images. Previously, uploads
+  could silently stop after eight different image sizes. The Blend tests
+  suite now passes 105/105 and Texture render target passes 42/42.
+- **Window clipping** (#237) — Use the clip rectangles selected by the
+  game, including single-pixel rectangles. Window clip now passes 92/92.
+- **Bump mapping** (#236) — Correct bump-offset scaling, filtering,
+  signed 16-bit texture formats and luminance.
+- **Textures and lighting** (#235) — Improve point sampling at texel
+  boundaries and apply the selected material colour to ambient lighting.
+- **Depth buffers** (#238) — Write floating-point depth back to Xbox
+  memory, preserve clears when switching between fixed and floating-point
+  formats, and keep vertices already on the NV2A's subpixel grid in place.
+- **Polygon offset** (#239) — Use exact depth-bias units on drivers that
+  support `VK_EXT_depth_bias_control` with `floatRepresentation`. Other
+  drivers keep the existing path.
+
+### Testing
+
+Validation used Linux x86-64 (KVM), render scale 1x and synchronous
+pipeline compilation. HLE tests pass 28/28 and native tests pass 35/35.
+Short smoke runs of Burnout 3, Dead or Alive 3, Halo 2 and Conker
+completed without errors.
+
+The graphics-test count uses the suite's comparison threshold; it does
+not mean every pixel matches. Longer gameplay checks remain pending,
+particularly decals in Burnout 3 and Dead or Alive 2, Midnight Club 3's
+headlights and Dead or Alive 3's character selection. These changes have
+not been tested on ARM64 hardware; Android ARM64 remains experimental.
+
 ## linux-v0.30.0 (Linux, aarch64 and x86-64, and Android)
 
 This release improves NV2A rendering accuracy, with fixes for shadows,
