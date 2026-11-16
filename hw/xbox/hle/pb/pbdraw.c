@@ -3412,7 +3412,7 @@ static uint32_t texture(unsigned s, bool *unset, bool *lin)
     /* colour sign: the signed 8-bit channels uploaded offset binary, an
      * object apart from the texture read unsigned */
     const uint32_t sign = R(NV097_SET_TEXTURE_FILTER + b) >> 28;
-    const uint32_t sxor = hle_fmt_sign_xor(code, sign);
+    const uint32_t sxor = hle_fmt_sign_xor(code, sign) | hle_fmt_sign_wide(code, sign);
     /* Convert formats whose channel mapping would alter the border colour
      * (address mode 4). Also preserve linear pitches the header cannot encode. */
     const uint32_t addr = R(NV097_SET_TEXTURE_ADDRESS + b);

@@ -505,6 +505,20 @@ static void test_bumpenv(void)
     HT_EQ_U32(un, 0);
     HT_CHECK(strstr(buf, "sgn8(t1.bg);") != NULL);
     HT_CHECK(strstr(buf, "t2.rgb *= clamp(l.x * t1.r + l.y, 0.0, 1.0);") != NULL);
+    /* the offsets: bytes over 128; the input stage (t1) filters on the
+     * NV2A's weight grid, other shaders' samp() is as it was */
+    HT_CHECK(strstr(buf, "greaterThanEqual(v, vec2(128.0))) / 128.0;") != NULL);
+    HT_CHECK(strstr(buf, "if (((2u >> s) & 1u) != 0u) {\n"
+                         "    vec2 p = uv * sz - 0.5, f = floor(p);\n"
+                         "    uv = (f + floor((p - f) * 256.0) / 256.0 + 0.50048828125) / sz;")
+             != NULL);
+    k.sgn_raw = 0x10;                                   /* t1's red signed: its byte, unsigned */
+    HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), &un) > 0);
+    HT_CHECK(strstr(buf, "t2.rgb *= clamp(l.x * bmpu(t1.r) + l.y, 0.0, 1.0);") != NULL);
+    rs[HLE_PS_TEXMODES] = 1;
+    hle_psh_key(rs, &k);
+    HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), &un) > 0);
+    HT_CHECK(strstr(buf, "floor((p - f) * 256.0)") == NULL);
 }
 
 /* two-sided lighting: back faces read v0 / v1 from the back colours */
@@ -600,14 +614,15 @@ static void test_sign(void)
     HT_CHECK(strstr(buf, "t1.r = sgnraw(t1.r);") != NULL);
     HT_CHECK(strstr(buf, "vec4 tsh(vec4 t, bvec4 m) { return mix(t, max(t * (255.0 / 254.0), "
                          "-1.0), m); }") != NULL);
-    HT_CHECK(strstr(buf, "* tsh(t0, bvec4(false, true, true, true)).bg;") != NULL);
+    HT_CHECK(strstr(buf, "* bmps(t0.bg);") != NULL);    /* the bytes again, over 128 */
+    HT_CHECK(strstr(buf, "float bmps(float c) { return c <= -1.0 ? -1.0 : "
+                         "floor(c * 127.5 + 0.5) / 128.0; }") != NULL);
     HT_CHECK(strstr(buf, "sgn8(t0.bg)") == NULL);
     HT_CHECK(strstr(buf, "vec3 A = max(t1.rgb, 0.0);") != NULL);     /* combiners: as decoded */
     k.sgn_ob = 0x4;                                     /* b only */
     k.sgn_raw = 0;
     HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), NULL) > 0);
-    HT_CHECK(strstr(buf, "* vec2(tsh(t0, bvec4(false, false, true, false)).b, sgn8(t0.bg).y);")
-             != NULL);
+    HT_CHECK(strstr(buf, "* vec2(bmps(t0.b), sgn8(t0.bg).y);") != NULL);
     /* a dot product and a dependent read of a signed t0 */
     rs[HLE_PS_TEXMODES] = HLE_PST_PROJECT2D | HLE_PST_DOTPRODUCT << 5 | HLE_PST_DPNDNT_GB << 10;
     hle_psh_key(rs, &k);

@@ -574,6 +574,27 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
                  "#define GLT3(t, s, v) (((GLCLAMP >> (3u * (s))) & 7u) != 0u ? "
                  "textureGrad(t, glc3(s, v), dFdx(v), dFdy(v)) : texture(t, v))\n", k->tex_modes >> 20);
     }
+    /* A bump stage's offsets: the NV2A filters the input stage's texels with
+     * weights of eight bits, cut off, and the offsets are whole bytes: half a
+     * step of the weight between +127 and -128 is a texel of the offset
+     * stage (nxdk_pgraph_tests' Bump map). The input stage's coordinates
+     * move down to that grid, a hair inside the step, so that the host's
+     * filter takes the same weights whatever its own rounding. */
+    char bsnap[320] = "";
+    unsigned bin = 0;
+    for (unsigned s = 1; s < 4; s++) {
+        const unsigned m = (k->tex_modes >> (5 * s)) & 0x1F;
+        if (m == HLE_PST_BUMPENVMAP || m == HLE_PST_BUMPENVMAP_LUM) {
+            bin |= 1u << (s == 3 ? (k->input_tex >> 20) & 3 : s == 2 ? (k->input_tex >> 16) & 1 : 0);
+        }
+    }
+    if (bin) {
+        snprintf(bsnap, sizeof(bsnap),
+                 "  if (((%uu >> s) & 1u) != 0u) {\n"
+                 "    vec2 p = uv * sz - 0.5, f = floor(p);\n"
+                 "    uv = (f + floor((p - f) * 256.0) / 256.0 + 0.50048828125) / sz;\n"
+                 "  }\n", bin);
+    }
     put(&b, "layout(set = 0, binding = 0) uniform texture2D uTex2D[];\n"
             "layout(set = 0, binding = 1) uniform sampler uSmp[];\n"
             "layout(set = 0, binding = 2) uniform textureCube uTexCube[];\n"
@@ -597,6 +618,7 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "  vec2 sz = vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[0]), 0));\n"
             "  if ((pc.flags & (1u << s)) != 0u)\n"
             "    uv /= sz / ((pc.flags & (256u << s)) != 0u ? float(pc.flags >> 24) : 1.0);\n"
+            "%s"
             /* Point sampling, a coordinate on a texel's edge: the texel after
              * it. The NV2A's plane equations land such a coordinate on the
              * edge or a hair past it (nxdk_pgraph_tests' checkerboard, 256
@@ -626,10 +648,18 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "    return vec3(h, m == 4u ? 1.0 : sqrt(max(1.0 - dot(h, h), 0.0))); }\n"
             "  return c.rgb * 2.0 - 1.0;\n"
             "}\n"
-            /* bytes as two's complement over 127 (bump offsets) */
+            /* bytes as two's complement over 128 (bump offsets) */
             "vec2 sgn8(vec2 c) {\n"
             "  vec2 v = floor(c * 255.0 + 0.5);\n"
-            "  return mix(v, v - 256.0, greaterThanEqual(v, vec2(128.0))) / 127.0;\n"
+            "  return mix(v, v - 256.0, greaterThanEqual(v, vec2(128.0))) / 128.0;\n"
+            "}\n"
+            /* a signed channel (sign_decode: the byte over 127.5, -128 as
+             * -127.5) as that offset: the byte to the nearest, over 128 */
+            "float bmps(float c) { return c <= -1.0 ? -1.0 : floor(c * 127.5 + 0.5) / 128.0; }\n"
+            "vec2 bmps(vec2 c) { return vec2(bmps(c.x), bmps(c.y)); }\n"
+            "float bmpu(float c) {\n"
+            "  float v = c <= -1.0 ? -128.0 : floor(c * 127.5 + 0.5);\n"
+            "  return (v < 0.0 ? v + 256.0 : v) / 255.0;\n"
             "}\n"
             "%s%s%s"
             "void main() {\n"
@@ -646,6 +676,7 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "    if (r != 0u && s == ((r >> 28 & 1u) | (r >> 30 & 2u)))\n"
             "      uv = nvrect(uv, (pc.flags & (256u << s)) != 0u ? 0.5 / float(pc.flags >> 24) : 0.5); }\n"
             : "",
+        bsnap,
         gl ? "GLT2(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), s, uv)"
            : "texture(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), uv)",
         gl ? "GLT3(sampler3D(uTex3D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), s, uvw)"
@@ -796,23 +827,25 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             static const char *const mat[4][2] = {
                 { "", "" }, { "pc.bump.x", "pc.bump.y" }, { "pc.bump.z", "pc.bump.w" },
                 { "pc.bump3.x", "pc.bump3.y" } };
-            /* (du, dv) the input's signed bytes; a channel colour sign already
-             * made signed (sign_decode) as it is, over 127 (tex_read) */
+            /* (du, dv) the input's bytes as two's complement over 128: 127
+             * moves the stage 127 / 128 of the matrix's column, -128 all of
+             * it the other way (nxdk_pgraph_tests' Bump map: over 127 the
+             * console's offsets were a texel in 128 short). A channel colour
+             * sign already made signed (sign_decode) is that byte again. */
             const unsigned sd = ((k->sgn_ob | k->sgn_raw) >> (4 * in)) & 6;
             char duv[176], du[80], dv[80];
-            tex_read(ts, sizeof(ts), k, in);
             if (sd & 4) {
-                snprintf(du, sizeof(du), "%s.b", ts);
+                snprintf(du, sizeof(du), "bmps(t%u.b)", in);
             } else {
                 snprintf(du, sizeof(du), "sgn8(t%u.bg).x", in);
             }
             if (sd & 2) {
-                snprintf(dv, sizeof(dv), "%s.g", ts);
+                snprintf(dv, sizeof(dv), "bmps(t%u.g)", in);
             } else {
                 snprintf(dv, sizeof(dv), "sgn8(t%u.bg).y", in);
             }
             if (sd == 6) {
-                snprintf(duv, sizeof(duv), "%s.bg", ts);
+                snprintf(duv, sizeof(duv), "bmps(t%u.bg)", in);
             } else if (!sd) {
                 snprintf(duv, sizeof(duv), "sgn8(t%u.bg)", in);
             } else {
@@ -829,8 +862,13 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
                 put(&b, "    t%u = samp(%uu, nvproj(vTex%u).xy + d);\n", s, s, s);
             }
             if (m == HLE_PST_BUMPENVMAP_LUM) {
+                /* the luminance is the red byte unsigned, a signed one's
+                 * bits too (filtered as signed): -1 is 255 */
+                char lr[32];
+                snprintf(lr, sizeof(lr), ((k->sgn_ob | k->sgn_raw) >> (4 * in)) & 1 ?
+                         "bmpu(t%u.r)" : "t%u.r", in);
                 put(&b, "    vec2 l = unpackHalf2x16(pc.bumpl[%u]);\n"
-                        "    t%u.rgb *= clamp(l.x * %s.r + l.y, 0.0, 1.0);\n", s - 1, s, ts);
+                        "    t%u.rgb *= clamp(l.x * %s + l.y, 0.0, 1.0);\n", s - 1, s, lr);
             }
             put(&b, "  }\n");
             break;
