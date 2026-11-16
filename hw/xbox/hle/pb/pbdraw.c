@@ -298,6 +298,8 @@ static struct {
     uint32_t st_gen;                    /* hle_kelvin_state_gen of st */
     uint32_t vp_key[2];
     uint32_t wc_key[17];                /* the window clip the viewport was sent with */
+    uint32_t wc_count;                  /* the window clip's rectangles in use: up to the
+                                           one written last (pb/wclip.h); 0 none yet */
     uint64_t draws, ff, skipped;
     PbTex *tex;                         /* TEX_SLOTS */
     unsigned ntex;
@@ -1416,7 +1418,7 @@ static void sync_rt(void)
     /* the surface clip: the draws' viewport rect and scissor, and the
      * window clip inside it */
     uint32_t wc[17];
-    wc[0] = R(NV097_SET_WINDOW_CLIP_TYPE);
+    wc[0] = (R(NV097_SET_WINDOW_CLIP_TYPE) & 1) | g_pd.wc_count << 8;
     for (unsigned i = 0; i < 16; i++) {
         wc[1 + i] = R(NV097_SET_WINDOW_CLIP_HORIZONTAL + 4 * i);
     }
@@ -1434,7 +1436,8 @@ static void sync_rt(void)
         const HleRect area = { (int32_t)vx, (int32_t)vy, (int32_t)(vx + vw), (int32_t)(vy + vh) };
         HleRect pieces[HLE_CMD_MAX_CLIP];
         const int n = hle_pb_window_clip(&R(NV097_SET_WINDOW_CLIP_HORIZONTAL), &R(NV097_SET_WINDOW_CLIP_VERTICAL),
-                                         R(NV097_SET_WINDOW_CLIP_TYPE) & 1, g_pd.aa_x, g_pd.aa_y, &area, pieces);
+                                         g_pd.wc_count, R(NV097_SET_WINDOW_CLIP_TYPE) & 1, g_pd.aa_x,
+                                         g_pd.aa_y, &area, pieces);
         const uint32_t np = n > 0 ? (uint32_t)n : 0;
         HleCmdViewport *v = begin(HLE_OP_VIEWPORT, offsetof(HleCmdViewport, rect) + np * sizeof(HleRect));
         v->x = vx;
@@ -5047,6 +5050,7 @@ void hle_pbd_method(uint32_t m, uint32_t v)
     }
     if (m - NV097_SET_WINDOW_CLIP_HORIZONTAL < 0x40) {
         g_pd.rt_dirty = true;               /* the window clip's rectangles */
+        g_pd.wc_count = ((m - NV097_SET_WINDOW_CLIP_HORIZONTAL) / 4 & 7) + 1;
     }
     switch (m) {
     case NV097_SET_CONTEXT_DMA_A:

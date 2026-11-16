@@ -140,11 +140,12 @@ typedef struct HleFfPsKey {
                                          samples at the point's coordinates */
     uint8_t out_bgra;                 /* 8-bit (B8) target: it stores blue */
     uint8_t wbuf;                     /* W-buffering: depth = vW (HLE_WBUF_*_GLSL) */
-    uint8_t sblend;                   /* the NV2A's signed blend equations, ONE / ONE (the
-                                         fixed-function blend is off): the output and
-                                         the target's pixel (uFb, set 2) as two's-
-                                         complement bytes, 1 dst + src (ADDSIGNED), 2
-                                         dst - src (REVSUBTRACTSIGNED), saturated */
+    uint8_t sblend;                   /* the NV2A's signed blend equations (the
+                                         fixed-function blend is off): the target's
+                                         pixel (uFb, set 2) and the output as a two's-
+                                         complement byte, 1 dst + src (ADDSIGNED), 2
+                                         dst - src (REVSUBTRACTSIGNED), kept in
+                                         0 .. 255 */
     uint8_t fbfetch;                  /* stages (bits) whose texture is the colour target:
                                          its pixel as the earlier draws left it (uFb),
                                          as the NV2A's texture unit reads the memory

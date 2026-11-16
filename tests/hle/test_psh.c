@@ -521,6 +521,26 @@ static void test_bumpenv(void)
     HT_CHECK(strstr(buf, "floor((p - f) * 256.0)") == NULL);
 }
 
+/* the signed blend equations: the source a two's-complement byte, the
+ * target's unsigned, the result in 0 .. 255 */
+static void test_sblend(void)
+{
+    uint32_t rs[HLE_PS_REGS] = { 0 };
+    rs[HLE_PS_COUNT] = 1;
+    HlePshKey k;
+    hle_psh_key(rs, &k);
+    HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), NULL) > 0);
+    HT_CHECK(strstr(buf, "subpassLoad(uFb)") == NULL);
+    k.sblend = 1;
+    HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), NULL) > 0);
+    HT_CHECK(strstr(buf, "sv -= 256 * (sv >> 7);\n"
+                         "    oColor = vec4(clamp(dv + sv, ivec4(0), ivec4(255))) / 255.0; }") != NULL);
+    HT_CHECK(strstr(buf, "dv -= 256") == NULL);
+    k.sblend = 2;
+    HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), NULL) > 0);
+    HT_CHECK(strstr(buf, "clamp(dv - sv, ivec4(0), ivec4(255))") != NULL);
+}
+
 /* two-sided lighting: back faces read v0 / v1 from the back colours */
 static void test_two_side(void)
 {
@@ -1087,6 +1107,7 @@ int main(void)
     HT_RUN(test_shadow_point);
     HT_RUN(test_shadow_f24);
     HT_RUN(test_bumpenv);
+    HT_RUN(test_sblend);
     HT_RUN(test_two_side);
     HT_RUN(test_color_key);
     HT_RUN(test_convolution);

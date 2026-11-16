@@ -1053,9 +1053,8 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
     if (k->sblend) {
         put(&b, "  { ivec4 sv = ivec4(floor(clamp(%s, 0.0, 1.0) * 255.0 + 0.5));\n"
         "    ivec4 dv = ivec4(floor(clamp(subpassLoad(uFb), 0.0, 1.0) * 255.0 + 0.5));\n"
-        "    sv -= 256 * (sv >> 7); dv -= 256 * (dv >> 7);\n"
-        "    ivec4 r = clamp(dv %s sv, ivec4(-128), ivec4(127));\n"
-        "    oColor = vec4(r & 255) / 255.0; }\n", "oColor", k->sblend == 1 ? "+" : "-");
+        "    sv -= 256 * (sv >> 7);\n"
+        "    oColor = vec4(clamp(dv %s sv, ivec4(0), ivec4(255))) / 255.0; }\n", "oColor", k->sblend == 1 ? "+" : "-");
     }
     if (k->fblend) {
         /* the blend with the target's pixel, here so that the dither below

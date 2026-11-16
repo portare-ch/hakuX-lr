@@ -43,7 +43,7 @@ static bool drawn(bool exclusive, uint32_t ax, uint32_t ay, int32_t x, int32_t y
 /* Every pixel of the area drawn exactly once if drawn() says so, never else */
 static void check_exact(bool exclusive, uint32_t ax, uint32_t ay, const HleRect *area)
 {
-    const int n = hle_pb_window_clip(hz, vt, exclusive, ax, ay, area, out);
+    const int n = hle_pb_window_clip(hz, vt, 0, exclusive, ax, ay, area, out);
     HT_CHECK(n >= -1 && n <= HLE_CMD_MAX_CLIP);
     unsigned bad = 0;
     for (int32_t y = area->y1; y < area->y2; y++) {
@@ -62,15 +62,15 @@ static void test_no_clip(void)
 {
     const HleRect area = { 0, 0, 640, 480 };
     none();
-    HT_EQ_INT(hle_pb_window_clip(hz, vt, false, 1, 1, &area, out), -1);
-    HT_EQ_INT(hle_pb_window_clip(hz, vt, true, 1, 1, &area, out), -1);
+    HT_EQ_INT(hle_pb_window_clip(hz, vt, 0, false, 1, 1, &area, out), -1);
+    HT_EQ_INT(hle_pb_window_clip(hz, vt, 0, true, 1, 1, &area, out), -1);
     /* D3D's "no scissors": the first window over the whole surface */
     win(0, 0, 639, 0, 479);
-    HT_EQ_INT(hle_pb_window_clip(hz, vt, false, 1, 1, &area, out), -1);
+    HT_EQ_INT(hle_pb_window_clip(hz, vt, 0, false, 1, 1, &area, out), -1);
     /* an exclusive window outside the area excludes nothing */
     none();
     win(0, 700, 800, 0, 10);
-    HT_EQ_INT(hle_pb_window_clip(hz, vt, true, 1, 1, &area, out), -1);
+    HT_EQ_INT(hle_pb_window_clip(hz, vt, 0, true, 1, 1, &area, out), -1);
 }
 
 /* One inclusive window: one rectangle (the scissor the draws had before),
@@ -80,16 +80,16 @@ static void test_inclusive_one(void)
     const HleRect area = { 0, 0, 640, 480 };
     none();
     win(0, 100, 199, 50, 149);
-    HT_EQ_INT(hle_pb_window_clip(hz, vt, false, 1, 1, &area, out), 1);
+    HT_EQ_INT(hle_pb_window_clip(hz, vt, 0, false, 1, 1, &area, out), 1);
     HT_CHECK(rect_eq(&out[0], 100, 50, 200, 150));
-    HT_EQ_INT(hle_pb_window_clip(hz, vt, false, 2, 2, &area, out), 1);
+    HT_EQ_INT(hle_pb_window_clip(hz, vt, 0, false, 2, 2, &area, out), 1);
     HT_CHECK(rect_eq(&out[0], 200, 100, 400, 300));
     const HleRect part = { 150, 0, 640, 100 };
-    HT_EQ_INT(hle_pb_window_clip(hz, vt, false, 1, 1, &part, out), 1);
+    HT_EQ_INT(hle_pb_window_clip(hz, vt, 0, false, 1, 1, &part, out), 1);
     HT_CHECK(rect_eq(&out[0], 150, 50, 200, 100));
     /* outside the area: nothing drawn */
     const HleRect far = { 300, 300, 640, 480 };
-    HT_EQ_INT(hle_pb_window_clip(hz, vt, false, 1, 1, &far, out), 0);
+    HT_EQ_INT(hle_pb_window_clip(hz, vt, 0, false, 1, 1, &far, out), 0);
 }
 
 /* Several inclusive windows: their union, not the box around them (which
@@ -100,20 +100,20 @@ static void test_inclusive_union(void)
     none();
     win(0, 0, 99, 0, 99);
     win(1, 500, 599, 300, 399);
-    HT_EQ_INT(hle_pb_window_clip(hz, vt, false, 1, 1, &area, out), 2);
+    HT_EQ_INT(hle_pb_window_clip(hz, vt, 0, false, 1, 1, &area, out), 2);
     HT_CHECK(rect_eq(&out[0], 0, 0, 100, 100));
     HT_CHECK(rect_eq(&out[1], 500, 300, 600, 400));
     /* two stacked windows as wide: one rectangle */
     none();
     win(0, 10, 19, 0, 9);
     win(3, 10, 19, 10, 29);
-    HT_EQ_INT(hle_pb_window_clip(hz, vt, false, 1, 1, &area, out), 1);
+    HT_EQ_INT(hle_pb_window_clip(hz, vt, 0, false, 1, 1, &area, out), 1);
     HT_CHECK(rect_eq(&out[0], 10, 0, 20, 30));
     /* overlapping (an L): disjoint pieces */
     none();
     win(0, 0, 99, 0, 19);
     win(1, 0, 19, 0, 99);
-    HT_EQ_INT(hle_pb_window_clip(hz, vt, false, 1, 1, &area, out), 2);
+    HT_EQ_INT(hle_pb_window_clip(hz, vt, 0, false, 1, 1, &area, out), 2);
     HT_CHECK(rect_eq(&out[0], 0, 0, 100, 20));
     HT_CHECK(rect_eq(&out[1], 0, 20, 20, 100));
 }
@@ -125,14 +125,14 @@ static void test_exclusive(void)
     const HleRect area = { 0, 0, 640, 480 };
     none();
     win(0, 100, 199, 50, 149);
-    HT_EQ_INT(hle_pb_window_clip(hz, vt, true, 1, 1, &area, out), 4);
+    HT_EQ_INT(hle_pb_window_clip(hz, vt, 0, true, 1, 1, &area, out), 4);
     HT_CHECK(rect_eq(&out[0], 0, 0, 640, 50));
     HT_CHECK(rect_eq(&out[1], 0, 50, 100, 150));
     HT_CHECK(rect_eq(&out[2], 200, 50, 640, 150));
     HT_CHECK(rect_eq(&out[3], 0, 150, 640, 480));
     check_exact(true, 1, 1, &area);
     win(1, 0, 639, 0, 479);
-    HT_EQ_INT(hle_pb_window_clip(hz, vt, true, 1, 1, &area, out), 0);
+    HT_EQ_INT(hle_pb_window_clip(hz, vt, 0, true, 1, 1, &area, out), 0);
 }
 
 static uint32_t g_seed = 12345;
@@ -175,9 +175,35 @@ static void test_random(void)
     check_exact(false, 1, 1, &area);
 }
 
+/* The rectangles in use are those up to the one written last: the rest, and
+ * a rectangle of zero words, count or not by that alone */
+static void test_count(void)
+{
+    const HleRect area = { 0, 0, 640, 480 };
+    none();
+    win(0, 96, 160, 96, 160);
+    for (unsigned i = 2; i < 8; i++) {
+        win(i, 0, 639, 0, 479);             /* left over the whole screen */
+    }
+    HT_EQ_INT(hle_pb_window_clip(hz, vt, 0, false, 1, 1, &area, out), -1);  /* not known: all of them */
+    /* 0 and 1 written: the square and the pixel at 0, 0 */
+    HT_EQ_INT(hle_pb_window_clip(hz, vt, 2, false, 1, 1, &area, out), 2);
+    HT_CHECK(rect_eq(&out[0], 0, 0, 1, 1));
+    HT_CHECK(rect_eq(&out[1], 96, 96, 161, 161));
+    /* 0 written last: it alone */
+    win(1, 16, 23, 16, 23);
+    HT_EQ_INT(hle_pb_window_clip(hz, vt, 1, false, 1, 1, &area, out), 1);
+    HT_CHECK(rect_eq(&out[0], 96, 96, 161, 161));
+    /* exclusive, two in use: the screen but for them (the full-screen ones
+     * would leave nothing) */
+    HT_CHECK(hle_pb_window_clip(hz, vt, 2, true, 1, 1, &area, out) > 2);
+    HT_EQ_INT(hle_pb_window_clip(hz, vt, 8, true, 1, 1, &area, out), 0);
+}
+
 int main(void)
 {
     test_no_clip();
+    test_count();
     test_inclusive_one();
     test_inclusive_union();
     test_exclusive();

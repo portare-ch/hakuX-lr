@@ -16,11 +16,16 @@
  * horiz and vert: SET_WINDOW_CLIP_HORIZONTAL and _VERTICAL's 8 words (min
  * 11:0, max 27:16, both included, in logical pixels: scaled by the
  * antialiasing's ax x ay). Inclusive: inside the union of the rectangles;
- * exclusive: outside all of them. A rectangle with both words 0 is unused
- * (D3D's SetScissors leaves those after the ones it sets so). Returns how
- * many; 0: nothing is drawn; -1: no clip (no rectangle used, or the clip
- * leaves the whole area). */
-int hle_pb_window_clip(const uint32_t *horiz, const uint32_t *vert, bool exclusive, uint32_t ax,
-                       uint32_t ay, const HleRect *area, HleRect *out);
+ * exclusive: outside all of them. count: the rectangles in use, the first
+ * so many: the NV2A takes those up to the one written last, whatever the
+ * others hold (nxdk_pgraph_tests' Window clip: with rectangles 2 to 7 left
+ * over the whole screen, an inclusive clip is rectangles 0 and 1 alone, and
+ * rectangle 0 alone when it was written after 1; a rectangle of two zero
+ * words is the pixel at 0, 0). 0: not known (none written since the state
+ * was made): those with a word that isn't 0. Returns how many; 0: nothing
+ * is drawn; -1: no clip (no rectangle used, or the clip leaves the whole
+ * area). */
+int hle_pb_window_clip(const uint32_t *horiz, const uint32_t *vert, unsigned count, bool exclusive,
+                       uint32_t ax, uint32_t ay, const HleRect *area, HleRect *out);
 
 #endif
