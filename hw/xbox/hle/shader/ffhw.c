@@ -207,11 +207,16 @@ static void lighting(Buf *b, const HleFfhwKey *k)
         }
         put(b, "      if (lit) {\n"
                "        float pf = nl > 0.0 ? NVC(nh, c[%u], 10000.0) : 0.0;\n"
-               "        oD0.rgb += c[%u].rgb * att;\n"
+               /* the light's ambient times the ambient source's colour, as
+                * its diffuse and specular are (Material color source: with
+                * the ambient from a vertex colour the console's quads are
+                * darker by the light ambient times one minus that colour) */
+               "        oD0.rgb += %s * c[%u].rgb * att;\n"
                "        oD0.rgb += %s * c[%u].rgb * (att * nl);\n"
                "        oD1.rgb += %s * c[%u].rgb * (att * pf);\n"
                "      }\n",
-            HLE_FFHW_C_SPECULAR, L + HLE_FFHW_L_AMBIENT, src_rgb(k->src[2]), L + HLE_FFHW_L_DIFFUSE,
+            HLE_FFHW_C_SPECULAR, src_rgb(k->src[1]), L + HLE_FFHW_L_AMBIENT, src_rgb(k->src[2]),
+            L + HLE_FFHW_L_DIFFUSE,
             src_rgb(k->src[3]), L + HLE_FFHW_L_SPECULAR);
         if (k->two_side) {
             /* the back faces: the same light along -N, the back light colours
@@ -226,11 +231,12 @@ static void lighting(Buf *b, const HleFfhwKey *k)
             put(b, "      if (lit) {\n"
                    "        float bl = max(dot(-tN, %s), 0.0), bh = max(dot(-tN, %s), 0.0);\n"
                    "        float bf = bl > 0.0 ? NVC(bh, c[%u], 10000.0) : 0.0;\n"
-                   "        oB0.rgb += c[%u].rgb * att;\n"
+                   "        oB0.rgb += %s * c[%u].rgb * att;\n"
                    "        oB0.rgb += %s * c[%u].rgb * (att * bl);\n"
                    "        oB1.rgb += %s * c[%u].rgb * (att * bf);\n"
                    "      }\n",
-                t == 1 ? "Ld" : "VP", h, HLE_FFHW_C_BACK_SPECULAR, BL, src_rgb(k->bsrc[2]), BL + 1,
+                t == 1 ? "Ld" : "VP", h, HLE_FFHW_C_BACK_SPECULAR, src_rgb(k->bsrc[1]), BL,
+                src_rgb(k->bsrc[2]), BL + 1,
                 src_rgb(k->bsrc[3]), BL + 2);
         }
         put(b, "    }\n");

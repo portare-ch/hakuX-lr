@@ -714,7 +714,12 @@ static void test_convolution(void)
     HT_CHECK(strstr(seg, "uSmp[nonuniformEXT(si)]), uv, gx, gy);") != NULL);
     /* the stages' own samplers: the index's 8 bits */
     HT_CHECK(strstr(buf, "uint ti = pc.tex[s] & 0xFFFFu, si = (pc.tex[s] >> 16) & 0xFFu;\n"
-                         "  if ((pc.flags & (1u << s)) != 0u)") != NULL);
+                         "  vec2 sz = vec2(textureSize(") != NULL);
+    HT_CHECK(strstr(buf, "  if ((pc.flags & (1u << s)) != 0u)\n    uv /= sz / ") != NULL);
+    /* a point-sampled stage (flags bit 4 + s): a coordinate on a texel's
+     * edge takes the texel after it */
+    HT_CHECK(strstr(buf, "  if ((pc.flags & (16u << s)) != 0u)\n"
+                         "    uv += 0.000244140625 / sz;") != NULL);
     /* no descriptor indexing: the draw set's samplers (vk/draw.c fixed_bind),
      * the taps' at 1 + HLE_FF_STAGES + s, inside the sized array */
     HT_CHECK(hle_glsl_fixed_slots(buf, sizeof(buf)) == strlen(buf));
