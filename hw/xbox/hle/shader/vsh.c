@@ -332,6 +332,14 @@ static void tail(Buf *bp, const HleVshKey *k, bool fogw)
             "  vBack0 = clamp(oB0, 0.0, 1.0);\n"
             "  vBack1 = %s;\n"
             "  vTex0 = oT0; vTex1 = oT1; vTex2 = oT2; vTex3 = oT3;\n", d1, b1);
+    /* the NV2A's vertex colours are bytes: rounded before they are
+     * interpolated (nxdk_pgraph_tests' Alpha func: a quad's alpha from 0.495
+     * to 0.505 is 126 to 129 across it, EQUAL to 127 from a sixth of the way
+     * to half, not from a tenth) */
+    put(&b, "  vDiffuse = floor(vDiffuse * 255.0 + 0.5) / 255.0;\n"
+            "  vSpecular = floor(vSpecular * 255.0 + 0.5) / 255.0;\n"
+            "  vBack0 = floor(vBack0 * 255.0 + 0.5) / 255.0;\n"
+            "  vBack1 = floor(vBack1 * 255.0 + 0.5) / 255.0;\n");
     /* A program that leaves oFog alone is not fogged: Halo draws its Bink
      * movies with fog enabled through a program writing no oFog, and they
      * show on the console. Unfogged is factor 1 under FOGTABLEMODE NONE

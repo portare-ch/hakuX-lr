@@ -30,6 +30,7 @@ set(HLE_PURE_SOURCES
   ${REPO_ROOT}/hw/xbox/hle/pb/pusher.c
   ${REPO_ROOT}/hw/xbox/hle/pb/objslot.c
   ${REPO_ROOT}/hw/xbox/hle/pb/wclip.c
+  ${REPO_ROOT}/hw/xbox/hle/pb/prim.c
   ${REPO_ROOT}/hw/xbox/hle/pb/blitclip.c
   ${REPO_ROOT}/native/core/cheats.c
   ${REPO_ROOT}/native/core/xbe_patch.c
@@ -57,6 +58,7 @@ hle_test(test_pageuse)
 hle_test(test_pusher)
 hle_test(test_objslot)
 hle_test(test_wclip)
+hle_test(test_prim)
 hle_test(test_blitclip)
 hle_test(test_kdma)
 hle_test(test_pvideo)

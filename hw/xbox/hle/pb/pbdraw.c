@@ -4116,16 +4116,68 @@ static void emit(HleCmdDraw *d)
 
 /* Indices 0 .. n - 1 converted for the primitive into the arena (d's
  * count and index buffer); false without room. */
+/* The primitive with the flat shading in effect (pb/pbres.h): SHADE_MODEL
+ * FLAT, FLAT_SHADE_OP's vertex (0 LAST_VTX, 1 FIRST_VTX, D3D's) */
+/* Whether the register combiners' result takes a vertex colour: the final
+ * combiner reads DIFFUSE (4), SPECULAR (5) or SPEC + R0 (0xE), or it reads
+ * R0 / R1 (0xC, 0xD) and a stage does. */
+static bool combiners_read_colours(void)
+{
+    /* the final combiner's inputs A .. D, E F G; SPEC + R0 (0xE) is both */
+    const uint32_t f0 = R(0x0288), f1 = R(0x028C) & 0xFFFFFF00u;
+    bool col = false, regs = false;
+    for (unsigned k = 0; k < 4; k++) {
+        const uint32_t src[2] = { (f0 >> (8 * k)) & 0xF, k ? (f1 >> (8 * k)) & 0xF : 0 };
+        for (unsigned w = 0; w < 2; w++) {
+            col |= src[w] == 4 || src[w] == 5 || src[w] == 0xE;
+            regs |= src[w] == 0xC || src[w] == 0xD || src[w] == 0xE;
+        }
+    }
+    if (col || !regs) {
+        return col;
+    }
+    /* it reads R0 or R1: what the stages made them from */
+    const uint32_t n = R(0x1E60) & 0xFF;
+    for (uint32_t i = 0; i < MIN(n, 8u); i++) {
+        for (uint32_t w = 0; w < 2; w++) {
+            const uint32_t v = R((w ? 0x0AC0 : 0x0260) + 4 * i);
+            for (unsigned k = 0; k < 4; k++) {
+                const uint32_t src = (v >> (8 * k)) & 0xF;
+                col |= src == 4 || src == 5;
+            }
+        }
+    }
+    return col;
+}
+
+static uint32_t prim_flat(void)
+{
+    if (R(0x037C) != 0x1D00) {
+        return g_pd.prim;
+    }
+    /* A quad's colours are its last vertex's, which only one of the two
+     * triangles the NV2A draws it as (0 1 2, 0 2 3) has: drawn here as 3 0 1
+     * and 3 1 2, the other diagonal, which shows where a quad is not flat in
+     * its texture coordinates. Where no combiner reads a vertex colour the
+     * NV2A's triangles are kept (nxdk_pgraph_tests' Shade model: its
+     * textured quads vary w by vertex and show the texture alone). */
+    if ((g_pd.prim == NV2A_PRIM_QUADS || g_pd.prim == NV2A_PRIM_QUADS + 1) && !combiners_read_colours()) {
+        return g_pd.prim;
+    }
+    return g_pd.prim | (R(0x09FC) ? HLE_PRIM_FLAT_FIRST : HLE_PRIM_FLAT_LAST);
+}
+
 static bool sequential(HleCmdDraw *d, uint32_t n)
 {
-    uint32_t cnt = hle_draw_prim_count(g_pd.prim, n);
+    const uint32_t pt = prim_flat();
+    uint32_t cnt = hle_draw_prim_count(pt, n);
     uint8_t *ib;
     uint32_t ib_off = cnt ? arena_idx(2 * cnt + 4, &ib) : HLE_ARENA_FULL;
     if (ib_off == HLE_ARENA_FULL) {
         return false;
     }
-    hle_draw_prim_indices(g_pd.prim, NULL, n, 0, (uint16_t *)ib);
-    d->prim = hle_draw_prim_topology(g_pd.prim);
+    hle_draw_prim_indices(pt, NULL, n, 0, (uint16_t *)ib);
+    d->prim = hle_draw_prim_topology(pt);
     d->count = cnt;
     d->ib_off = ib_off;
     return true;
@@ -4459,14 +4511,14 @@ static void draw_arrays(void)
         bool pos = ((R(NV097_SET_VERTEX_DATA_ARRAY_FORMAT) >> 4) & 0xF) && ((d.attr[0] >> 8) & 0xFF) == b;
         vbrace(from, len, st, pos ? (int)(d.attr[0] >> 16) : -1, dst);
     }
-    uint32_t pt = g_pd.prim;
+    uint32_t pt = prim_flat();
     /* One run of vertices in order, of a primitive Vulkan draws as it is
      * (quads and line loops are converted): a draw without indices. The
      * back end joins such strips into one draw (vk/batch.c): Blinx draws its
      * snowy town as ~17k short strips a frame, which as indexed draws went to
      * the GPU one by one at ~1.7 us each, and the frame took the GPU 30 ms
      * at 2x (26 fps; 30 at 3x in D3D mode, whose strips were joined). */
-    if (hi - lo + 1 == n && pt != NV2A_PRIM_QUADS && pt != NV2A_PRIM_LINE_LOOP) {
+    if (hi - lo + 1 == n && !hle_draw_prim_converted(pt)) {
         bool seq = true;
         for (uint32_t i = 0; i < n && seq; i++) {
             seq = g_pd.idx[i] == lo + i;
@@ -4488,7 +4540,7 @@ static void draw_arrays(void)
         skip(SK_DRAW_ARRAYS_ARENA2);
         return;
     }
-    if (pt == NV2A_PRIM_QUADS || pt == NV2A_PRIM_LINE_LOOP) {
+    if (hle_draw_prim_converted(pt)) {
         for (uint32_t i = 0; i < n; i++) {
             g_pd.idx16[i] = (uint16_t)(g_pd.idx[i] - lo);
         }

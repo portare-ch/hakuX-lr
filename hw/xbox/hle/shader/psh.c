@@ -985,7 +985,8 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
         put(&b, "  outc.a *= pcov;\n");
     }
     if (k->alpha_test && k->alpha_func < 8) {
-        put(&b, "  { float a = outc.a, r = pc.alpha_ref; if (!(%s)) discard; }\n",
+        put(&b, "  { int a = int(clamp(outc.a, 0.0, 1.0) * 255.0 + 0.5), r = int(pc.alpha_ref * 255.0 + 0.5);\n"
+                "    if (!(%s)) discard; }\n",
             k_cmp[k->alpha_func]);
     }
     if (zr) {

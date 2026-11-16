@@ -6,6 +6,7 @@
 #ifndef HW_XBOX_HLE_PB_PBRES_H
 #define HW_XBOX_HLE_PB_PBRES_H
 
+#include "hw/xbox/hle/pb/prim.h"
 #include "hw/xbox/hle/front/cmd.h"
 
 /* Arena space for the next submission; HLE_ARENA_FULL if none. */
@@ -32,14 +33,6 @@ uint32_t hle_draw_tex_bytes(const uint32_t h5[5], uint32_t def);
 struct HlePvideoColor;
 uint32_t hle_draw_overlay_upload(const uint32_t h5[5], const struct HlePvideoColor *color,
                                  uint32_t *w, uint32_t *h);
-/* NV2A / Xbox D3D primitive types (1 points .. 10 polygon): the Vulkan
- * topology they are drawn with, the index count after conversion, and the
- * converted indices (in NULL: 0..n-1; rebased by -base). */
-uint32_t hle_draw_prim_topology(uint32_t pt);
-uint32_t hle_draw_prim_count(uint32_t pt, uint32_t n);
-void hle_draw_prim_indices(uint32_t pt, const uint16_t *in, uint32_t n, uint32_t base,
-                           uint16_t *out);
-
 /* Texels the CPU wrote at pa (linear rows of pitch bytes) into object id's
  * image: rects of source pixels, each to its pts[i] (HLE_OP_UPLOAD). */
 bool hle_res_upload(uint32_t id, uint32_t pa, uint32_t pitch, uint32_t n,
