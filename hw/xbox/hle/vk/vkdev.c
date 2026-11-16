@@ -195,6 +195,7 @@ static const struct { VkStructureType s; const char *name; unsigned n; } k_feat[
     FEAT(RASTERIZATION_ORDER_ATTACHMENT_ACCESS_FEATURES_EXT,
          VkPhysicalDeviceRasterizationOrderAttachmentAccessFeaturesEXT,
          rasterizationOrderStencilAttachmentAccess),
+    FEAT(DEPTH_BIAS_CONTROL_FEATURES_EXT, VkPhysicalDeviceDepthBiasControlFeaturesEXT, depthBiasExact),
 };
 #undef FEAT
 
@@ -280,6 +281,7 @@ static void caps_override(HleCaps *c)
         { "widelines", offsetof(HleCaps, wide_lines) },
         { "fillmodes", offsetof(HleCaps, fill_modes) },
         { "smoothlines", offsetof(HleCaps, smooth_lines) }, { "bary", offsetof(HleCaps, bary) },
+        { "dbias", offsetof(HleCaps, dbias_float) },
     };
     for (char *save = NULL, *t = strtok_r(v, ", ", &save); t; t = strtok_r(NULL, ", ", &save)) {
         const char *name = *t == '-' ? t + 1 : t;
@@ -469,6 +471,7 @@ static int vk_init(PFN_vkGetInstanceProcAddr gipa_shared, VkInstance inst_shared
     bool e_lr = has_ext(ext, ne, VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME);
     bool e_roa = has_ext(ext, ne, VK_EXT_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_EXTENSION_NAME);
     bool e_bary = has_ext(ext, ne, VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME);
+    bool e_dbc = has_ext(ext, ne, VK_EXT_DEPTH_BIAS_CONTROL_EXTENSION_NAME);
     bool e_pd = has_ext(ext, ne, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
     /* Use the API version supported by both the instance and device. */
     const uint32_t inst_api = g_inst_api ? g_inst_api : VK_API_VERSION_1_3;
@@ -543,6 +546,8 @@ static int vk_init(PFN_vkGetInstanceProcAddr gipa_shared, VkInstance inst_shared
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_BARYCENTRIC_FEATURES_KHR };
     VkPhysicalDeviceRasterizationOrderAttachmentAccessFeaturesEXT q_roa = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_FEATURES_EXT };
+    VkPhysicalDeviceDepthBiasControlFeaturesEXT q_dbc = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_BIAS_CONTROL_FEATURES_EXT };
     VkPhysicalDeviceVulkan13Features q13 = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
     VkPhysicalDeviceVulkan12Features q12 = {
@@ -591,6 +596,7 @@ static int vk_init(PFN_vkGetInstanceProcAddr gipa_shared, VkInstance inst_shared
     if (e_roa) chain(&tail, &q_roa);
     if (e_lrast) chain(&tail, &q_lrast);
     if (e_bary) chain(&tail, &q_bary);
+    if (e_dbc) chain(&tail, &q_dbc);
     vkGetPhysicalDeviceFeatures2(v->phys, &q);
     /* the limits the bindless set and the samplers need (Vulkan 1.2's: a 1.1
      * device fails the floor without them) */
@@ -638,6 +644,8 @@ static int vk_init(PFN_vkGetInstanceProcAddr gipa_shared, VkInstance inst_shared
     c->logic_op = q.features.logicOp;
     c->smooth_lines = e_lrast && q_lrast.smoothLines;
     c->bary = e_bary && q_bary.fragmentShaderBarycentric;
+    c->dbias_float = e_dbc && q_dbc.depthBiasControl && q_dbc.floatRepresentation;
+    c->dbias_exact = c->dbias_float && q_dbc.depthBiasExact;
     need(c, q.features.largePoints, "largePoints");
     c->depth_clamp = q.features.depthClamp;
     need(c, ok_tl, "timelineSemaphore");
@@ -745,6 +753,7 @@ static int vk_init(PFN_vkGetInstanceProcAddr gipa_shared, VkInstance inst_shared
     vkGetPhysicalDeviceFormatProperties(v->phys, VK_FORMAT_R16G16_SSCALED, &fp);
     c->sscaled = fp.bufferFeatures & VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT;
     caps_override(c);
+    c->dbias_exact = c->dbias_exact && c->dbias_float;
     {   /* DXT as ETC2 (tex/etc2_enc.h): without BC, where the driver samples
          * ETC2; HAKUX_HLE_DXT_ETC2 / debug.hakux.dxt_etc2 decides either way */
         char v[32] = "";
@@ -894,10 +903,14 @@ static int vk_init(PFN_vkGetInstanceProcAddr gipa_shared, VkInstance inst_shared
         .sType = q_lrast.sType, .smoothLines = VK_TRUE };
     VkPhysicalDeviceFragmentShaderBarycentricFeaturesKHR f_bary = {
         .sType = q_bary.sType, .fragmentShaderBarycentric = VK_TRUE };
+    VkPhysicalDeviceDepthBiasControlFeaturesEXT f_dbc = {
+        .sType = q_dbc.sType, .depthBiasControl = VK_TRUE, .floatRepresentation = VK_TRUE,
+        .depthBiasExact = c->dbias_exact };
     if (c->smooth_lines) chain(&tail, &f_lrast);
     if (c->bary) chain(&tail, &f_bary);
+    if (c->dbias_float) chain(&tail, &f_dbc);
 
-    const char *exts[32];
+    const char *exts[40];
     uint32_t nx = 0;
     if (!v13) {
         if (!v12) {                     /* core in 1.2 */
@@ -944,6 +957,7 @@ static int vk_init(PFN_vkGetInstanceProcAddr gipa_shared, VkInstance inst_shared
                            : VK_EXT_LINE_RASTERIZATION_EXTENSION_NAME;
     }
     if (c->bary) exts[nx++] = VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME;
+    if (c->dbias_float) exts[nx++] = VK_EXT_DEPTH_BIAS_CONTROL_EXTENSION_NAME;
     if (c->fbfetch) {
         exts[nx++] = VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME;
         if (e_pd) {
@@ -963,14 +977,15 @@ static int vk_init(PFN_vkGetInstanceProcAddr gipa_shared, VkInstance inst_shared
         .enabledExtensionCount = nx, .ppEnabledExtensionNames = exts };
     hle_log("hakuX-hle-back", "vk: device \"%s\" api %u.%u.%u (used as %u.%u) driver 0x%x floor=ok "
             "plus: gpl=%d eds3=%d dbuf=%d m5=%d sscaled=%d local_read=%d fbfetch=%d "
-            "raster_order=%d cache_control=%d swapchain=%d fill_modes=%d smooth_lines=%d bary=%d",
+            "raster_order=%d cache_control=%d swapchain=%d fill_modes=%d smooth_lines=%d bary=%d "
+            "dbias_float=%d dbias_exact=%d",
             v->props.deviceName, VK_API_VERSION_MAJOR(v->props.apiVersion),
             VK_API_VERSION_MINOR(v->props.apiVersion),
             VK_API_VERSION_PATCH(v->props.apiVersion), VK_API_VERSION_MAJOR(api),
             VK_API_VERSION_MINOR(api), v->props.driverVersion,
             c->gpl, c->eds3, c->descriptor_buffer, c->maint5, c->sscaled,
             c->local_read, c->fbfetch, c->raster_order, c->cache_control, c->swapchain,
-            c->fill_modes, c->smooth_lines, c->bary);
+            c->fill_modes, c->smooth_lines, c->bary, c->dbias_float, c->dbias_exact);
     hle_log("hakuX-hle-back", "vk: bc=%d vids=%d push=%d push_desc=%d cbc=%d cbc_any=%d bcs=%d "
             "bcs_image=%d x4444=%d r16=%d r5551=%d r4444=%d d24s8=%d bda=%d ahb=%d vk13=%d "
             "dyn_render=%d sync2=%d eds1=%d eds2=%d bindless=%d depth_clamp=%d etc2=%d dxt_etc2=%d "
