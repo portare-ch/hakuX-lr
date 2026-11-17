@@ -134,6 +134,8 @@ typedef struct HleFfPsKey {
     uint8_t alpha_func;               /* D3DCMP_* - 0x200 (0..7) */
     uint8_t specular;                 /* SPECULARENABLE (add specular) */
     uint8_t flat;
+    uint8_t zcull;                    /* fragments outside the depth range (pc.scr.xy)
+                                         are discarded (ZCLAMP_EN CULL, vk/draw.c) */
     uint8_t fog;                      /* 0 off; FOGTABLEMODE + 1 (NONE 1 .. LINEAR 4) */
     uint8_t point_sprite;             /* POINTSPRITEENABLE on a point list: stage 0
                                          (texture stage 3, see HLE_FF_SPRITE_STAGE)
@@ -297,7 +299,7 @@ static inline const char *hle_push_glsl(void)
     "  float wRaw = vW + uintBitsToFloat(pc.psc[18]) + uintBitsToFloat(pc.psc[19]) *\n" \
     "      max(abs(dFdx(vW)), abs(dFdy(vW)));\n" \
     HLE_ZNORM_GLSL("wRaw", "wN") \
-    "  float wDepth = clamp(wN, 0.0, 1.0);\n"
+    "  float wDepth = pc.scr.y > pc.scr.x ? clamp(wN, pc.scr.x, pc.scr.y) : clamp(wN, 0.0, 1.0);\n"
 #define HLE_WBUF_STORE_GLSL "  gl_FragDepth = wDepth;\n"
 
 /* EQUAL depth passes that do not write (vk/draw.c eq_tol) test LESSEQUAL a

@@ -4120,6 +4120,22 @@ static void emit(HleCmdDraw *d)
         const uint32_t cf = R(NV097_SET_SURFACE_FORMAT) & 0xF;
         d->rt_noalpha = cf == 1 || cf == 2 || cf == 4 || cf == 5;
     }
+    /* CLIP_MIN / CLIP_MAX (0x0394, 0x0398), in the depth buffer's units (w's
+     * under W-buffering): D3D sets its viewport's MinZ and MaxZ there. Only
+     * a range inside a fixed-point buffer's, and at least a step wide. */
+    d->zclip[0] = d->zclip[1] = 0.0f;
+    d->zclip_w = (R(NV097_SET_CONTROL0) & 0x10000u) != 0;
+    if (!(R(NV097_SET_CONTROL0) & 0x1000u) && (zf == 1 || zf == 2)) {
+        const float zmax = zf == 2 ? 16777215.0f : 65535.0f;
+        const uint32_t r0 = R(0x0394), r1 = R(0x0398);
+        float lo, hi;
+        memcpy(&lo, &r0, 4);
+        memcpy(&hi, &r1, 4);
+        if (isfinite(lo) && isfinite(hi) && (lo > 0.0f || hi < zmax) && hi - lo >= 1.0f) {
+            d->zclip[0] = MAX(lo, 0.0f) / zmax;
+            d->zclip[1] = MIN(hi, zmax) / zmax;
+        }
+    }
     d->ff_ubo = HLE_DRAW_NO_UBO;
     drawlog(d, ff);
     HleCmdDraw *c = begin(HLE_OP_DRAW, sizeof(*c));

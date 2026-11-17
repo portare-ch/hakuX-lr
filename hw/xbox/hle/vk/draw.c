@@ -4623,13 +4623,42 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
     bool wff = !prog && !rhw && c->wscale > 0.0f;
     bool wbuf = (prog || rhw || wff) && ds && s->rs[RS_ZENABLE] == 2 && !(dbgf & 8) &&
                 !hle_quirk(HLE_QUIRK_NO_WBUF);
+    /* W-buffering's depth range (CLIP_MIN .. CLIP_MAX of w) holds without a
+     * depth test too: the pixel shader then has w to cull by, and stores
+     * nothing (no depth test, no write) */
+    if (!wbuf && prog && ds && s->rs[RS_ZENABLE] == 0 && c->zclip_w && c->zclip[1] > c->zclip[0] && !s->zclamp) {
+        wbuf = true;
+    }
     /* NV2A ZCLAMP_EN CLAMP: depth past the near and far planes is clamped to
      * them instead of clipping the primitive (MechAssault 2's sky, drawn past
      * the far plane, was black): the rasterizer's depth clamp */
     bool zclamp = ds && s->rs[RS_ZENABLE] != 0 && s->zclamp;
+    /* A depth range less than the buffer's (CLIP_MIN .. CLIP_MAX, below at
+     * the viewport): a fragment outside it is clamped (ZCLAMP_EN) or culled.
+     * Culled by the pixel shader, the triangle not clipped: clipped, its
+     * depths came out a step from those of the same triangle drawn clamped,
+     * and an EQUAL pass over it failed (nxdk_pgraph_tests' Depth Clamp:
+     * depth_equal). Without depthClamp the rasterizer clips instead. */
+    /* The range holds without a depth test too (ZMinMaxControl's quads are
+     * drawn with none): culled then by the depth the program leaves. */
+    const bool zt_off = !ds || s->rs[RS_ZENABLE] == 0;
+    const bool zrange = prog && !wbuf && c->zclip[1] > c->zclip[0] &&
+                        (zt_off ? !c->zclip_w && !s->zclamp && g_hvk.caps.depth_clamp : true);
+    /* (under W-buffering the range is w's, kept by the pixel shader alone) */
+    const bool wrange = prog && ds && wbuf && c->zclip[1] > c->zclip[0];
+    const bool zcull = (zrange && !s->zclamp && g_hvk.caps.depth_clamp) || (wrange && !s->zclamp);
+    bool pk_zcull = false;
+    if (zcull) {
+        zclamp = zclamp || zrange;
+        if (s->psh) {
+            pk_zcull = true;
+        } else {
+            k.ps.zcull = 1;
+        }
+    }
     if (prog) {
         k.vk.wbuf = wbuf;
-        k.vk.zfree = !ds || s->rs[RS_ZENABLE] == 0;
+        k.vk.zfree = zt_off && !zrange;
         k.vk.zclamp = zclamp;
     } else {
         k.vs.wbuf = wbuf;
@@ -4638,7 +4667,7 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
     if (s->psh) {
         k.pk.wbuf = wbuf;
         /* a depth DOT_ZW replaces is clamped the same way (psh.c) */
-        k.pk.zclamp = zclamp && hle_psh_zrep(k.pk.tex_modes);
+        k.pk.zclamp = (zclamp && !zcull && hle_psh_zrep(k.pk.tex_modes) ? 1 : 0) | (pk_zcull ? HLE_PSH_ZCULL : 0);
     } else {
         k.ps.wbuf = wbuf;
     }
@@ -4841,6 +4870,24 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
     if (!prog && !rhw && !full) {
         v.minDepth = vpc->minz;
         v.maxDepth = vpc->maxz;
+    }
+    /* The NV2A keeps the depths from CLIP_MIN to CLIP_MAX: outside, a
+     * fragment is culled or, with ZCLAMP_EN, clamped to the range. The
+     * viewport's depth range is that range, the program's depth scaled into
+     * it (vsh.c, pc.scr.zw): Vulkan then clips or clamps at its ends.
+     * nxdk_pgraph_tests' Depth Clamp draws a floor through a range of 0.89 to
+     * 0.95; all of it was drawn. */
+    if (wrange) {
+        pc.scr[0] = c->zclip[0];
+        pc.scr[1] = c->zclip[1];
+    }
+    if (zrange) {
+        v.minDepth = c->zclip[0];
+        v.maxDepth = c->zclip[1];
+        pc.scr[0] = c->zclip[0];            /* (the pixel shader's cull) */
+        pc.scr[1] = c->zclip[1];
+        pc.scr[2] = c->zclip[0];
+        pc.scr[3] = 1.0f / (c->zclip[1] - c->zclip[0]);
     }
     if (!g_rec.valid || memcmp(&g_rec.vp, &v, sizeof(v))) {
         g_rec.vp = v;

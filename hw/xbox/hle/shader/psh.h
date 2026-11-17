@@ -43,6 +43,7 @@ enum {
     HLE_PST_DPNDNT_GB, HLE_PST_DOTPRODUCT, HLE_PST_DOT_RFLCT_SPEC_CONST,
 };
 
+#define HLE_PSH_ZCULL 2u            /* HlePshKey.zclamp */
 typedef struct HlePshKey {
     uint32_t rgb_in[8], rgb_out[8], alpha_in[8], alpha_out[8];
     uint32_t final_abcd, final_efg;
@@ -132,7 +133,10 @@ typedef struct HlePshKey {
      * aa_ctl: bit 0 alpha-to-coverage, 1 alpha-to-one, 4-7 the sample mask
      * (all clear: no sample is written). hle_psh_aa_key sets both. */
     uint8_t aa_grid, aa_ctl;
-    uint8_t zclamp;                     /* a DOT_ZW draw's ZCLAMP_EN: its depth clamped to
+    uint8_t zclamp;                     /* bit 1 (HLE_PSH_ZCULL): fragments outside the depth
+                                           range (pc.scr.xy) are discarded (ZCLAMP_EN CULL,
+                                           vk/draw.c). Bit 0:
+                                           a DOT_ZW draw's ZCLAMP_EN: its depth clamped to
                                            the range, else a fragment outside it rejected
                                            (0 for every other draw: no split key) */
     uint8_t poly_smooth;                /* Smooth triangle edges using barycentric coverage. */

@@ -370,6 +370,9 @@ static void tail(Buf *bp, const HleVshKey *k, bool fogw)
      * minimap at z far below 0), so the clip z only keeps w >= 0. */
     if (!k->wbuf && !k->zfree) {
         put(&b, HLE_ZNORM_GLSL("oPos.z", "zN"));
+        /* a depth range less than the buffer's (CLIP_MIN .. CLIP_MAX, the
+         * viewport's: vk/draw.c): the depth as a fraction of it */
+        put(&b, "  if (pc.scr.w != 0.0) zN = (zN - pc.scr.z) * pc.scr.w;\n");
     }
     put(&b, "  gl_Position = vec4(ndc * w, %s, w);\n", k->wbuf || k->zfree ? "0.0" : "zN * w");
     if (k->zclamp && g_hle_glsl_zclamp) {

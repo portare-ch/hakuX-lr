@@ -616,6 +616,10 @@ size_t hle_ff_ps_glsl(const HleFfPsKey *k, char *buf, size_t cap)
     if (k->poly_smooth) {
         put(&b, "  cur.a *= pcov;\n");          /* before the alpha test, as psh.c */
     }
+    if (k->zcull) {                         /* outside CLIP_MIN .. CLIP_MAX (vk/draw.c) */
+        put(&b, "  if (%s < pc.scr.x || %s > pc.scr.y) discard;\n", k->wbuf ? "wN" : "gl_FragCoord.z",
+            k->wbuf ? "wN" : "gl_FragCoord.z");
+    }
     if (k->alpha_test && k->alpha_func < 8) {
         put(&b, "  { int a = int(clamp(cur.a, 0.0, 1.0) * 255.0 + 0.5), r = int(pc.alpha_ref * 255.0 + 0.5);\n"
                 "    if (!(%s)) discard; }\n",
