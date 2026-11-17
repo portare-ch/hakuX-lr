@@ -2092,7 +2092,15 @@ static void voice_process(MCPXAPUState *d, uint8_t *c,
             uint16_t q = voice_get_mask_nolock(
                 d, c, v, NV_PAVS_VOICE_TAR_FCA + (ch % channels) * 4,
                 NV_PAVS_VOICE_TAR_FCA_FC1);
-            float q_f = q / (1.0 * 0x8000);
+            /* The damping, at most 1: DirectSound's own setting for a voice
+             * it does not filter is FC0 0 and FC1 FFFFh, a coefficient of 1
+             * and a word that over 8000h would be a damping of 2, where
+             * this filter is unstable (it holds below 2 / f - f / 2) and at
+             * 1 passes its input through unchanged. Unbounded, every such
+             * voice ran off to infinity within a few frames: Need for Speed
+             * Underground 2's menu sounds were a click, and silence in the
+             * whole mix till the voice ended. */
+            float q_f = fminf(q / (1.0 * 0x8000), 1.0f);
             sv_filter *filter = &vfl->svf[ch];
             setup_svf(filter, fc_f, q_f, F_LP);
             for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {

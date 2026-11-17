@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Need for Speed Underground 2: menu sounds no longer click and cut the sound out for a moment (a regression in 0.25). A voice's low-pass filter took DirectSound's "not filtered" setting as a damping at which the filter is unstable, and such a voice ran off to infinity, silencing the mix until it ended. Any game whose sounds use that default was affected.
+
 - OutRun 2006: Coast 2 Coast no longer shows a screen of smoke in races (a regression in 0.32.0). A 2D blit's clip rectangle and blend apply only when the blit names a clip or beta object; Direct3D's own blits name the null object there, and every one of them was cut away.
 
 ## linux-v0.33.0 (Linux, aarch64 and x86-64, and Android)
