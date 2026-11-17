@@ -494,7 +494,8 @@ static const char *k_cmp[8] = {
 size_t hle_ff_ps_glsl(const HleFfPsKey *k, char *buf, size_t cap)
 {
     Buf b = { buf, cap, 0, false };
-    const char *interp = k->flat ? "flat " : "";
+    const char *interp = (k->flat & 1) ? "flat " : (k->flat & 2) ? "noperspective " : "";
+    const char *np = (k->flat & 2) ? "noperspective " : "";
     put(&b, "#version 450\n#extension GL_EXT_nonuniform_qualifier : require\n%s%s",
         k->poly_smooth ? HLE_BARY_EXT_GLSL : "", hle_push_glsl());
     put(&b, "layout(set = 0, binding = 0) uniform texture2D uTex2D[];\n"
@@ -503,11 +504,11 @@ size_t hle_ff_ps_glsl(const HleFfPsKey *k, char *buf, size_t cap)
     put(&b, "layout(location = 1) %sin vec4 vSpecular;\n", interp);
     for (unsigned s = 0; s < k->nstages; s++) {
         if (k->st[s].texture) {
-            put(&b, "layout(location = %u) in vec4 vTex%u;\n", 2 + s, s);
+            put(&b, "layout(location = %u) %sin vec4 vTex%u;\n", 2 + s, np, s);
         }
     }
     if (k->fog) {
-        put(&b, "layout(location = 6) in float vFog;\n");
+        put(&b, "layout(location = 6) %sin float vFog;\n", np);
     }
     if (k->wbuf) {
         put(&b, k->wbuf == 2 ? HLE_ZLIN_IN_GLSL : HLE_WBUF_IN_GLSL);
@@ -619,6 +620,9 @@ size_t hle_ff_ps_glsl(const HleFfPsKey *k, char *buf, size_t cap)
     if (k->zcull) {                         /* outside CLIP_MIN .. CLIP_MAX (vk/draw.c) */
         put(&b, "  if (%s < pc.scr.x || %s > pc.scr.y) discard;\n", k->wbuf ? "wN" : "gl_FragCoord.z",
             k->wbuf ? "wN" : "gl_FragCoord.z");
+        if (k->zcull & 2) {                 /* ... and of the program's z (CULL_NEAR_FAR_EN) */
+            put(&b, "  if (gl_FragCoord.z < pc.scr.x || gl_FragCoord.z > pc.scr.y) discard;\n");
+        }
     }
     if (k->alpha_test && k->alpha_func < 8) {
         put(&b, "  { int a = int(clamp(cur.a, 0.0, 1.0) * 255.0 + 0.5), r = int(pc.alpha_ref * 255.0 + 0.5);\n"

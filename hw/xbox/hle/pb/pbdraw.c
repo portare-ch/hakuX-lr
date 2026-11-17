@@ -1384,8 +1384,8 @@ static void sync_rt(void)
         if (g_pd.objs[i].id == rt) {
             g_pd.objs[i].swz_bound = swz;
         }
-        if (g_pd.objs[i].id == rt && (cf == 4 || cf == 5)) {
-            g_pd.objs[i].x_zero = cf == 4;
+        if (g_pd.objs[i].id == rt && (cf == 1 || cf == 2 || cf == 4 || cf == 5)) {
+            g_pd.objs[i].x_zero = cf == 4 || cf == 1;      /* (X1R5G5B5's bit 15 too) */
         }
     }
     if (ds != g_pd.ds && g_pd.ds) {
@@ -3675,6 +3675,12 @@ static uint32_t tex_order(unsigned s, uint32_t id)
          * Blend surface samples such targets as A8R8G8B8) */
         ord = HLE_DRAW_ORD_XALPHA;
         break;
+    case HLE_XFMT_A1R5G5B5: case HLE_XFMT_LIN_A1R5G5B5: {
+        /* the same of an X1R5G5B5 target's bit 15 */
+        const PbObj *t = obj_of(id);
+        return t && !t->cube && (t->d.xfmt == HLE_XFMT_X1R5G5B5 || t->d.xfmt == HLE_XFMT_LIN_X1R5G5B5) ?
+               HLE_DRAW_ORD_XALPHA | (t->x_zero ? HLE_DRAW_ORD_AZERO : 0) : 0;
+    }
     default:
         return 0;
     }
@@ -4128,6 +4134,8 @@ static void emit(HleCmdDraw *d)
     /* CLIP_MIN / CLIP_MAX (0x0394, 0x0398), in the depth buffer's units (w's
      * under W-buffering): D3D sets its viewport's MinZ and MaxZ there. Only
      * a range inside a fixed-point buffer's, and at least a step wide. */
+    /* (a CONTROL0 never written is 0: D3D writes it with the bit set) */
+    d->nopersp = R(NV097_SET_CONTROL0) && !(R(NV097_SET_CONTROL0) & 0x100000u);
     d->zclip[0] = d->zclip[1] = 0.0f;
     d->zclip_w = (R(NV097_SET_CONTROL0) & 0x10000u) != 0;
     if ((R(NV097_SET_CONTROL0) & 0x1000u) && zf == 2 && hle_res_zfloat_raw()) {
@@ -4216,8 +4224,10 @@ static bool combiners_read_colours(void)
 
 static uint32_t prim_flat(void)
 {
-    /* both faces' POLYGON_MODE LINE (0x038C, 0x0390) and no culling
-     * (CULL_FACE_ENABLE, 0x0308): quads and polygons as their outlines.
+    /* both faces' POLYGON_MODE LINE (0x038C, 0x0390): quads and polygons as
+     * their outlines. With culling on too: a polygon facing away is then
+     * drawn where the NV2A culls it (lines have no facing), which is less
+     * wrong than every quad's diagonal (Line width, Edge flag).
      * Not where the lines would lose what the polygon has: its one colour
      * under flat shading (each edge would take its own first vertex's), its
      * facing under two-sided lighting (0x17C4: lines are front-facing), its
@@ -4225,7 +4235,7 @@ static uint32_t prim_flat(void)
      * triangles drawn as lines, the diagonals with them. */
     const bool flat_col = R(0x037C) == 0x1D00 && combiners_read_colours();
     const bool wire_ofs = R(0x0334) && ((R(0x0384) & 0x7FFFFFFFu) || (R(0x0388) & 0x7FFFFFFFu));
-    if (R(0x038C) == 0x1B01 && R(0x0390) == 0x1B01 && !R(0x0308) &&
+    if (R(0x038C) == 0x1B01 && R(0x0390) == 0x1B01 &&
         !flat_col && !(R(0x17C4) & 1) && !wire_ofs &&
         (g_pd.prim == NV2A_PRIM_QUADS || g_pd.prim == NV2A_PRIM_QUADS + 1 || g_pd.prim == NV2A_PRIM_QUADS + 2)) {
         return g_pd.prim | HLE_PRIM_OUTLINE;

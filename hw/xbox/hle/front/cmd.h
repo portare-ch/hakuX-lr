@@ -281,6 +281,9 @@ typedef struct HleCmdState {
                                    and far planes is clamped to them, not clipped (bit
                                    0); bit 1: with CULL_NEAR_FAR_EN, a primitive wholly
                                    outside the range is dropped */
+    uint32_t znearfar;          /* ... ZMIN_MAX_CONTROL CULL_NEAR_FAR_EN (bit 0): under
+                                   W-buffering the range is the program's z's too */
+    uint32_t znearfar_pad;      /* (the state is 8-byte words) */
     uint32_t aactl;             /* NV2A SET_ANTI_ALIASING_CONTROL (0x1D7C): bit 0
                                    multisampling, 4 alpha-to-coverage, 8 alpha-to-one,
                                    31:16 the sample mask (as NV30's MULTISAMPLE_CONTROL);
@@ -355,6 +358,9 @@ typedef struct HleCmdDraw {
                                    buffer's maximum, when it is less than all of a
                                    fixed-point Z buffer's (else 0, 0): outside it a
                                    fragment is culled, or clamped (zclamp) */
+    uint32_t nopersp;           /* CONTROL0's TEXTUREPERSPECTIVE off: colours and
+                                   texture coordinates are interpolated linearly on
+                                   screen, not perspective-correct */
     uint32_t zclip_w;           /* ... of w: Z_PERSPECTIVE_ENABLE (W-buffering), whether
                                    the depth is tested or not */
     uint32_t rt_noalpha;        /* the colour target's format has no alpha (the NV2A's
