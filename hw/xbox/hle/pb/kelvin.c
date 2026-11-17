@@ -353,7 +353,8 @@ void hle_kelvin_state(HleCmdState *st)
         st->spec = (R(0x03B8) != 0) | ((R(0x0294) >> 17) & 1) << 1;
     }
     if (W(0x1D78)) {                    /* SET_ZMIN_MAX_CONTROL: ZCLAMP_EN (bits 4..7) CLAMP */
-        st->zclamp = ((R(0x1D78) >> 4) & 0xF) == 1;
+        /* (bit 1: with CULL_NEAR_FAR_EN, bit 0 of the register) */
+        st->zclamp = ((R(0x1D78) >> 4) & 0xF) == 1 ? 1u | (R(0x1D78) & 1 ? 2u : 0) : 0;
     }
 }
 

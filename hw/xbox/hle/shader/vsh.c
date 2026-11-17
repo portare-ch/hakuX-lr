@@ -375,7 +375,21 @@ static void tail(Buf *bp, const HleVshKey *k, bool fogw)
         put(&b, "  if (pc.scr.w != 0.0) zN = (zN - pc.scr.z) * pc.scr.w;\n");
     }
     put(&b, "  gl_Position = vec4(ndc * w, %s, w);\n", k->wbuf || k->zfree ? "0.0" : "zN * w");
-    if (k->zclamp && g_hle_glsl_zclamp) {
+    /* CULL_NEAR_FAR_EN with ZCLAMP_EN (the key's zclamp bit 1, vk/draw.c): a
+     * primitive whose vertices are all before the depth range, or all past
+     * it, is dropped; the others are clamped. By the program's z, also
+     * under W-buffering (nxdk_pgraph_tests' ZMinMaxControl: quads of w 1,
+     * below a range of 10 .. 100, are drawn there by their z): the range's
+     * fraction (the depth scaled above), or z against pc.scr.xy. */
+    if (k->zclamp & 2) {
+        if (k->wbuf) {
+            put(&b, HLE_ZNORM_GLSL("oPos.z", "zCull")
+                    "  gl_CullDistance[0] = zCull - pc.scr.x;\n  gl_CullDistance[1] = pc.scr.y - zCull;\n");
+        } else if (!k->zfree) {
+            put(&b, "  gl_CullDistance[0] = zN;\n  gl_CullDistance[1] = 1.0 - zN;\n");
+        }
+    }
+    if ((k->zclamp & 1) && g_hle_glsl_zclamp) {
         put(&b, HLE_ZCLAMP_GLSL);
     }
     if (g_hle_glsl_zw) {

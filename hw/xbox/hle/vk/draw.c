@@ -4626,7 +4626,9 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
     /* W-buffering's depth range (CLIP_MIN .. CLIP_MAX of w) holds without a
      * depth test too: the pixel shader then has w to cull by, and stores
      * nothing (no depth test, no write) */
-    if (!wbuf && prog && ds && s->rs[RS_ZENABLE] == 0 && c->zclip_w && c->zclip[1] > c->zclip[0] && !s->zclamp) {
+    const bool znf = (s->zclamp & 2) && g_hvk.caps.cull_distance && prog && c->zclip[1] > c->zclip[0];
+    if (!wbuf && prog && ds && s->rs[RS_ZENABLE] == 0 && c->zclip_w && c->zclip[1] > c->zclip[0] &&
+        (!s->zclamp || znf)) {
         wbuf = true;
     }
     /* NV2A ZCLAMP_EN CLAMP: depth past the near and far planes is clamped to
@@ -4643,7 +4645,7 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
      * drawn with none): culled then by the depth the program leaves. */
     const bool zt_off = !ds || s->rs[RS_ZENABLE] == 0;
     const bool zrange = prog && !wbuf && c->zclip[1] > c->zclip[0] &&
-                        (zt_off ? !c->zclip_w && !s->zclamp && g_hvk.caps.depth_clamp : true);
+                        (zt_off ? !c->zclip_w && (!s->zclamp || znf) && g_hvk.caps.depth_clamp : true);
     /* (under W-buffering the range is w's, kept by the pixel shader alone) */
     const bool wrange = prog && ds && wbuf && c->zclip[1] > c->zclip[0];
     const bool zcull = (zrange && !s->zclamp && g_hvk.caps.depth_clamp) || (wrange && !s->zclamp);
@@ -4659,7 +4661,7 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
     if (prog) {
         k.vk.wbuf = wbuf;
         k.vk.zfree = zt_off && !zrange;
-        k.vk.zclamp = zclamp;
+        k.vk.zclamp = (zclamp || (znf && (zrange || wrange)) ? 1 : 0) | (znf && (zrange || wrange) ? 2 : 0);
     } else {
         k.vs.wbuf = wbuf;
         k.vs.zclamp = zclamp;

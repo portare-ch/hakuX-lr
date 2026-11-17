@@ -4198,6 +4198,20 @@ static bool combiners_read_colours(void)
 
 static uint32_t prim_flat(void)
 {
+    /* both faces' POLYGON_MODE LINE (0x038C, 0x0390) and no culling
+     * (CULL_FACE_ENABLE, 0x0308): quads and polygons as their outlines.
+     * Not where the lines would lose what the polygon has: its one colour
+     * under flat shading (each edge would take its own first vertex's), its
+     * facing under two-sided lighting (0x17C4: lines are front-facing), its
+     * wireframe polygon offset (0x0334: lines get no depth bias). Those stay
+     * triangles drawn as lines, the diagonals with them. */
+    const bool flat_col = R(0x037C) == 0x1D00 && combiners_read_colours();
+    const bool wire_ofs = R(0x0334) && ((R(0x0384) & 0x7FFFFFFFu) || (R(0x0388) & 0x7FFFFFFFu));
+    if (R(0x038C) == 0x1B01 && R(0x0390) == 0x1B01 && !R(0x0308) &&
+        !flat_col && !(R(0x17C4) & 1) && !wire_ofs &&
+        (g_pd.prim == NV2A_PRIM_QUADS || g_pd.prim == NV2A_PRIM_QUADS + 1 || g_pd.prim == NV2A_PRIM_QUADS + 2)) {
+        return g_pd.prim | HLE_PRIM_OUTLINE;
+    }
     if (R(0x037C) != 0x1D00) {
         return g_pd.prim;
     }

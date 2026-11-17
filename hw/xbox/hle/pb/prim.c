@@ -37,13 +37,25 @@ static bool flat_list(uint32_t pt)
     }
 }
 
+/* The NV2A draws a polygon in line mode by its own edges (its edge flags):
+ * a quad's four, a polygon's outline. As triangles in line mode the
+ * diagonals between them were drawn too (nxdk_pgraph_tests' Line width). */
+static bool outline(uint32_t pt)
+{
+    const uint32_t t = HLE_PRIM_TYPE(pt);
+    return (pt & HLE_PRIM_OUTLINE) && (t == PT_QUADLIST || t == PT_QUADSTRIP || t == PT_POLYGON);
+}
+
 bool hle_draw_prim_converted(uint32_t pt)
 {
-    return HLE_PRIM_TYPE(pt) == PT_QUADLIST || HLE_PRIM_TYPE(pt) == PT_LINELOOP || flat_list(pt);
+    return outline(pt) || HLE_PRIM_TYPE(pt) == PT_QUADLIST || HLE_PRIM_TYPE(pt) == PT_LINELOOP || flat_list(pt);
 }
 
 uint32_t hle_draw_prim_topology(uint32_t pt)
 {
+    if (outline(pt)) {
+        return VT_LINES;
+    }
     if (flat_list(pt)) {
         return VT_TRIS;
     }
@@ -63,6 +75,13 @@ uint32_t hle_draw_prim_topology(uint32_t pt)
 
 uint32_t hle_draw_prim_count(uint32_t pt, uint32_t n)
 {
+    if (outline(pt)) {
+        switch (HLE_PRIM_TYPE(pt)) {
+        case PT_QUADLIST:  return n / 4 * 8;
+        case PT_QUADSTRIP: return n >= 4 ? (n / 2 - 1) * 8 : 0;
+        default:           return n >= 2 ? n * 2 : 0;
+        }
+    }
     if (flat_list(pt)) {
         switch (HLE_PRIM_TYPE(pt)) {
         case PT_TRIANGLELIST: return n / 3 * 3;
@@ -86,6 +105,33 @@ void hle_draw_prim_indices(uint32_t pt, const uint16_t *in, uint32_t n, uint32_t
 #define IN(i) ((uint16_t)((in ? in[i] : (i)) - base))
 #define TRI(a, b, c) (*out++ = IN(a), *out++ = IN(b), *out++ = IN(c))
     const bool flat = pt & (HLE_PRIM_FLAT_FIRST | HLE_PRIM_FLAT_LAST);
+#define LINE(a, b) (*out++ = IN(a), *out++ = IN(b))
+    if (outline(pt)) {
+        switch (HLE_PRIM_TYPE(pt)) {
+        case PT_QUADLIST:
+            for (uint32_t q = 0; q + 3 < n; q += 4) {
+                LINE(q, q + 1);
+                LINE(q + 1, q + 2);
+                LINE(q + 2, q + 3);
+                LINE(q + 3, q);
+            }
+            break;
+        case PT_QUADSTRIP:              /* quad i: 2 i, 2 i + 1, 2 i + 3, 2 i + 2 around */
+            for (uint32_t i = 0; i + 3 < n; i += 2) {
+                LINE(i, i + 1);
+                LINE(i + 1, i + 3);
+                LINE(i + 3, i + 2);
+                LINE(i + 2, i);
+            }
+            break;
+        default:
+            for (uint32_t i = 0; n >= 2 && i < n; i++) {
+                LINE(i, i + 1 < n ? i + 1 : 0);
+            }
+            break;
+        }
+        return;
+    }
     if (flat_list(pt)) {
         switch (HLE_PRIM_TYPE(pt)) {
         case PT_TRIANGLELIST:
@@ -140,6 +186,7 @@ void hle_draw_prim_indices(uint32_t pt, const uint16_t *in, uint32_t n, uint32_t
     if (pt == PT_LINELOOP && n) {
         *out = IN(0);
     }
+#undef LINE
 #undef TRI
 #undef IN
 }
