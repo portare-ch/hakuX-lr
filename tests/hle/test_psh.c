@@ -307,12 +307,24 @@ static void test_dot_zw(void)
     n = hle_psh_glsl(&k, buf, sizeof(buf), &un);
     HT_CHECK(n > 0 && n == strlen(buf));
     dump("psh_dot_zw_wbuf");
-    HT_CHECK(strstr(buf, "zrep = clamp(zrep, 0.0, 1.0);") != NULL);
+    HT_CHECK(strstr(buf, "zrep = pc.scr.y > pc.scr.x ? clamp(zrep, pc.scr.x, pc.scr.y) : clamp(zrep, 0.0, 1.0);") != NULL);
     HT_CHECK(strstr(buf, "zrep >= 0.0") == NULL);
     HT_CHECK(strstr(buf, "if (zrep < subpassLoad(uZ).r") != NULL);
     HT_CHECK(strstr(buf, "gl_FragCoord.z <") == NULL);
     HT_CHECK(strstr(buf, "gl_FragDepth = zrep;") != NULL);
     HT_CHECK(strstr(buf, "wDepth") == NULL);
+    /* a depth range culled by (CLIP_MIN .. CLIP_MAX): the replaced depth's,
+     * W-buffering's w neither computed nor read */
+    k.zclamp = HLE_PSH_ZCULL;
+    k.fbfetch = 0;
+    n = hle_psh_glsl(&k, buf, sizeof(buf), &un);
+    HT_CHECK(n > 0 && n == strlen(buf));
+    dump("psh_dot_zw_zcull");
+    HT_CHECK(strstr(buf, "if (!(zrep >= pc.scr.x && zrep <= pc.scr.y)) discard;") != NULL);
+    HT_CHECK(strstr(buf, "wN") == NULL);
+    HT_CHECK(strstr(buf, "gl_FragCoord.z <") == NULL);
+    k.zclamp = 1;
+    k.fbfetch = HLE_FB_ZEQ24;
     /* stage 2 (texm3x2pad on stage 1) */
     rs[HLE_PS_TEXMODES] = 1 | 0x11u << 5 | (unsigned)HLE_PST_DOT_ZW << 10;
     hle_psh_key(rs, &k);
