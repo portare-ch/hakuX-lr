@@ -1322,6 +1322,8 @@ static unsigned shadow_fmt(uint32_t id)
     switch (s->d.xfmt) {
     case HLE_XFMT_D16: case HLE_XFMT_LIN_D16:   return 2;
     case HLE_XFMT_F24S8: case HLE_XFMT_LIN_F24S8:
+        /* (an image that holds the depth itself: read as an F24 texture's float) */
+        return g_hvk.caps.depth_unrestricted ? 4 : 3;
     case HLE_XFMT_F16: case HLE_XFMT_LIN_F16:   return 3;
     default:                                    return 1;
     }
@@ -2595,7 +2597,7 @@ static HlePbResult pipeline_build(const void *key, const uint32_t *tok, uint32_t
         VkPipelineRasterizationStateCreateInfo rs = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
             /* without depthClamp the vertex shader clamps (HLE_ZCLAMP_GLSL) */
-            .depthClampEnable = (k->vsh ? k->vk.zclamp : k->vs.zclamp) && g_hvk.caps.depth_clamp,
+            .depthClampEnable = (k->vsh ? k->vk.zclamp & 1 : k->vs.zclamp) && g_hvk.caps.depth_clamp,
             .polygonMode = (VkPolygonMode)(k->raster & 3), .lineWidth = 1.0f };
         /* Vulkan line rasterization applies coverage to fragment alpha. */
         VkPipelineRasterizationLineStateCreateInfoKHR ls = {
