@@ -9,6 +9,7 @@
 #include <math.h>
 #include "native/platform/properties.h"
 
+#include "hw/xbox/hle/accuracy.h"
 #include "hw/xbox/hle/hle.h"
 #include "hw/xbox/hle/prop.h"
 #include "hw/xbox/hle/hitch.h"
@@ -676,6 +677,8 @@ void hle_draw_slot(unsigned slot)
     }
 }
 
+static void accuracy_resolve(void);
+
 int hle_draw_init(void)
 {
     VkDescriptorSetLayoutBinding b[4] = {
@@ -800,6 +803,7 @@ int hle_draw_init(void)
                     "no push descriptors");
         }
     }
+    accuracy_resolve();                     /* (fbfetch is final now) */
     VkDescriptorSetLayout sets[4] = { g_dr.dsl, g_dr.cdsl,
                                       g_hvk.caps.fbfetch ? g_dr.fbdsl : g_dr.edsl, g_dr.pdsl };
     VkPipelineLayoutCreateInfo lci = {
@@ -1329,13 +1333,31 @@ static unsigned shadow_fmt(uint32_t id)
     }
 }
 
+/* The accuracy level's two paths here, as this device has them (accuracy.h;
+ * accuracy_resolve, once the device's capabilities are final) */
+static bool g_acc_sblend, g_acc_fblend;
+
+static void accuracy_resolve(void)
+{
+    const HleGraphicsAccuracy *a = hle_accuracy();
+    g_acc_sblend = a->precise_signed_blend && g_hvk.caps.fbfetch;
+    g_acc_fblend = a->precise_postblend_dither && g_hvk.caps.raster_order;
+    hle_log("hakuX-hle-back", "accuracy: %s; combiners: %s; signed blending: %s; "
+            "16-bit post-blend dithering: %s",
+            hle_accuracy_level_name(hle_accuracy_level()), a->precise_combiners ? "accurate" : "fast",
+            g_acc_sblend ? "accurate" : a->precise_signed_blend ? "unsigned approximation (no framebuffer "
+            "fetch on this device)" : "unsigned approximation",
+            g_acc_fblend ? "accurate" : a->precise_postblend_dither ? "host approximation (no rasterization-"
+            "order attachment access on this device)" : "host approximation");
+}
+
 /* The draw blends with a signed equation the shader does (sblend): 1
  * ADDSIGNED, 2 REVSUBTRACTSIGNED; 0 none. Whatever the factors: the NV2A
  * ignores them for these two. */
 static unsigned signed_blend(const HleCmdState *s)
 {
     uint32_t op = s->rs[RS_BLENDOP];
-    if (!g_hvk.caps.fbfetch || !s->rs[RS_ALPHABLENDENABLE] || (op != 0xF005 && op != 0xF006)) {
+    if (!g_acc_sblend || !s->rs[RS_ALPHABLENDENABLE] || (op != 0xF005 && op != 0xF006)) {
         return 0;
     }
     return op == 0xF006 ? 1 : 2;
@@ -1397,7 +1419,7 @@ static bool is_colour_rt(uint32_t rt_id)
 static bool dither_blend(const HleCmdState *s, uint32_t rt_id)
 {
     const uint32_t op = s->rs[RS_BLENDOP];
-    if (!g_hvk.caps.raster_order || !s->psh || !s->rs[RS_DITHERENABLE] ||
+    if (!g_acc_fblend || !s->psh || !s->rs[RS_DITHERENABLE] ||
         !s->rs[RS_ALPHABLENDENABLE] || op == 0xF005 || op == 0xF006) {
         return false;
     }

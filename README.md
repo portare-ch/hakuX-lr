@@ -245,11 +245,27 @@ take effect immediately.
 | Render Scale | The default is **2x**. Try **1x** if a game runs slowly. Higher values sharpen the picture but need more GPU power. |
 | Screen Format | Choose **Widescreen** for games that support it. Set RetroArch's aspect ratio to **Core provided**. |
 | Crop Overscan | On by default to hide borders around the picture. Turn it off to show the full frame. |
-| Combiner Precision | **Accurate** is the default on AMD64 Linux; **Fast** on ARM64 Linux and Android. Fast omits 9-bit combiner rounding to reduce GPU work. Restart the game after changing it. |
+| Accuracy Level | Selects graphics accuracy trade-offs; see the table below. **Custom** is the default for now and keeps Combiner Precision as you set it. Render scale and audio are separate settings. Restart the game after changing it. |
+| Combiner Precision | Used only when Accuracy Level is **Custom**. **Accurate** is the default on AMD64 Linux; **Fast** on ARM64 Linux and Android. Fast omits 9-bit combiner rounding to reduce GPU work. Restart the game after changing it. |
 | Audio Processing | Defaults to **Full DSP (experimental)**, which runs Xbox audio effects. Try **Fast** if audio crackles or a game runs slowly. |
 | Audio Resampler | Defaults to **Sinc**. Try **Linear** to reduce CPU use at the cost of some audio quality. |
 | Console Memory | **64 MB** (default), **128 MB**, or **256 MB**. Extra RAM is available to homebrew and compatible games. Most games keep their 64 MB limit unless the patch option below is enabled. Restart the game after changing it. |
 | Patch Games for Console Memory | Off by default. Removes the game's 64 MB limit when using 128 MB or 256 MB of console RAM. Some games may not work with extra memory. Game files are not changed. Restart the game after changing it. |
+
+What each **Accuracy Level** does:
+
+| | Potato | Medium | High |
+| --- | --- | --- | --- |
+| Combiner rounding | Fast | Accurate | Accurate |
+| Signed blend equations | Unsigned approximation | Accurate | Accurate |
+| Dithering after blending into 16-bit targets | Host approximation | Host approximation | Accurate |
+
+**Potato** can change colours and effects in games that use these features;
+**Medium** is the recommended choice for play. **High** uses every accuracy
+path the device's GPU supports; a path the GPU lacks stays an approximation,
+and the log names it. The mapping is provisional: no speed gain has been
+measured for it yet. All other rendering and compatibility fixes are the same
+at every level.
 | Frame Pacing | Off by default (experimental). If a game runs slowly and the controls feel delayed, **On** holds the game to the pace the GPU draws at, so it can't run ahead of the picture. **Lowest Latency** waits one frame less but may lower the frame rate. |
 
 ## Saves
