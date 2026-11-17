@@ -3960,6 +3960,7 @@ static int dbg_flags(void)
 static unsigned cull_bits(const uint32_t *rs)
 {
     return rs[RS_CULLMODE] == 0 || (dbg_flags() & 32) ? VK_CULL_MODE_NONE :
+           rs[RS_CULLMODE] == 0x408 ? VK_CULL_MODE_FRONT_AND_BACK :
            rs[RS_CULLMODE] == rs[RS_FRONTFACE] ? VK_CULL_MODE_FRONT_BIT : VK_CULL_MODE_BACK_BIT;
 }
 
@@ -4537,6 +4538,15 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
                  !(s->psh && k.pk.debug == 17 && (k.pk.shadow & 15));  /* debug view 17 */
     k.src = s->rs[RS_SRCBLEND];
     k.dst = s->rs[RS_DESTBLEND];
+    /* A target without alpha (X1R5G5B5, X8R8G8B8): the NV2A blends with a
+     * destination alpha of 1, whatever the unused bits hold. The image has
+     * an alpha channel and what was drawn into it: DSTALPHA scaled by that
+     * (nxdk_pgraph_tests' Blend surface: white over 0x40000000 came out a
+     * quarter grey, the console's is white). */
+    if (c->rt_noalpha) {
+        k.src = k.src == 0x304 ? 1 : k.src == 0x305 || k.src == 0x308 ? 0 : k.src;
+        k.dst = k.dst == 0x304 ? 1 : k.dst == 0x305 || k.dst == 0x308 ? 0 : k.dst;
+    }
     k.op = s->rs[RS_BLENDOP];
     /* The NV2A's signed equations, ADDSIGNED (0xF006) and REVSUBTRACTSIGNED
      * (0xF005), add the source to the target's byte, or subtract it, as a
@@ -4719,7 +4729,8 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
     if (dbgf & 32) {
         cull = 0;                       /* debug: culling off */
     }
-    const uint32_t cullv = faces == HLE_FACES_FRONT ? VK_CULL_MODE_BACK_BIT :
+    const uint32_t cullv = cull == 0x408 ? VK_CULL_MODE_FRONT_AND_BACK :    /* the NV2A's FRONT_AND_BACK */
+                           faces == HLE_FACES_FRONT ? VK_CULL_MODE_BACK_BIT :
                            faces == HLE_FACES_BACK ? VK_CULL_MODE_FRONT_BIT :
                            cull == 0 ? VK_CULL_MODE_NONE :
                            cull == ff ? VK_CULL_MODE_FRONT_BIT : VK_CULL_MODE_BACK_BIT;

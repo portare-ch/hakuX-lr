@@ -346,6 +346,9 @@ typedef struct HleCmdDraw {
                                    diffuse register's current value (float4), 0 = none */
     float wscale;               /* untransformed FF draws: 1 / the projection's W-buffer
                                    far w (W-buffering stores w / wfar); 0 = keep z */
+    uint32_t rt_noalpha;        /* the colour target's format has no alpha (the NV2A's
+                                   X1R5G5B5 and X8R8G8B8, Z or O): a blend's destination
+                                   alpha is 1 */
 } HleCmdDraw;
 
 #define HLE_DRAW_GUEST_FVF (1u << 31)
@@ -357,6 +360,8 @@ typedef struct HleCmdDraw {
 #define HLE_DRAW_ORD_RGBA 3u        /* R8G8B8A8: bytes A B G R */
 #define HLE_DRAW_ORD_AZERO 4u       /* Z8 target: read the unused byte as 0.
                                        Combine with a byte-order flag above. */
+#define HLE_DRAW_ORD_XALPHA 8u      /* A8R8G8B8 (the target's own order) over an X8R8G8B8
+                                       target: its alpha is the unused byte, 0 or 0xFF */
 
 /* Vertex program microcode: nslots 4-dword instructions follow. */
 typedef struct HleCmdVsh {

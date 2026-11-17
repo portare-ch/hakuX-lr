@@ -92,6 +92,10 @@ bool hle_pbd_blit_images(uint32_t sbase, uint32_t sp, uint32_t dbase, uint32_t d
 uint64_t hle_pbd_copy_begin(uint32_t slo, uint32_t sp, uint32_t dlo, uint32_t dp, uint32_t row,
                             uint32_t rows, uint32_t dbase);
 void hle_pbd_copy_done(uint32_t dlo, uint32_t dp, uint32_t row, uint32_t rows, uint64_t dep);
+/* Decode thread: the memory of rows (row bytes each from lo, pitch apart)
+ * as the GPU has it, before the caller reads it: the images of the targets
+ * over it landed and waited for (a blit that blends reads its destination). */
+void hle_pbd_mem_current(uint32_t lo, uint32_t pitch, uint32_t row, uint32_t rows);
 /* Counters: targets' images landed, copies queued, decoder waits for them */
 void hle_pbd_coh_counts(uint64_t *lands, uint64_t *copies, uint64_t *waits);
 /* After a blit's copy in memory (dep: queued, hle_pbd_copy_begin): the

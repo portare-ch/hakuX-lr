@@ -55,9 +55,13 @@ static const char k_fs[] =
      * so a cleared word comes back as it was), as the NV2A's 24 bits: a
      * float's exponent and the top 16 of its mantissa. An image at its
      * maximum holds what was more (a clear to 0xFFFFFF, D3D's far): that
-     * word */
+     * word. Two steps of the image's float are added first: a depth
+     * interpolated over a triangle comes out a step under the one all its
+     * vertices have (325.0 as 324.99997), and the NV2A's word for that is
+     * the one before (0x8744FF for 0x874500: nxdk_pgraph_tests' W buffering
+     * prints them) */
     "  if ((pc.map.x & 0x80u) != 0u)\n"
-    "    d = z >= 1.0 ? 0xFFFFFFu : floatBitsToUint(z * 1267650600228229401496703205376.0) >> 7;\n"
+    "    d = z >= 1.0 ? 0xFFFFFFu : (floatBitsToUint(z * 1267650600228229401496703205376.0) + 2u) >> 7;\n"
     "  uint w = d << 8 | (texelFetch(st, q, 0).r & 0xFFu);\n"
     "  if (halves) {\n"
     "    uint h = pc.map.y > 1u || ((uint(p.x) / max(pc.map.y, 1u)) & 1u) != 0u ? w >> 16\n"
@@ -82,7 +86,7 @@ static const char k_fs16[] =
      * bits of mantissa. A depth of exponent 0 (below 2^-6) is stored 0
      * (nxdk_pgraph_tests' Depth buffer: every word under 0x1000) */
     "  if (pc.map.y == 0x80u) {\n"
-    "    uint b = floatBitsToUint(d * 511.9375);\n"
+    "    uint b = floatBitsToUint(d * 511.9375) + 2u;\n"
     "    v = b < 0x3C800000u ? 0u : min((b - 0x3C000000u) >> 11, 65535u);\n"
     "  }\n"
     "  o = vec4(float(v) / 65535.0);\n"

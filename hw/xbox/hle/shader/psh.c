@@ -642,11 +642,26 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "vec3 dmap(uint m, vec4 c) {\n"
             "  if (m == 0u) return c.rgb;\n"
             "%s"
-            "  if (m == 3u) { vec3 v = floor(c.rgb * 255.0 + 0.5);\n"
-            "    return mix(v, v - 256.0, greaterThanEqual(v, vec3(128.0))) / 127.0; }\n"
-            "  if (m >= 4u) { vec2 h = c.rg * 2.0 - 1.0;\n"
-            "    return vec3(h, m == 4u ? 1.0 : sqrt(max(1.0 - dot(h, h), 0.0))); }\n"
-            "  return c.rgb * 2.0 - 1.0;\n"
+            /* The byte mappings (nxdk_pgraph_tests' Texture cubemap, by the
+             * console's pictures): MINUS1_TO_1_D3D (1) is the byte less 128
+             * over 127; _GL (2) and MINUS1_TO_1 (3) read it as two's
+             * complement, (2 b + 1) / 255 and b / 127. The HILO_HEMISPHERE
+             * ones (5 D3D, 6 GL, 7) take the texel's two 16-bit halves (as
+             * HILO_1's) the same three ways over 32767, and the third
+             * component from the unit length. */
+            "  vec3 v = floor(c.rgb * 255.0 + 0.5);\n"
+            "  if (m == 1u) return (v - 128.0) / 127.0;\n"
+            "  if (m == 2u || m == 3u) {\n"
+            "    vec3 t = mix(v, v - 256.0, greaterThanEqual(v, vec3(128.0)));\n"
+            "    return m == 2u ? (2.0 * t + 1.0) / 255.0 : t / 127.0; }\n"
+            "  if (m >= 5u) { uvec4 i = uvec4(c * 255.0 + 0.5);\n"
+            "    vec2 w = vec2(float(i.a << 8 | i.r), float(i.g << 8 | i.b));\n"
+            "    vec2 h = m == 5u ? (w - 32768.0) / 32767.0 :\n"
+            "             mix(w, w - 65536.0, greaterThanEqual(w, vec2(32768.0))) / 32767.0;\n"
+            "    if (m == 6u) h = (2.0 * h * 32767.0 + 1.0) / 65535.0;\n"
+            "    return vec3(h, sqrt(max(1.0 - dot(h, h), 0.0))); }\n"
+            "  vec2 h = c.rg * 2.0 - 1.0;\n"
+            "  return vec3(h, 1.0);\n"
             "}\n"
             /* bytes as two's complement over 128 (bump offsets) */
             "vec2 sgn8(vec2 c) {\n"

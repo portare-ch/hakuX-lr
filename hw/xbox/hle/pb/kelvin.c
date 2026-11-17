@@ -267,9 +267,15 @@ void hle_kelvin_state(HleCmdState *st)
     }
     if (W(0x0308) || W(0x039C) || W(0x03A0)) {
         /* CULLMODE is the winding culled: the front one for GL_FRONT */
-        uint32_t ff = W(0x03A0) && R(0x03A0) ? R(0x03A0) : 0x900;
+        /* a FRONT_FACE that is neither CW (0x900) nor CCW (0x901) leaves the
+         * one before in effect (nxdk_pgraph_tests' Front face: 0 and 99) */
+        uint32_t ff = rs[RS_FRONTFACE] == 0x900 || rs[RS_FRONTFACE] == 0x901 ? rs[RS_FRONTFACE] : 0x900;
+        if (W(0x03A0) && (R(0x03A0) == 0x900 || R(0x03A0) == 0x901)) {
+            ff = R(0x03A0);
+        }
         rs[RS_FRONTFACE] = ff;
-        rs[RS_CULLMODE] = !R(0x0308) ? 0 : R(0x039C) == 0x404 ? ff : (ff ^ 1);
+        /* FRONT_AND_BACK (0x408) culls every polygon: as itself */
+        rs[RS_CULLMODE] = !R(0x0308) ? 0 : R(0x039C) == 0x408 ? 0x408 : R(0x039C) == 0x404 ? ff : (ff ^ 1);
     }
     if (W(0x029C)) {                    /* 0x100: an _ABS mode (0x802 .. 0x804) */
         uint32_t m = R(0x029C);

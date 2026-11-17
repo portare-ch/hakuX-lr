@@ -2797,6 +2797,16 @@ void hle_pbd_blit(uint32_t dbase, uint32_t dp, uint32_t ox, uint32_t oy, uint32_
     const int32_t pt[1][2] = { { (int32_t)ox, (int32_t)oy } };
     hle_res_upload(dst, dbase, dp, 1, &r, pt);
     dd->written = ++g_pd.wseq;
+    if (!kept) {
+        /* The copy's rows are in the image: its memory's writes are taken.
+         * Left as written, the whole target went from memory into its image
+         * at its next use (rt_cpu_sync), over what the GPU drew since the
+         * memory was current: nxdk_pgraph_tests' Image blit clears its back
+         * buffer and blits into it, and every picture was the frame before
+         * with the blit on it. */
+        (void)obj_written(dd);
+        obj_edges_set(dd);
+    }
     if (kept) {
         const uint64_t was = dd->synced;
         coh_synced(dd, len);                /* the copy's bytes are the image's too */
@@ -3487,8 +3497,13 @@ static uint32_t texture(unsigned s, bool *unset, bool *lin)
      * colour pass used; sampled as that target, the CPU's DXT bytes uploaded
      * into it as colour, the picture was the clear colour (teal). */
     const bool dxt = fi && (fi->flags & HLE_FI_DXT);
+    /* Nor is a volume (FORMAT's dimensionality 3): a target is one slice of
+     * memory, the volume's depth slices are the title's data. After
+     * nxdk_pgraph_tests rendered into its texture memory, its 32-bit volumes
+     * there sampled the target's image (drawn blank). */
+    const bool vol = ((fmt >> 4) & 0xF) == 3;
     const uint64_t landing = g_pd.tex_landing[s];
-    PbObj *best = dxt || landing ? NULL : tex_target(pa, want_depth);
+    PbObj *best = dxt || vol || landing ? NULL : tex_target(pa, want_depth);
     if (best) {
         rt_cpu_sync(best->id);
     }
@@ -3644,6 +3659,13 @@ static uint32_t tex_order(unsigned s, uint32_t id)
     case HLE_XFMT_R8G8B8A8: case HLE_XFMT_LIN_R8G8B8A8:
         ord = HLE_DRAW_ORD_RGBA;
         break;
+    case HLE_XFMT_A8R8G8B8: case HLE_XFMT_LIN_A8R8G8B8:
+        /* the target's own order: only an X8R8G8B8 target's alpha differs.
+         * The NV2A writes its unused byte 0 (Z8) or 0xFF (O8) with every
+         * pixel; the image's alpha is what was drawn (nxdk_pgraph_tests'
+         * Blend surface samples such targets as A8R8G8B8) */
+        ord = HLE_DRAW_ORD_XALPHA;
+        break;
     default:
         return 0;
     }
@@ -3656,7 +3678,7 @@ static uint32_t tex_order(unsigned s, uint32_t id)
         /* Preserve the unused byte when reordering: 0 for Z8, 0xFF for O8. */
         return ord | (o->x_zero ? HLE_DRAW_ORD_AZERO : 0);
     case HLE_XFMT_A8R8G8B8: case HLE_XFMT_LIN_A8R8G8B8:
-        return ord;
+        return ord == HLE_DRAW_ORD_XALPHA ? 0 : ord;
     default:
         return 0;
     }
@@ -4090,6 +4112,10 @@ static void emit(HleCmdDraw *d)
      * a float format's own (zfloat_scale) */
     d->zscale = (R(NV097_SET_CONTROL0) & 0x1000u) ? zfloat_scale(zf == 2) : zf == 1 ? 1.0f / 65536.0f
                                                                            : 1.0f / 16777216.0f;
+    {
+        const uint32_t cf = R(NV097_SET_SURFACE_FORMAT) & 0xF;
+        d->rt_noalpha = cf == 1 || cf == 2 || cf == 4 || cf == 5;
+    }
     d->ff_ubo = HLE_DRAW_NO_UBO;
     drawlog(d, ff);
     HleCmdDraw *c = begin(HLE_OP_DRAW, sizeof(*c));
@@ -5677,6 +5703,12 @@ uint64_t hle_pbd_copy_begin(uint32_t slo, uint32_t sp, uint32_t dlo, uint32_t dp
     coh_adopt();
     uint32_t len;
     PbObj *rd = dbase && g_pd.device ? obj_of(object_at(dbase)) : NULL;
+    if (rd && rd->d.pitch && !coh_managed(rd, &len)) {
+        /* a blit into a target the old paths keep (a frame buffer): what the
+         * CPU wrote there before goes into its image now; the blit's own
+         * rows follow by themselves (hle_pbd_blit) */
+        rt_cpu_sync(rd->id);
+    }
     if (rd && (!rd->d.pitch || !coh_managed(rd, &len))) {
         rd = NULL;
     }
@@ -5878,6 +5910,20 @@ uint64_t hle_pbd_copy_begin(uint32_t slo, uint32_t sp, uint32_t dlo, uint32_t dp
     }
     g_coh.copies += v != 0;
     return v;
+}
+
+void hle_pbd_mem_current(uint32_t lo, uint32_t pitch, uint32_t row, uint32_t rows)
+{
+    /* as a copy of the rows onto themselves: what a copy reads lands first */
+    const uint64_t v = hle_pbd_copy_begin(lo, pitch, lo, pitch, row, rows, 0);
+    hle_pbd_copy_done(lo, pitch, row, rows, v);
+    if (v) {
+        if (v > hle_fe_last_value()) {
+            kick();
+        }
+        coh_wait(v);
+        coh_adopt();
+    }
 }
 
 void hle_pbd_copy_done(uint32_t dlo, uint32_t dp, uint32_t row, uint32_t rows, uint64_t dep)
