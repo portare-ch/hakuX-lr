@@ -363,6 +363,12 @@ Options (`options.c`): only what the emulator backs.
   level is Custom, where the frontend can hide options. The level never
   changes render scale, audio, pacing, memory or CPU behaviour, and never
   changes during a run.
+  For measurements, `debug.hakux.accuracy` (on Linux the environment
+  variable `HAKUX_PROP_DEBUG_HAKUX_ACCURACY`) overrides single settings at
+  boot, e.g. `combiners=0,sblend=1,dither=0`, and the renderer's
+  per-second `hakuX-hle-back` line counts the draws that ask for a signed
+  blend (`signed_blend=`) and for a dithered blend into a 16-bit target
+  (`dither_blend=`), whichever path they get.
 - The console's own settings, as its dashboard keeps them: screen format
   (normal, widescreen, letterbox), language (auto: RetroArch's) and video
   region (auto: the game's; NTSC-M, NTSC-J, PAL). 480p is on, as on the

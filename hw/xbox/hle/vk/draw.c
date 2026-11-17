@@ -224,6 +224,9 @@ static struct {
      * first used */
     uint64_t async_queued, async_built, inplace, cache_hits, prebuilt, prebuilt_used;
     uint64_t signed_blends;             /* draws with a signed blend equation, in two */
+    /* draws that ask for a signed blend equation, and for a dithered blend
+     * into a 16-bit target: whichever path the accuracy level gives them */
+    uint64_t signed_blend_want, dither_blend_want;
     /* FF transformed draws by the FF features their state asks for */
     uint64_t ff3d, ff_lit, ff_fog, ff_texgen, ff_texxform, ff_blend, ff_psprite, prog_fog;
     uint8_t fill_seen;                  /* Fill/smoothing modes logged for this game. */
@@ -1339,12 +1342,30 @@ static bool g_acc_sblend, g_acc_fblend;
 
 static void accuracy_resolve(void)
 {
-    const HleGraphicsAccuracy *a = hle_accuracy();
+    HleGraphicsAccuracy acc = *hle_accuracy(), *a = &acc;
+    /* debug.hakux.accuracy, for measuring one setting at a time: "combiners=0",
+     * "sblend=1", "dither=0", comma-separated, over the level's */
+    char v[NC_PROPERTY_VALUE_MAX];
+    const bool dbg = hle_prop_get("debug.hakux.accuracy", v) > 0;
+    if (dbg) {
+        const char *t;
+        if ((t = strstr(v, "combiners="))) {
+            a->precise_combiners = t[10] == '1';
+        }
+        if ((t = strstr(v, "sblend="))) {
+            a->precise_signed_blend = t[7] == '1';
+        }
+        if ((t = strstr(v, "dither="))) {
+            a->precise_postblend_dither = t[7] == '1';
+        }
+        hle_psh_set_precision(a->precise_combiners);
+    }
     g_acc_sblend = a->precise_signed_blend && g_hvk.caps.fbfetch;
     g_acc_fblend = a->precise_postblend_dither && g_hvk.caps.raster_order;
-    hle_log("hakuX-hle-back", "accuracy: %s; combiners: %s; signed blending: %s; "
+    hle_log("hakuX-hle-back", "accuracy: %s%s; combiners: %s; signed blending: %s; "
             "16-bit post-blend dithering: %s",
-            hle_accuracy_level_name(hle_accuracy_level()), a->precise_combiners ? "accurate" : "fast",
+            hle_accuracy_level_name(hle_accuracy_level()), dbg ? " with debug.hakux.accuracy" : "",
+            a->precise_combiners ? "accurate" : "fast",
             g_acc_sblend ? "accurate" : a->precise_signed_blend ? "unsigned approximation (no framebuffer "
             "fetch on this device)" : "unsigned approximation",
             g_acc_fblend ? "accurate" : a->precise_postblend_dither ? "host approximation (no rasterization-"
@@ -1416,16 +1437,21 @@ static bool is_colour_rt(uint32_t rt_id)
  * (caps.raster_order): a draw's overlapping primitives (a particle batch)
  * each blend over the one before, as the fixed-function blend does. Not
  * the signed equations (signed_blend's, or drawn unsigned). */
-static bool dither_blend(const HleCmdState *s, uint32_t rt_id)
+static bool dither_blend_want(const HleCmdState *s, uint32_t rt_id)
 {
     const uint32_t op = s->rs[RS_BLENDOP];
-    if (!g_acc_fblend || !s->psh || !s->rs[RS_DITHERENABLE] ||
+    if (!s->psh || !s->rs[RS_DITHERENABLE] ||
         !s->rs[RS_ALPHABLENDENABLE] || op == 0xF005 || op == 0xF006) {
         return false;
     }
     HleVkSurf *rt = hle_surf_get(rt_id);
     return rt && (rt->aspect & VK_IMAGE_ASPECT_COLOR_BIT) &&
            (rt->fmt == VK_FORMAT_R5G6B5_UNORM_PACK16 || rt->fmt == VK_FORMAT_A1R5G5B5_UNORM_PACK16);
+}
+
+static bool dither_blend(const HleCmdState *s, uint32_t rt_id)
+{
+    return g_acc_fblend && dither_blend_want(s, rt_id);
 }
 
 /*
@@ -4612,6 +4638,7 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
      * Signed blending ignores source alpha. */
     const bool vk_cov = lsmooth && g_hvk.caps.smooth_lines;
     if (k.blend_en && s->psh && k.pk.dither && k.op != 0xF005 && k.op != 0xF006 && !vk_cov) {
+        g_dr.dither_blend_want += dither_blend_want(s, rt_id);
         if (dither_blend(s, rt_id)) {
             const bool cst = (k.src >= 0x8001 && k.src <= 0x8004) ||
                              (k.dst >= 0x8001 && k.dst <= 0x8004);
@@ -4631,6 +4658,7 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         }
     }
     if (k.blend_en && (k.op == 0xF005 || k.op == 0xF006)) {
+        g_dr.signed_blend_want++;
         unsigned sb = signed_blend(s);
         if (sb && rt && (rt->aspect & VK_IMAGE_ASPECT_COLOR_BIT)) {
             k.blend_en = 0;
@@ -5398,13 +5426,14 @@ void hle_draw_ff_diag(void)
     g_prev.verts = g_dr.verts;
     hle_log("hakuX-hle-emit", "%s", line);
     hle_log("hakuX-hle-back", "ff3d=%llu lit=%llu fog=%llu texgen=%llu texxform=%llu "
-            "blend=%llu psprite=%llu prog=%llu prog_fog=%llu dropped: state=%llu target=%llu "
-            "skip=%llu layout=%llu pipeline=%llu",
+            "blend=%llu psprite=%llu prog=%llu prog_fog=%llu signed_blend=%llu dither_blend=%llu "
+            "dropped: state=%llu target=%llu skip=%llu layout=%llu pipeline=%llu",
             (unsigned long long)g_dr.ff3d, (unsigned long long)g_dr.ff_lit,
             (unsigned long long)g_dr.ff_fog, (unsigned long long)g_dr.ff_texgen,
             (unsigned long long)g_dr.ff_texxform, (unsigned long long)g_dr.ff_blend,
             (unsigned long long)g_dr.ff_psprite, (unsigned long long)g_dr.prog_draws,
-            (unsigned long long)g_dr.prog_fog, (unsigned long long)g_dr.drops[DROP_STATE],
+            (unsigned long long)g_dr.prog_fog, (unsigned long long)g_dr.signed_blend_want,
+            (unsigned long long)g_dr.dither_blend_want, (unsigned long long)g_dr.drops[DROP_STATE],
             (unsigned long long)g_dr.drops[DROP_TARGET], (unsigned long long)g_dr.drops[DROP_SKIP],
             (unsigned long long)g_dr.drops[DROP_DECL], (unsigned long long)g_dr.drops[DROP_PIPE]);
     {   /* new pipelines this second: from the caches at once, queued to the
