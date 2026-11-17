@@ -252,11 +252,6 @@ bool hle_host_contig_freed(uint32_t pa, uint32_t limit)
     return nc_mm_contig_freed(pa, limit);
 }
 
-uint32_t hle_host_contig_gen(void)
-{
-    return nc_mm_contig_gen();
-}
-
 /* Disc reads aren't counted here. */
 bool hle_host_disc_stats(uint64_t *ops, uint64_t *bytes, uint64_t *ns)
 {

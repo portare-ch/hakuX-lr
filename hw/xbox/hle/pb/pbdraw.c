@@ -829,23 +829,8 @@ static bool past_block(const HleSurfDesc *d)
         return false;
     }
     const uint32_t limit = (uint32_t)MIN((uint64_t)d->pa + (uint64_t)d->pitch * d->h, UINT32_MAX);
-    /* Asked of every target at every draw (coh_managed), and the answer is a
-     * walk of the title's allocations under their lock: kept by range until
-     * an allocation is made or freed (a quarter of the decoder's time in NBA
-     * Inside Drive 2003's arena otherwise). Each thread's own. */
-    static __thread struct {
-        uint32_t pa, limit, gen;
-        bool valid, past;
-    } memo[256];
-    const uint32_t gen = hle_host_contig_gen();
-    typeof(memo[0]) *m = &memo[((d->pa >> 12) ^ (limit >> 12) ^ (d->pa >> 20)) & 255];
-    if (m->valid && m->pa == d->pa && m->limit == limit && m->gen == gen) {
-        return m->past;
-    }
     const uint32_t end = hle_host_contig_end(d->pa, limit);
-    const bool past = (end && (uint64_t)d->pitch * d->h > end - d->pa) || hle_host_contig_freed(d->pa, limit);
-    *m = (typeof(*m)){ d->pa, limit, gen, true, past };
-    return past;
+    return (end && (uint64_t)d->pitch * d->h > end - d->pa) || hle_host_contig_freed(d->pa, limit);
 }
 
 static bool d16_padded(const HleSurfDesc *d)

@@ -337,9 +337,6 @@ void nc_mm_usage(NcKernel *k, uint32_t *contig_bytes, uint32_t *virtual_bytes, u
 uint32_t nc_mm_contig_end(uint32_t pa, uint32_t limit);
 /* True if any page in [pa, limit) was freed and not reallocated. */
 bool nc_mm_contig_freed(uint32_t pa, uint32_t limit);
-/* Changes whenever a contiguous block is allocated or freed (or all are replaced): while it
- * stands, nc_mm_contig_end and nc_mm_contig_freed answer as they did. */
-uint32_t nc_mm_contig_gen(void);
 /* mm.c: frees the contiguous blocks that code in [lo, hi) allocated (a mod's
  * buffers once its code is gone); returns their bytes. */
 uint32_t nc_mm_contig_free_callers(NcKernel *k, uint32_t lo, uint32_t hi);
