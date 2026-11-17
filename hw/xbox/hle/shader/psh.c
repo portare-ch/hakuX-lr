@@ -999,6 +999,10 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
          * are shaded. */
         put(&b, "  outc.a *= pcov;\n");
     }
+    if (k->zclamp & HLE_PSH_ZCULL) {        /* outside CLIP_MIN .. CLIP_MAX (vk/draw.c) */
+        put(&b, "  if (%s < pc.scr.x || %s > pc.scr.y) discard;\n", k->wbuf ? "wN" : "gl_FragCoord.z",
+            k->wbuf ? "wN" : "gl_FragCoord.z");
+    }
     if (k->alpha_test && k->alpha_func < 8) {
         put(&b, "  { int a = int(clamp(outc.a, 0.0, 1.0) * 255.0 + 0.5), r = int(pc.alpha_ref * 255.0 + 0.5);\n"
                 "    if (!(%s)) discard; }\n",
@@ -1014,7 +1018,7 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
          * with ZCLAMP_EN; NaN fails. */
         put(&b, "  float zq = zrw == 0.0 ? 0.0 : zrz / zrw;\n" HLE_ZNORM_GLSL("zq", "zrep")
                 "  if (zrw == 0.0) zrep = 1.0;\n%s",
-            k->zclamp ? "  zrep = clamp(zrep, 0.0, 1.0);\n"
+            (k->zclamp & 1) ? "  zrep = clamp(zrep, 0.0, 1.0);\n"
                       : "  if (!(zrep >= 0.0 && zrep <= 1.0)) discard;\n");
     }
     if (k->fbfetch & HLE_FB_ZEQ) {

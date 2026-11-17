@@ -346,6 +346,12 @@ typedef struct HleCmdDraw {
                                    diffuse register's current value (float4), 0 = none */
     float wscale;               /* untransformed FF draws: 1 / the projection's W-buffer
                                    far w (W-buffering stores w / wfar); 0 = keep z */
+    float zclip[2];             /* the depth the NV2A keeps, CLIP_MIN .. CLIP_MAX over the
+                                   buffer's maximum, when it is less than all of a
+                                   fixed-point Z buffer's (else 0, 0): outside it a
+                                   fragment is culled, or clamped (zclamp) */
+    uint32_t zclip_w;           /* ... of w: Z_PERSPECTIVE_ENABLE (W-buffering), whether
+                                   the depth is tested or not */
     uint32_t rt_noalpha;        /* the colour target's format has no alpha (the NV2A's
                                    X1R5G5B5 and X8R8G8B8, Z or O): a blend's destination
                                    alpha is 1 */
