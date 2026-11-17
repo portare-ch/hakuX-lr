@@ -1017,13 +1017,18 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
          * range the fragment is rejected (NV_texture_shader), or clamped
          * with ZCLAMP_EN; NaN fails. */
         put(&b, "  float zq = zrw == 0.0 ? 0.0 : zrz / zrw;\n" HLE_ZNORM_GLSL("zq", "zrep")
-                "  if (zrw == 0.0) zrep = 1.0;\n%s",
+                /* (zscale 1: a float buffer that holds the depth itself,
+                 * pb/pbdraw.c zfloat_scale; its far is past every depth and
+                 * it has no top to clamp to or reject at) */
+                "  bool zraw = pc.zscale == 1.0;\n"
+                "  if (zrw == 0.0) zrep = zraw ? uintBitsToFloat(0x7F800000u) : 1.0;\n%s",
             /* the depth range (pc.scr.xy, vk/draw.c: CLIP_MIN .. CLIP_MAX when
              * less than the buffer's) is this depth's, not the one it
              * replaces: culled outside it, or clamped to it */
             (k->zclamp & HLE_PSH_ZCULL) ? "  if (!(zrep >= pc.scr.x && zrep <= pc.scr.y)) discard;\n" :
-            (k->zclamp & 1) ? "  zrep = pc.scr.y > pc.scr.x ? clamp(zrep, pc.scr.x, pc.scr.y) : clamp(zrep, 0.0, 1.0);\n"
-                      : "  if (!(zrep >= 0.0 && zrep <= 1.0)) discard;\n");
+            (k->zclamp & 1) ? "  zrep = pc.scr.y > pc.scr.x ? clamp(zrep, pc.scr.x, pc.scr.y) :\n"
+                              "         zraw ? max(zrep, 0.0) : clamp(zrep, 0.0, 1.0);\n"
+                      : "  if (!(zrep >= 0.0 && (zraw || zrep <= 1.0))) discard;\n");
     }
     if (k->fbfetch & HLE_FB_ZEQ) {
         put(&b, "%s", zr ? HLE_ZEQ_TEST_GLSL(k->fbfetch, "zrep")
