@@ -376,6 +376,11 @@ static struct {
     bool mem_newer, img_newer;
 } g_coh_rows;
 
+/* Counts the changes to which surfaces the object slots hold (one made, one
+ * replaced or freed, all of them reset): what is derived from the slots is
+ * made again when it moves (vb_land's ranges). Not in g_pd: a reset counts. */
+static uint64_t g_objs_gen;
+
 /* debug.hakux.pbdraws: draws still to log (drawlog), clears with them */
 static int g_dlog_left;
 
@@ -484,6 +489,7 @@ bool hle_pbd_start(void)
 {
     pd_free();                              /* a start's before, if not freed (hle_pbd_reset) */
     memset(&g_pd, 0, sizeof(g_pd));
+    g_objs_gen++;
     regs_init();
     ff_regs_init();
     vsh_forget();                           /* program memory starts empty */
@@ -890,6 +896,7 @@ static uint32_t object(uint32_t pa, uint32_t xfmt, uint32_t pitch, uint32_t w, u
                 hle_fe_commit();
                 coh_forget(s);                  /* release its guard unless another target shares it */
                 memset(s, 0, sizeof(*s));       /* a free slot (evict_slot's first) */
+                g_objs_gen++;
             }
             continue;
         }
@@ -922,6 +929,7 @@ static uint32_t object(uint32_t pa, uint32_t xfmt, uint32_t pitch, uint32_t w, u
         }
     }
     memset(o, 0, sizeof(*o));
+    g_objs_gen++;
     o->id = g_pd.next_id++;
     g_pd.made = o->id;
     o->d.id = o->id;
@@ -2672,6 +2680,7 @@ static uint32_t cube_of_targets(uint32_t pa, uint32_t code, uint32_t w, uint32_t
     }
     PbObj *c = &g_pd.objs[g_pd.nobjs++];
     memset(c, 0, sizeof(*c));
+    g_objs_gen++;
     c->id = g_pd.next_id++;
     c->cube = true;
     c->d = (HleSurfDesc){ .id = c->id, .xfmt = xfmt, .w = w, .h = w, .pa = pa, .levels = 1, .faces = 6 };
@@ -4739,10 +4748,11 @@ static uint32_t carry_take(float carry[ATTRS][4])
  * colours a later draw's diffuse stream reads). Its image lands in its
  * memory before the draw's data is taken, as a texture of another layout
  * has it land (tex_land); a wait, so before the draw allocates anything.
- * Arrays start outside every target otherwise: a compare with each target's
- * range a draw, the ranges listed when the targets change. (One range over
- * all of them, [lowest, highest), held most titles' vertex buffers too: NBA
- * Inside Drive 2003's draws then asked every target about every array.) */
+ * Arrays start outside every target otherwise: a compare with the range
+ * over all of them, then with each target's own, listed when the targets or
+ * the object slots change. (Inside [lowest, highest) lie many titles' vertex
+ * buffers too: NBA Inside Drive 2003's draws asked every target, its format
+ * and length looked up, about every array.) */
 static void vb_land(void)
 {
     static uint64_t key = ~0ull;
@@ -4751,24 +4761,26 @@ static void vb_land(void)
         uint8_t obj;
     } rng[MAX_OBJS];
     static unsigned nrng;
-    static uint64_t pages[(1u << 28 >> 12) / 64];   /* the pages those ranges touch, of 256 MiB */
+    static uint32_t lo, hi;                 /* ... and all of them: [lo, hi) */
     if (g_pd.nimm || g_pd.ninl || !g_pd.nidx) {
         return;
     }
+    /* (a slot can be given another surface with neither a bind nor a count
+     * changing: a blit's destination made when all the slots are in use) */
+    static uint64_t gen = ~0ull;
     const uint64_t k = g_pd.binds << 8 | g_pd.nobjs;
-    if (k != key) {                         /* the targets' memory, each one's [pa, end) */
+    if (k != key || gen != g_objs_gen) {    /* the targets' memory, each one's [pa, end) */
         key = k;
+        gen = g_objs_gen;
         nrng = 0;
-        memset(pages, 0, sizeof(pages));
+        lo = UINT32_MAX;
+        hi = 0;
         for (unsigned i = 0; i < g_pd.nobjs; i++) {
             uint32_t len;
             if (coh_len(&g_pd.objs[i], &len)) {
-                const uint32_t pa = g_pd.objs[i].d.pa & 0x0FFFFFFFu;
-                const uint32_t end = (uint32_t)MIN((uint64_t)pa + len, 1u << 28);
                 rng[nrng++] = (typeof(rng[0])){ g_pd.objs[i].d.pa, g_pd.objs[i].d.pa + len, (uint8_t)i };
-                for (uint32_t pg = pa >> 12; pg <= (end - 1) >> 12; pg++) {
-                    pages[pg >> 6] |= 1ull << (pg & 63);
-                }
+                lo = MIN(lo, g_pd.objs[i].d.pa);
+                hi = MAX(hi, g_pd.objs[i].d.pa + len);
             }
         }
     }
@@ -4779,9 +4791,9 @@ static void vb_land(void)
         if (!((R(NV097_SET_VERTEX_DATA_ARRAY_FORMAT + 4 * a) >> 4) & 0xF)) {
             continue;
         }
-        const uint32_t pa = array_pa(a), pg = (pa & 0x0FFFFFFFu) >> 12;
-        if (!((pages[pg >> 6] >> (pg & 63)) & 1)) {
-            continue;                       /* in no target's pages */
+        const uint32_t pa = array_pa(a);
+        if (pa < lo || pa >= hi) {
+            continue;
         }
         for (unsigned r = 0; r < nrng; r++) {
             if (pa < rng[r].pa || pa >= rng[r].end) {
@@ -6512,6 +6524,7 @@ void hle_pbd_reset(void)
 {
     pd_free();
     memset(&g_pd, 0, sizeof(g_pd));
+    g_objs_gen++;
     g_dlog_left = 0;
     g_phase = 0;
     memset(&g_lg, 0, sizeof(g_lg));
