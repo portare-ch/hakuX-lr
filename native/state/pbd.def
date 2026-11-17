@@ -4,7 +4,7 @@
  * indices: HlePbdState's counts of them). */
 NC_SECTION(PBD)
 
-NC_REC(HlePbState, 10136)
+NC_REC(HlePbState, 10144)
 NC_F(HlePbState, dma_base, U32, 1, 1, 0)
 NC_F(HlePbState, dma_limit, U32, 1, 1, 0)
 NC_F(HlePbState, get, U32, 1, 1, 0)
@@ -42,6 +42,8 @@ NC_F(HlePbState, overlay_show, BOOL, 1, 1, 0)
 NC_F(HlePbState, gamma, U8, 768, 1, 0)
 NC_F(HlePbState, gamma_req, BOOL, 1, 1, 0)
 NC_F(HlePbState, gamma_set, BOOL, 1, 1, 0)
+NC_F(HlePbState, clip2d, U32, 2, 3, 0)
+NC_F(HlePbState, beta, U32, 1, 3, 0)
 NC_END(HlePbState)
 
 NC_REC(HlePbdState, 13768)
