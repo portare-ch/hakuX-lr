@@ -4739,37 +4739,55 @@ static uint32_t carry_take(float carry[ATTRS][4])
  * colours a later draw's diffuse stream reads). Its image lands in its
  * memory before the draw's data is taken, as a texture of another layout
  * has it land (tex_land); a wait, so before the draw allocates anything.
- * Arrays start outside every target otherwise: one range compare a draw. */
+ * Arrays start outside every target otherwise: a compare with each target's
+ * range a draw, the ranges listed when the targets change. (One range over
+ * all of them, [lowest, highest), held most titles' vertex buffers too: NBA
+ * Inside Drive 2003's draws then asked every target about every array.) */
 static void vb_land(void)
 {
     static uint64_t key = ~0ull;
-    static uint32_t lo, hi;
+    static struct {
+        uint32_t pa, end;
+        uint8_t obj;
+    } rng[MAX_OBJS];
+    static unsigned nrng;
+    static uint64_t pages[(1u << 28 >> 12) / 64];   /* the pages those ranges touch, of 256 MiB */
     if (g_pd.nimm || g_pd.ninl || !g_pd.nidx) {
         return;
     }
     const uint64_t k = g_pd.binds << 8 | g_pd.nobjs;
-    if (k != key) {                         /* the targets' memory, all of it: [lo, hi) */
+    if (k != key) {                         /* the targets' memory, each one's [pa, end) */
         key = k;
-        lo = UINT32_MAX;
-        hi = 0;
+        nrng = 0;
+        memset(pages, 0, sizeof(pages));
         for (unsigned i = 0; i < g_pd.nobjs; i++) {
             uint32_t len;
             if (coh_len(&g_pd.objs[i], &len)) {
-                lo = MIN(lo, g_pd.objs[i].d.pa);
-                hi = MAX(hi, g_pd.objs[i].d.pa + len);
+                const uint32_t pa = g_pd.objs[i].d.pa & 0x0FFFFFFFu;
+                const uint32_t end = (uint32_t)MIN((uint64_t)pa + len, 1u << 28);
+                rng[nrng++] = (typeof(rng[0])){ g_pd.objs[i].d.pa, g_pd.objs[i].d.pa + len, (uint8_t)i };
+                for (uint32_t pg = pa >> 12; pg <= (end - 1) >> 12; pg++) {
+                    pages[pg >> 6] |= 1ull << (pg & 63);
+                }
             }
         }
+    }
+    if (!nrng) {
+        return;
     }
     for (unsigned a = 0; a < ATTRS; a++) {
         if (!((R(NV097_SET_VERTEX_DATA_ARRAY_FORMAT + 4 * a) >> 4) & 0xF)) {
             continue;
         }
-        const uint32_t pa = array_pa(a);
-        if (pa < lo || pa >= hi) {
-            continue;
+        const uint32_t pa = array_pa(a), pg = (pa & 0x0FFFFFFFu) >> 12;
+        if (!((pages[pg >> 6] >> (pg & 63)) & 1)) {
+            continue;                       /* in no target's pages */
         }
-        for (unsigned i = 0; i < g_pd.nobjs; i++) {
-            PbObj *o = &g_pd.objs[i];
+        for (unsigned r = 0; r < nrng; r++) {
+            if (pa < rng[r].pa || pa >= rng[r].end) {
+                continue;
+            }
+            PbObj *o = &g_pd.objs[rng[r].obj];
             uint32_t len;
             if (!coh_len(o, &len) || pa < o->d.pa || pa >= o->d.pa + len || !o->written ||
                 o == g_pd.rt_obj) {
@@ -4831,7 +4849,7 @@ static void draw(void)
     } else {
         draw_arrays();
     }
-    for (unsigned a = 1; a < ATTRS; a++) {
+    for (unsigned a = 1; carried >> a; a++) {
         if (((carried >> a) & 1) && memcmp(g_pd.cur[a], carry[a], 16)) {
             memcpy(g_pd.cur[a], carry[a], 16);
             g_pd.cgen++;                    /* (the draws' constant block holds cur) */
