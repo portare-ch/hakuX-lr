@@ -163,6 +163,9 @@ void *hle_host_vk_loader(void);
 uint32_t hle_host_contig_end(uint32_t pa, uint32_t limit);
 /* True if any page in [pa, limit) was freed and not reallocated. */
 bool hle_host_contig_freed(uint32_t pa, uint32_t limit);
+/* Changes whenever an allocation is made or freed: the two above answer the
+ * same while it stands. */
+uint32_t hle_host_contig_gen(void);
 
 /* Disc reads so far: operations, bytes and the time spent in them
  * (diagnostics: the hitch monitor); false if the host doesn't count them. */

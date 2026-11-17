@@ -30,12 +30,18 @@ static const HleFmtInfo k_fmt[] = {
 
 const HleFmtInfo *hle_fmt_info(uint32_t code)
 {
-    for (size_t i = 0; i < sizeof(k_fmt) / sizeof(k_fmt[0]); i++) {
-        if (k_fmt[i].code == code) {
-            return &k_fmt[i];
+    /* by code, the table walked once (asked per target per draw): an index
+     * + 1, 0 for a code that isn't a format. Written whole before it is
+     * read, the same bytes by whichever thread gets there first. */
+    static uint8_t idx[256];
+    static bool made;
+    if (!__atomic_load_n(&made, __ATOMIC_ACQUIRE)) {
+        for (size_t i = sizeof(k_fmt) / sizeof(k_fmt[0]); i-- > 0;) {
+            idx[k_fmt[i].code] = (uint8_t)(i + 1);     /* (the first of a code, as the walk found) */
         }
+        __atomic_store_n(&made, true, __ATOMIC_RELEASE);
     }
-    return NULL;
+    return code < 256 && idx[code] ? &k_fmt[idx[code] - 1] : NULL;
 }
 
 /* Per format and sign bit (A, R, G, B): the texel bits flipped, and the
