@@ -2,12 +2,28 @@
 
 ## Unreleased
 
-- Added the **Accuracy Level** core option: Potato, Medium, High and Custom.
-  It selects graphics accuracy trade-offs only (combiner rounding, signed
-  blend equations, dithering after blending into 16-bit targets). Custom is
-  the default and keeps existing Combiner Precision settings, so nothing
-  changes until a level is chosen. The mapping is provisional and no speed
-  gain has been measured for it yet. Restart the game after changing it.
+## linux-v0.33.0 (Linux, aarch64 and x86-64, and Android)
+
+Potato mode is here, designed with lower-powered handhelds in mind — especially the legendary OGU. NBA Inside Drive 2003 has been the test game of choice during the performance work.
+
+### Accuracy Level
+
+Choose a preset in RetroArch under **Quick Menu → Core Options → Accuracy Level**, then restart the game:
+
+- **Potato – Performance:** Fast combiners and approximations for signed blending and dithering after blending into 16-bit targets. Intended for constrained devices; some colours and effects may look different.
+- **Medium – Balanced:** Accurate combiners and signed blending, with approximate post-blend dithering. Recommended for general play.
+- **High – Accuracy:** Enables all implemented graphics accuracy features supported by the device.
+- **Custom – Individual settings:** Preserves your existing Combiner Precision setting. This remains the default, so select Potato explicitly to try it.
+
+Render scale and audio settings remain separate. The preset mapping is provisional, and results depend on the game and GPU.
+
+### Testing
+
+PR #250 reports 30/30 HLE tests and 35/35 native tests. All four presets were checked in RetroArch on Linux x86-64.
+
+Measurements of individual settings on the Retroid Pocket Nova found about 2% fewer GPU cycles with fast combiners at 1x and 6% at 2x in NBA Inside Drive 2003. Approximate post-blend dithering used 37% fewer GPU cycles in the tested Jet Set Radio Future sequence. These measure GPU work, not equivalent FPS gains or the combined Potato preset. OGU-specific performance measurements are still pending.
+
+Available for Linux ARM64, Linux x86-64 (KVM), and Android ARM64 (experimental).
 
 ## linux-v0.32.2 (Linux, aarch64 and x86-64, and Android)
 
