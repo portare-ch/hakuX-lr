@@ -2,6 +2,52 @@
 
 ## Unreleased
 
+## linux-v0.32.0 (Linux, aarch64 and x86-64, and Android)
+
+**Lower-end devices:** Use [v0.26.0](https://github.com/portare-ch/hakuX-lr/releases/tag/linux-v0.26.0)
+for now. A low accuracy mode is still being implemented and tested.
+
+This release improves NV2A shading, framebuffer copies, depth handling
+and vertex positioning. In the full graphics-test run, 3,005 of 3,556
+tests meet the comparison threshold against Xbox reference captures,
+up from 2,727 in 0.31.0. See the [graphics test results](https://hakuxlr.portareos.org/nv2atests/)
+for the breakdown.
+
+### Fixes
+
+- **Shading and alpha testing** (#240) — Use the correct vertex for
+  flat-shaded colours, compare alpha as 8-bit values and round vertex
+  colours before interpolation. Shade model now passes 168/168 and
+  Alpha func passes 16/16.
+- **Framebuffer copies and textures** (#241, #247) — Keep newer GPU
+  rendering intact when copying into a framebuffer, apply blit clipping
+  and blending, and correct dot-product texture mappings and the alpha
+  values of render targets without an alpha channel.
+- **Depth and W buffering** (#242, #244, #245, #247) — Apply the selected
+  depth range, improve depth readback and match the Xbox's truncation of
+  fixed-point depth. Drivers with `VK_EXT_depth_range_unrestricted` can
+  store 24-bit floating-point depth without the previous scaling.
+- **Vertex positioning** (#246) — Truncate positions to the NV2A's
+  1/16-pixel grid where polygon offsets are exact. Other devices keep the
+  existing positioning rule.
+- **Wireframe and culling** (#241, #243, #247) — Improve polygon outlines,
+  near/far culling and handling of invalid graphics state. Correct
+  screen-linear interpolation when texture perspective is disabled.
+- **Fog** (#245) — Handle infinite fog coordinates with a zero multiplier
+  as the Xbox does.
+
+### Testing
+
+Linux CI builds and tests passed on ARM64 and x86-64. The graphics
+comparison and game checks used Linux x86-64 (KVM). HLE unit tests pass
+29/29 and native x86-64 tests pass 35/35.
+
+Short game checks covered Halo 2, Burnout 3, Dead or Alive 3, Conker and
+Forza. Longer checks for decal flicker in Burnout 3 and Dead or Alive 2
+remain pending, as does gameplay testing on ARM64 devices. Android ARM64
+remains experimental. Graphics-test matches use the suite's comparison
+threshold and do not imply pixel-perfect rendering.
+
 ## linux-v0.31.0 (Linux, aarch64 and x86-64, and Android)
 
 This release improves NV2A blending, bump mapping, lighting and depth
