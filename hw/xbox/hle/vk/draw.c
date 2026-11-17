@@ -4147,8 +4147,8 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
                    HLE_FVF_SPECULAR | (4u << HLE_FVF_TEXCOUNT_SHIFT) | 0xAA0000u;
     }
     k.vs.flat = k.ps.flat = s->rs[RS_SHADEMODE] == 0x1D00;
-    if (!k.ps.flat && c->nopersp && c->vsh) {
-        k.ps.flat = 2;                  /* (the program's side: k.vk.flat below) */
+    if (c->nopersp && c->vsh) {
+        k.ps.flat |= 2;                 /* (the program's side: k.vk.flat below) */
     }
     HleFfPush pc;
     memset(&pc, 0, sizeof(pc));
@@ -4213,7 +4213,7 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         k.pk.fbfetch = hle_draw_fb_stages(c, rt_id);
         k.pk.alpha_test = s->rs[RS_ALPHATESTENABLE] != 0;
         k.pk.alpha_func = s->rs[RS_ALPHAFUNC] >= 0x200 ? (s->rs[RS_ALPHAFUNC] - 0x200) & 7 : 7;
-        k.pk.flat = s->rs[RS_SHADEMODE] == 0x1D00 ? 1 : c->nopersp && prog ? 2 : 0;
+        k.pk.flat = (s->rs[RS_SHADEMODE] == 0x1D00 ? 1 : 0) | (c->nopersp && prog ? 2 : 0);
         k.pk.fog = s->rs[RS_FOGENABLE] ? (s->rs[RS_FOGTABLEMODE] & 3) + 1 : 0;
         k.pk.fog_abs = (s->rs[RS_FOGTABLEMODE] >> 8) & 1;
         k.pk.specular = s->rs[RS_SPECULARENABLE] != 0;
@@ -4536,7 +4536,7 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         k.vk.in_mask = in;
         k.vk.int_mask = ints;
         k.vk.cmp_mask = cmps;
-        k.vk.flat = s->rs[RS_SHADEMODE] == 0x1D00 ? 1 : c->nopersp ? 2 : 0;
+        k.vk.flat = (s->rs[RS_SHADEMODE] == 0x1D00 ? 1 : 0) | (c->nopersp ? 2 : 0);
         k.vk.spec_off = !(s->spec & 1);
         k.vk.spec_a1 = (s->spec & 3) == 1;
         /* (the mode itself: 1 EXP, 2 EXP2, 3 LINEAR) */

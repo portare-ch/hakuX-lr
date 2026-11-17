@@ -494,8 +494,8 @@ static const char *k_cmp[8] = {
 size_t hle_ff_ps_glsl(const HleFfPsKey *k, char *buf, size_t cap)
 {
     Buf b = { buf, cap, 0, false };
-    const char *interp = k->flat == 2 ? "noperspective " : k->flat ? "flat " : "";
-    const char *np = k->flat == 2 ? "noperspective " : "";
+    const char *interp = (k->flat & 1) ? "flat " : (k->flat & 2) ? "noperspective " : "";
+    const char *np = (k->flat & 2) ? "noperspective " : "";
     put(&b, "#version 450\n#extension GL_EXT_nonuniform_qualifier : require\n%s%s",
         k->poly_smooth ? HLE_BARY_EXT_GLSL : "", hle_push_glsl());
     put(&b, "layout(set = 0, binding = 0) uniform texture2D uTex2D[];\n"

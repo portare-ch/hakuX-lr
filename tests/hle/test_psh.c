@@ -574,6 +574,15 @@ static void test_two_side(void)
     HT_CHECK(strstr(buf, "layout(location = 8) flat in vec4 vBack1;") != NULL);
     HT_CHECK(strstr(buf, "vec4 v0 = gl_FrontFacing ? vDiffuse : vBack0;") != NULL);
     HT_CHECK(strstr(buf, "vec4 v1 = gl_FrontFacing ? vSpecular : vBack1;") != NULL);
+    /* flat colours with TEXTUREPERSPECTIVE off (bits 0 and 1): the colours
+     * flat, the rest linear on screen */
+    k.flat = 3;
+    HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), NULL) > 0);
+    HT_CHECK(strstr(buf, "layout(location = 7) flat in vec4 vBack0;") != NULL);
+    HT_CHECK(strstr(buf, "noperspective in") != NULL);
+    k.flat = 1;
+    HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), NULL) > 0);
+    HT_CHECK(strstr(buf, "noperspective") == NULL);
 }
 
 /* colour key: a matching texel's alpha zeroed (1), ARGB zeroed (2) or the

@@ -205,9 +205,10 @@ static const char k_lib[] =
 static void head(Buf *bp, const HleVshKey *k)
 {
     Buf b = *bp;
-    /* (flat 2: TEXTUREPERSPECTIVE off, everything linear on screen) */
-    const char *interp = k->flat == 2 ? "noperspective " : k->flat ? "flat " : "";
-    const char *np = k->flat == 2 ? "noperspective " : "";
+    /* (flat bit 1: TEXTUREPERSPECTIVE off, everything linear on screen; bit 0,
+     * SHADEMODE FLAT, has the colours) */
+    const char *interp = (k->flat & 1) ? "flat " : (k->flat & 2) ? "noperspective " : "";
+    const char *np = (k->flat & 2) ? "noperspective " : "";
     put(&b, "#version 450\n%s", hle_push_glsl());
     put(&b, "layout(set = 1, binding = 0, std140) uniform VshConst { vec4 c[192]; "
             "vec4 vcur[16]; vec4 vpsz; };\n"

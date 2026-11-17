@@ -524,9 +524,10 @@ static void alpha_kill(Buf *b, const HlePshKey *k, unsigned s, unsigned m)
 size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsupported)
 {
     Buf b = { buf, cap, 0, false };
-    /* (flat 2: TEXTUREPERSPECTIVE off, everything linear on screen) */
-    const char *interp = k->flat == 2 ? "noperspective " : k->flat ? "flat " : "";
-    const char *np = k->flat == 2 ? "noperspective " : "";
+    /* (flat bit 1: TEXTUREPERSPECTIVE off, everything linear on screen; bit 0,
+     * SHADEMODE FLAT, has the colours) */
+    const char *interp = (k->flat & 1) ? "flat " : (k->flat & 2) ? "noperspective " : "";
+    const char *np = (k->flat & 2) ? "noperspective " : "";
     /* Register-combiner outputs use signed 9-bit values (1.0 = 0xFF).
      * Round each stage after mapping and clamping, as in Xbox combiner
      * captures (116/116 matching pixels). Inputs remain interpolated. */
