@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+## linux-v0.32.1 (Linux, aarch64 and x86-64, and Android)
+
+Performance hotfix for the graphics decoder (#248). Render-target memory
+checks and texture-format lookups now avoid repeated linear searches,
+reducing CPU overhead without intentionally changing rendering accuracy.
+
+In the tested 120-second NBA Inside Drive 2003 sequence on the Retroid
+Pocket Nova, decoder CPU time fell from about 37–39 seconds to 30 seconds.
+This measures CPU work, not an equivalent increase in game frame rate.
+The OGU has not been measured.
+
+**Lower-end devices:** Use [v0.26.0](https://github.com/portare-ch/hakuX-lr/releases/tag/linux-v0.26.0)
+for now if recent versions remain too slow. A low accuracy mode is still
+being implemented and tested.
+
+### Testing
+
+Linux ARM64 and x86-64 CI passed. The hotfix was tested with NBA Inside
+Drive 2003 on the Nova and Linux x86-64 (KVM). The PR reports HLE tests
+29/29, native tests 35/35, and a full graphics-test run with no newly
+failing cases against the previous master. Android ARM64 remains
+experimental.
+
 ## linux-v0.32.0 (Linux, aarch64 and x86-64, and Android)
 
 **Lower-end devices:** Use [v0.26.0](https://github.com/portare-ch/hakuX-lr/releases/tag/linux-v0.26.0)
