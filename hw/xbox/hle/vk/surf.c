@@ -845,8 +845,8 @@ VkImageView hle_surf_order_view(HleVkSurf *s, uint32_t ord)
     static const VkComponentSwizzle k_chan[4] = {   /* byte -> the image's channel */
         VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_G, VK_COMPONENT_SWIZZLE_R,
         VK_COMPONENT_SWIZZLE_A };
-    const uint32_t order = ord & 3;
-    if (!order || s->d.parent || !s->img || s->fmt != VK_FORMAT_B8G8R8A8_UNORM ||
+    const uint32_t order = ord & 3;         /* 0 with HLE_DRAW_ORD_XALPHA: the image's own */
+    if (!(ord & (3 | HLE_DRAW_ORD_XALPHA)) || s->d.parent || !s->img || s->fmt != VK_FORMAT_B8G8R8A8_UNORM ||
         !(s->aspect & VK_IMAGE_ASPECT_COLOR_BIT)) {
         return VK_NULL_HANDLE;
     }

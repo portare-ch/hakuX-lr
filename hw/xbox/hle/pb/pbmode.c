@@ -43,6 +43,8 @@
 #define NV_PFB_TILE_LIMIT(i)         (0x100244u + 16u * (i))  /* the tile's last byte */
 
 /* the 2D classes */
+#define NV_CLASS_BETA       0x12u       /* NV01_CONTEXT_BETA: 0x300 the factor */
+#define NV_CLASS_CLIP2D     0x19u       /* NV01_CONTEXT_CLIP_RECTANGLE: 0x300 point, 0x304 size */
 #define NV_CLASS_M2MF       0x39u
 #define NV_CLASS_PATTERN    0x44u
 #define NV_CLASS_SURFACES2D 0x62u
@@ -112,6 +114,9 @@ static struct {
     int64_t pace_max_ns;                /* ... the longest since the diagnostics' last line (atomic) */
     uint32_t sub_r[8][0x400 / 4];       /* the 2D objects' methods, by subchannel */
     uint32_t s2d[0x400 / 4];            /* the 2D surfaces' (one at a time in D3D) */
+    uint32_t clip2d[2];                 /* the 2D clip rectangle's point and size (x | y << 16) */
+    uint32_t beta;                      /* the 2D beta factor, as written */
+    bool blit_blend;                    /* the blit under way is BLEND_AND */
     uint64_t blits, blit_bytes, m2mfs, m2mf_bytes, copies_skipped;
     volatile bool in_run;               /* debug: the decode thread is in the pusher */
     uint32_t disp_pa;                   /* hle_pb_display_start's, for the decode thread */
@@ -524,9 +529,46 @@ uint32_t hle_pb_dma_base(uint32_t handle)
  * or queued behind the landings of the images it reads (pbdraw.c
  * hle_pbd_copy_begin), the images over it following. False: a page wasn't
  * there. */
+/* BLEND_AND: the source over the destination by the beta factor, its bits
+ * 30:23 a fraction of 255 (negative: 0), each byte of a 32-bit pixel
+ * (nxdk_pgraph_tests' Image blit: 0x007FFFFF leaves the destination,
+ * 0x7F800000 is the source). The destination is read: its memory as the GPU
+ * has it first, then the copy at once. */
+static bool blend_rows(uint32_t sbase, uint32_t sp, uint32_t dbase, uint32_t dp, uint32_t ix, uint32_t iy,
+                       uint32_t ox, uint32_t oy, uint32_t w, uint32_t h, uint32_t beta)
+{
+    const uint32_t row = w * 4, slo = sbase + iy * sp + ix * 4, dlo = dbase + oy * dp + ox * 4;
+    const uint32_t b = beta & 0x80000000u ? 0 : (beta >> 23) & 0xFF;
+    hle_pbd_mem_current(slo, sp, row, h);
+    hle_pbd_mem_current(dlo, dp, row, h);
+    const uint64_t dep = hle_pbd_copy_begin(slo, sp, dlo, dp, row, h, dbase);
+    if (dep) {                              /* queued all the same: the plain copy */
+        hle_pbd_copy_done(dlo, dp, row, h, dep);
+        hle_pbd_blit(dbase, dp, ox, oy, w, h, dep);
+        return true;
+    }
+    for (uint32_t y = 0; y < h; y++) {
+        const uint8_t *sr = hle_pa_ptr(slo + y * sp, row);
+        uint8_t *dr = hle_pa_ptr(dlo + y * dp, row);
+        if (!sr || !dr) {
+            return false;
+        }
+        for (uint32_t i = 0; i < row; i++) {
+            dr[i] = (uint8_t)((sr[i] * b + dr[i] * (255 - b) + 127) / 255);
+        }
+        hle_mem_mark_written(dlo + y * dp, row);
+    }
+    hle_pbd_copy_done(dlo, dp, row, h, 0);
+    hle_pbd_blit(dbase, dp, ox, oy, w, h, 0);
+    return true;
+}
+
 static bool blit_rows(uint32_t sbase, uint32_t sp, uint32_t dbase, uint32_t dp, uint32_t bpp, uint32_t ix,
                       uint32_t iy, uint32_t ox, uint32_t oy, uint32_t w, uint32_t h)
 {
+    if (g_pb.blit_blend && bpp == 4) {
+        return blend_rows(sbase, sp, dbase, dp, ix, iy, ox, oy, w, h, g_pb.beta);
+    }
     if (hle_pbd_blit_images(sbase, sp, dbase, dp, bpp, ix, iy, ox, oy, w, h)) {
         return true;
     }
@@ -558,7 +600,28 @@ static void blit(const uint32_t *r)
     const uint32_t sp = s[0x304 >> 2] & 0xFFFF, dp = s[0x304 >> 2] >> 16;
     const uint32_t sbase = (ctx_base(s[0x184 >> 2]) + s[0x308 >> 2]) & 0x07FFFFFFu;
     const uint32_t dbase = (ctx_base(s[0x188 >> 2]) + s[0x30C >> 2]) & 0x07FFFFFFu;
-    const uint32_t ix = pin & 0xFFFF, iy = pin >> 16, ox = pout & 0xFFFF, oy = pout >> 16;
+    uint32_t ix = pin & 0xFFFF, iy = pin >> 16, ox = pout & 0xFFFF, oy = pout >> 16;
+    /* the clip rectangle, when the blit has one (SET_CONTEXT_CLIP_RECTANGLE,
+     * 0x188): what of the destination lies in it */
+    if (r[0x188 >> 2]) {
+        const uint32_t cx = g_pb.clip2d[0] & 0xFFFF, cy = g_pb.clip2d[0] >> 16;
+        const uint32_t cw = g_pb.clip2d[1] & 0xFFFF, ch = g_pb.clip2d[1] >> 16;
+        const uint32_t x0 = MAX(ox, cx), y0 = MAX(oy, cy);
+        const uint32_t x1 = MIN(ox + w, cx + cw), y1 = MIN(oy + h, cy + ch);
+        if (x1 <= x0 || y1 <= y0) {
+            g_pb.blits++;                   /* nothing of it is inside */
+            return;
+        }
+        ix += x0 - ox;
+        iy += y0 - oy;
+        ox = x0;
+        oy = y0;
+        w = x1 - x0;
+        h = y1 - y0;
+    }
+    /* SET_OPERATION (0x2FC): 2 BLEND_AND, by the beta factor of the context
+     * bound (0x194); the others copy */
+    g_pb.blit_blend = r[0x2FC >> 2] == 2 && r[0x194 >> 2];
     /* As the NV2A copies (blitclip.c): rows no longer than the narrower
      * pitch, the destination cut at the limit of the GPU tile it starts in.
      * WWE WrestleMania 21 blits 1023 x 511 at pitch 4096 to its 640 x 480
@@ -651,6 +714,16 @@ static void method_2d(unsigned subch, uint32_t m, uint32_t v)
         break;
     case NV_CLASS_SURFACES2D:
         g_pb.s2d[m >> 2] = v;
+        break;
+    case NV_CLASS_CLIP2D:
+        if (m == 0x300 || m == 0x304) {
+            g_pb.clip2d[(m - 0x300) >> 2] = v;
+        }
+        break;
+    case NV_CLASS_BETA:
+        if (m == 0x300) {
+            g_pb.beta = v;
+        }
         break;
     case NV_CLASS_BLIT:
         if (m == 0x308) {
@@ -1533,6 +1606,8 @@ void hle_pb_state_get(HlePbState *s)
     s->trap_wait = g_pb.trap_wait;
     memcpy(s->sub_r, g_pb.sub_r, sizeof(s->sub_r));
     memcpy(s->s2d, g_pb.s2d, sizeof(s->s2d));
+    memcpy(s->clip2d, g_pb.clip2d, sizeof(s->clip2d));
+    s->beta = g_pb.beta;
     s->disp_pa = g_pb.disp_pa;
     s->disp_req = g_pb.disp_req;
     s->disp_flip = g_pb.disp_flip;
@@ -1584,6 +1659,19 @@ void hle_pb_state_set(const HlePbState *s)
     g_sc.synced = false;
     memcpy(g_pb.sub_r, s->sub_r, sizeof(s->sub_r));
     memcpy(g_pb.s2d, s->s2d, sizeof(s->s2d));
+    memcpy(g_pb.clip2d, s->clip2d, sizeof(g_pb.clip2d));
+    g_pb.beta = s->beta;
+    /* a state from before PBD v3 has neither: what its subchannels' objects
+     * of those classes were last given (a rectangle of no size clips every
+     * blit away) */
+    for (unsigned i = 0; i < 8; i++) {
+        if (g_pb.obj_class[i] == NV_CLASS_CLIP2D && !s->clip2d[1]) {
+            g_pb.clip2d[0] = g_pb.sub_r[i][0x300 >> 2];
+            g_pb.clip2d[1] = g_pb.sub_r[i][0x304 >> 2];
+        } else if (g_pb.obj_class[i] == NV_CLASS_BETA && !s->beta) {
+            g_pb.beta = g_pb.sub_r[i][0x300 >> 2];
+        }
+    }
     g_pb.disp_pa = s->disp_pa;
     g_pb.disp_req = s->disp_req;
     g_pb.disp_flip = s->disp_flip;
