@@ -1537,13 +1537,17 @@ static float zfloat_scale(bool z24)
 /* A float depth buffer's clear value (F24: 8-bit exponent, 16-bit mantissa;
  * F16: 4-bit exponent biased 7, 12-bit mantissa) as the top of the depths
  * it stands for: the NV2A tests at the format's precision, and a far-plane
- * vertex lands on D3D's far clear, short of 1e30 by the mantissa it drops. */
+ * vertex lands on D3D's far clear, short of 1e30 by the mantissa it drops.
+ * A few of the image's steps under the very top: the readback adds two
+ * before it drops the mantissa (vk/zread.c, for depths interpolated a step
+ * low), which from the top carried into the word, and a buffer cleared to
+ * 0x874500 read back 0x874501. */
 static float zfloat_clear(uint32_t v, bool z24)
 {
     if (!v) {
         return 0.0f;
     }
-    uint32_t b = z24 ? (v << 7) | 0x7Fu : ((v << 11) + 0x3C000000u) | 0x7FFu;
+    uint32_t b = z24 ? (v << 7) | 0x7Du : ((v << 11) + 0x3C000000u) | 0x7FBu;
     float f;
     memcpy(&f, &b, 4);
     return isfinite(f) ? MIN(f * zfloat_scale(z24), 1.0f) : 1.0f;

@@ -34,6 +34,7 @@ typedef struct HlePbState {
     bool disp_req, disp_flip, overlay_req, overlay_show;
     uint8_t gamma[3][256];
     bool gamma_req, gamma_set;
+    uint32_t clip2d[2], beta;           /* the 2D clip rectangle and beta factor (PBD v3) */
 } HlePbState;
 
 /* pbdraw.c: the Kelvin methods as written, the transform unit, the draw
