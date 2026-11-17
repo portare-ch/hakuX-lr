@@ -76,6 +76,9 @@ typedef struct HleCaps {
                                    each draw's textures in a set of their own at fixed
                                    places (vk/draw.c fixed_bind: Mali's Bifrost, PowerVR's
                                    Rogue) */
+    bool depth_unrestricted;    /* VK_EXT_depth_range_unrestricted: a 24-bit float depth
+                                   buffer holds the NV2A's depth itself, not a fraction
+                                   of 2^100 (pb/pbdraw.c zfloat_scale) */
     bool cull_distance;         /* shaderCullDistance: primitives wholly outside the
                                    NV2A's depth range are dropped (CULL_NEAR_FAR_EN) */
     bool depth_clamp;           /* depthClamp, else a z-clamped draw's vertex shader clamps

@@ -47,6 +47,9 @@ enum HleOp {
 /* A float depth buffer: its words are the depth as the NV2A's 24-bit or
  * 16-bit float, not a fixed-point fraction. Or'd into map[0] of a 32-bit
  * read, map[1] of a D16 one. */
+#define HLE_ZREAD_RAW    0x40    /* ... of a 24-bit read: the image holds the depth
+                                   itself (VK_EXT_depth_range_unrestricted), not
+                                   its fraction of 2^HLE_ZFLOAT24_EXP */
 #define HLE_ZREAD_FLOAT  0x80
 /* A 24-bit float depth image holds the depth over 2^HLE_ZFLOAT24_EXP
  * (pb/pbdraw.c zfloat_scale; the read back's 2^100 in vk/zread.c is this) */

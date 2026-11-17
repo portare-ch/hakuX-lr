@@ -510,7 +510,7 @@ size_t hle_ff_ps_glsl(const HleFfPsKey *k, char *buf, size_t cap)
         put(&b, "layout(location = 6) in float vFog;\n");
     }
     if (k->wbuf) {
-        put(&b, HLE_WBUF_IN_GLSL);
+        put(&b, k->wbuf == 2 ? HLE_ZLIN_IN_GLSL : HLE_WBUF_IN_GLSL);
     }
     put(&b, "layout(location = 0) out vec4 oColor;\n" HLE_NVPROJ_GLSL);
     if (k->sblend || (k->fbfetch & ~HLE_FB_ZEQ)) {

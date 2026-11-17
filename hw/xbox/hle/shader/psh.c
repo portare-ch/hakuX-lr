@@ -679,7 +679,7 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "%s%s%s"
             "void main() {\n"
             "%s"
-            "  vec4 vTex3 = %s;\n", interp, interp, back, k->wbuf ? HLE_WBUF_IN_GLSL : "",
+            "  vec4 vTex3 = %s;\n", interp, interp, back, k->wbuf == 2 ? HLE_ZLIN_IN_GLSL : k->wbuf ? HLE_WBUF_IN_GLSL : "",
         (k->fbfetch & ~HLE_FB_ZEQ) || k->sblend || k->fblend ?
             "layout(input_attachment_index = 0, set = 2, binding = 0) "
             "uniform subpassInput uFb;\n" : "",

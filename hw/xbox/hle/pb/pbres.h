@@ -49,6 +49,9 @@ void hle_res_rb_land(HleCmdReadback *rb, uint32_t fb, uint32_t len, uint64_t val
  * readback (HLE_RB_PACKED): its fb (offset + 1), 0 if there's no room;
  * reserved before the command's value is taken (hle_fe_next_value). */
 uint32_t hle_res_land_alloc(uint32_t len);
+/* Whether a 24-bit float depth image holds the depth itself (the device's
+ * VK_EXT_depth_range_unrestricted), else its fraction of 2^100. */
+bool hle_res_zfloat_raw(void);
 /* Whether the GPU writes guest RAM in place (zero-copy): a direct readback
  * needs no hle_res_rb_fb then. */
 bool hle_res_ram_direct(void);

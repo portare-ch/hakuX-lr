@@ -48,7 +48,8 @@ static const char k_fs[] =
      * wrap a far plane past 2^24 - 1 to 0 (Mercenaries' sky dome,
      * depth-tested against its copied scene depth, then failed wherever the
      * scene was empty) */
-    "  float z = clamp(texelFetch(zt, q, 0).r, 0.0, 1.0);\n"
+    "  float zr = texelFetch(zt, q, 0).r;\n"
+    "  float z = clamp(zr, 0.0, 1.0);\n"
     "  uint d = min(uint(round(z * 16777215.0)), 16777215u);\n"
     /* a float buffer (HLE_ZREAD_FLOAT): the depth itself, the image's over
      * 2^100 (HLE_ZFLOAT24_EXP, pb/pbdraw.c zfloat_scale: the product exact,
@@ -62,6 +63,10 @@ static const char k_fs[] =
      * prints them) */
     "  if ((pc.map.x & 0x80u) != 0u)\n"
     "    d = z >= 1.0 ? 0xFFFFFFu : (floatBitsToUint(z * 1267650600228229401496703205376.0) + 2u) >> 7;\n"
+    /* HLE_ZREAD_RAW: the image holds the depth itself (an infinity: the
+     * clear to 0xFFFFFF) */
+    "  if ((pc.map.x & 0xC0u) == 0xC0u)\n"
+    "    d = isinf(zr) || isnan(zr) ? 0xFFFFFFu : (floatBitsToUint(max(zr, 0.0)) + 2u) >> 7;\n"
     "  uint w = d << 8 | (texelFetch(st, q, 0).r & 0xFFu);\n"
     "  if (halves) {\n"
     "    uint h = pc.map.y > 1u || ((uint(p.x) / max(pc.map.y, 1u)) & 1u) != 0u ? w >> 16\n"
@@ -69,7 +74,7 @@ static const char k_fs[] =
     "    o = vec4(float(h) / 65535.0);\n"
     "    return;\n"
     "  }\n"
-    "  o = vec4(ch(w, pc.map.x & 0x7Fu), ch(w, pc.map.y), ch(w, pc.map.z), ch(w, pc.map.w));\n"
+    "  o = vec4(ch(w, pc.map.x & 0x3Fu), ch(w, pc.map.y), ch(w, pc.map.z), ch(w, pc.map.w));\n"
     "}\n";
 
 /* HLE_ZREAD_D16: a D16 target's words, as 16-bit luminance (no stencil) */
