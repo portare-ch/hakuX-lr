@@ -303,7 +303,15 @@ static inline const char *hle_push_glsl(void)
     "      max(abs(dFdx(vW)), abs(dFdy(vW)));\n" \
     HLE_ZNORM_GLSL("wRaw", "wN") \
     "  float wDepth = pc.scr.y > pc.scr.x ? clamp(wN, pc.scr.x, pc.scr.y) :\n" \
-    "                 pc.zscale == 1.0 ? max(wN, 0.0) : clamp(wN, 0.0, 1.0);\n"
+    "                 pc.zscale == 1.0 ? max(wN, 0.0) : clamp(wN, 0.0, 1.0);\n" \
+    /* a fixed-point buffer holds the depth as one of its steps: stored so \
+     * (the image may be a float one, finer than the NV2A's), an EQUAL pass \
+     * over it compares what the NV2A compares. Two pipelines' w came out a \
+     * float step apart, and nxdk_pgraph_tests' depth_equal under \
+     * W-buffering passed nowhere. (Rounded, not + 0.5 and floored: above \
+     * 2^23 that addition rounds an odd step up to the even one after.) */ \
+    "  if (pc.zscale == uintBitsToFloat(0x33800000u)) wDepth = round(wDepth * 16777215.0) / 16777215.0;\n" \
+    "  else if (pc.zscale == uintBitsToFloat(0x37800000u)) wDepth = floor(wDepth * 65535.0 + 0.5) / 65535.0;\n"
 #define HLE_WBUF_STORE_GLSL "  gl_FragDepth = wDepth;\n"
 
 /* EQUAL depth passes that do not write (vk/draw.c eq_tol) test LESSEQUAL a

@@ -32,7 +32,8 @@ typedef struct HleVshKey {
     uint8_t spec_off;           /* specular off: oD1 / oB1 read as (0, 0, 0, 1) */
     uint8_t wbuf;               /* W-buffering: oPos.w to the pixel stage (vW) */
     uint8_t zfree;              /* no depth test: the program's z clips nothing */
-    uint8_t fog_table;          /* FOGTABLEMODE other than NONE (a program writing
+    uint8_t fog_table;          /* FOGTABLEMODE (1 EXP, 2 EXP2, 3 LINEAR), 0 NONE or no
+                                   fog; other than NONE (a program writing
                                    no oFog: distance 0, else factor 1) */
     uint8_t zclamp;             /* depth clamped, not clipped (the pipeline's: in the
                                    padding, the key's size is the pipeline record's) */

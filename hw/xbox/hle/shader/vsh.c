@@ -344,7 +344,15 @@ static void tail(Buf *bp, const HleVshKey *k, bool fogw)
      * movies with fog enabled through a program writing no oFog, and they
      * show on the console. Unfogged is factor 1 under FOGTABLEMODE NONE
      * (vertex fog), distance 0 under the table modes. */
-    if (fogw) {
+    if (fogw && (k->fog_table == 1 || k->fog_table == 2)) {
+        /* The exponential modes' factor is of p0 - 1.5 + p1 d (psh.c). With
+         * p1 0 an infinite d leaves p0 alone on the NV2A: 0 times infinity is
+         * 0 there, not the NaN the pixel stage takes for +infinity
+         * (nxdk_pgraph_tests' Fog exceptional value, INF with a multiplier of
+         * 0: fogged by the bias alone). Decided here: interpolated, an
+         * infinity is a NaN, and a NaN coordinate is not this. */
+        put(&b, "  vFog = isinf(oFog.x) && pc.fog.y == 0.0 ? 0.0 : oFog.x;\n");
+    } else if (fogw) {
         put(&b, "  vFog = oFog.x;\n");
     } else {
         put(&b, "  vFog = %s;\n", k->fog_table ? "0.0" : "1.0");
