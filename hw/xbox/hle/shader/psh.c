@@ -999,7 +999,7 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
          * are shaded. */
         put(&b, "  outc.a *= pcov;\n");
     }
-    if (k->zclamp & HLE_PSH_ZCULL) {        /* outside CLIP_MIN .. CLIP_MAX (vk/draw.c) */
+    if ((k->zclamp & HLE_PSH_ZCULL) && !zr) {       /* outside CLIP_MIN .. CLIP_MAX (vk/draw.c) */
         put(&b, "  if (%s < pc.scr.x || %s > pc.scr.y) discard;\n", k->wbuf ? "wN" : "gl_FragCoord.z",
             k->wbuf ? "wN" : "gl_FragCoord.z");
     }
@@ -1018,7 +1018,11 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
          * with ZCLAMP_EN; NaN fails. */
         put(&b, "  float zq = zrw == 0.0 ? 0.0 : zrz / zrw;\n" HLE_ZNORM_GLSL("zq", "zrep")
                 "  if (zrw == 0.0) zrep = 1.0;\n%s",
-            (k->zclamp & 1) ? "  zrep = clamp(zrep, 0.0, 1.0);\n"
+            /* the depth range (pc.scr.xy, vk/draw.c: CLIP_MIN .. CLIP_MAX when
+             * less than the buffer's) is this depth's, not the one it
+             * replaces: culled outside it, or clamped to it */
+            (k->zclamp & HLE_PSH_ZCULL) ? "  if (!(zrep >= pc.scr.x && zrep <= pc.scr.y)) discard;\n" :
+            (k->zclamp & 1) ? "  zrep = pc.scr.y > pc.scr.x ? clamp(zrep, pc.scr.x, pc.scr.y) : clamp(zrep, 0.0, 1.0);\n"
                       : "  if (!(zrep >= 0.0 && zrep <= 1.0)) discard;\n");
     }
     if (k->fbfetch & HLE_FB_ZEQ) {
