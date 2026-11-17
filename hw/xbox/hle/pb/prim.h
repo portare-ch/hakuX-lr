@@ -15,6 +15,10 @@
  * list of triangles that start with it (hle_draw_prim_converted). */
 #define HLE_PRIM_FLAT_FIRST 0x100u
 #define HLE_PRIM_FLAT_LAST  0x200u
+/* ... or that its polygons are drawn as lines (both POLYGON_MODEs LINE, no
+ * culling): a quad, a quad strip's quads and a polygon are their outlines,
+ * a list of lines, without the edges inside that their triangles have. */
+#define HLE_PRIM_OUTLINE    0x400u
 #define HLE_PRIM_TYPE(pt)   ((pt) & 0xFFu)
 bool hle_draw_prim_converted(uint32_t pt);      /* its indices are not 0 .. n-1 as given */
 uint32_t hle_draw_prim_topology(uint32_t pt);

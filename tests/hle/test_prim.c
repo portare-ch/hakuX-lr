@@ -93,8 +93,28 @@ static void test_indexed(void)
     HT_CHECK(!memcmp(out, (const uint16_t[]){ 0, 1, 2, 3, 0 }, 10));
 }
 
+/* polygons in line mode: a quad's four edges, a quad strip's quads', a
+ * polygon's outline, as a list of lines; triangles stay triangles */
+static void test_outline(void)
+{
+    const uint32_t o = HLE_PRIM_OUTLINE;
+    HT_CHECK(hle_draw_prim_converted(QUADS | o) && hle_draw_prim_converted(QSTRIP | o) &&
+             hle_draw_prim_converted(POLY | o));
+    HT_CHECK(!hle_draw_prim_converted(TRIS | o) && !hle_draw_prim_converted(STRIP | o) &&
+             !hle_draw_prim_converted(FAN | o));
+    HT_EQ_U32(hle_draw_prim_topology(QUADS | o), 1);         /* lines */
+    HT_EQ_U32(hle_draw_prim_topology(POLY | o), 1);
+    HT_EQ_U32(hle_draw_prim_topology(STRIP | o), VT_TRI_STRIP);
+    HT_CHECK(is(QUADS | o, 4, 8, (const uint16_t[]){ 0, 1, 1, 2, 2, 3, 3, 0 }));
+    HT_CHECK(is(QSTRIP | o, 6, 16, (const uint16_t[]){ 0, 1, 1, 3, 3, 2, 2, 0, 2, 3, 3, 5, 5, 4, 4, 2 }));
+    HT_CHECK(is(POLY | o, 5, 10, (const uint16_t[]){ 0, 1, 1, 2, 2, 3, 3, 4, 4, 0 }));
+    HT_EQ_U32(hle_draw_prim_count(POLY | o, 1), 0);
+    HT_EQ_U32(hle_draw_prim_count(QSTRIP | o, 3), 0);
+}
+
 int main(void)
 {
+    test_outline();
     test_smooth();
     test_first();
     test_last();

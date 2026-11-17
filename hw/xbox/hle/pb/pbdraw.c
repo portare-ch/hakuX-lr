@@ -4194,6 +4194,12 @@ static bool combiners_read_colours(void)
 
 static uint32_t prim_flat(void)
 {
+    /* both faces' POLYGON_MODE LINE (0x038C, 0x0390) and no culling
+     * (CULL_FACE_ENABLE, 0x0308): quads and polygons as their outlines */
+    if (R(0x038C) == 0x1B01 && R(0x0390) == 0x1B01 && !R(0x0308) &&
+        (g_pd.prim == NV2A_PRIM_QUADS || g_pd.prim == NV2A_PRIM_QUADS + 1 || g_pd.prim == NV2A_PRIM_QUADS + 2)) {
+        return g_pd.prim | HLE_PRIM_OUTLINE;
+    }
     if (R(0x037C) != 0x1D00) {
         return g_pd.prim;
     }
