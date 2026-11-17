@@ -12,7 +12,7 @@
 #include "native/kernel/kernel.h"
 #include "native/dev/dev.h"
 #include "native/dev/usb.h"
-#include "hw/xbox/hle/shader/psh.h"
+#include "hw/xbox/hle/accuracy.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,8 +32,8 @@
 #define COMBINER_PRECISION_DEFAULT "disabled"
 #endif
 
-enum { OPT_SCALE, OPT_CROP, OPT_FORMAT, OPT_LANGUAGE, OPT_REGION, OPT_RUMBLE, OPT_NETWORK, OPT_COMMUNICATOR,
-       OPT_MIC_GATE, OPT_RESAMPLER, OPT_PROCESSING, OPT_PRECISION, OPT_PACE,
+enum { OPT_SCALE, OPT_ACCURACY, OPT_CROP, OPT_FORMAT, OPT_LANGUAGE, OPT_REGION, OPT_RUMBLE, OPT_NETWORK,
+       OPT_COMMUNICATOR, OPT_MIC_GATE, OPT_RESAMPLER, OPT_PROCESSING, OPT_PRECISION, OPT_PACE,
        OPT_REPEAT, OPT_MODS, OPT_RAM, OPT_RAM_PATCH, OPT_COUNT };
 
 /* The language values follow XC_LANGUAGE after auto: english is 1. */
@@ -45,6 +45,18 @@ static struct retro_core_option_v2_definition g_defs[OPT_COUNT + 1] = {
         NULL, NULL,
         {{"1", "1x (Xbox)"}, {"2", "2x"}, {"3", "3x"}, {"4", "4x"}, {NULL, NULL}},
         "2"},
+    /* The values in HleAccuracyLevel's order. Custom is the default while
+     * existing set-ups move over: it keeps Combiner Precision as it is set. */
+    [OPT_ACCURACY] = {
+        "hakux_accuracy_level", "Accuracy Level", NULL,
+        "Selects graphics accuracy trade-offs. Potato permits approximations for performance and may "
+        "cause visual errors or compatibility problems. Medium is recommended for general play. High "
+        "enables all implemented graphics accuracy features supported by the device. Custom uses the "
+        "individual settings (Combiner Precision). Render scale and audio settings are separate." NEXT,
+        NULL, NULL,
+        {{"potato", "Potato - Performance"}, {"medium", "Medium - Balanced"}, {"high", "High - Accuracy"},
+         {"custom", "Custom - Individual settings"}, {NULL, NULL}},
+        "custom"},
     [OPT_CROP] = {
         "hakux_crop_overscan", "Crop Overscan", NULL,
         "Removes 3.75% from each edge to hide the TV overscan border. Off shows the full frame.",
@@ -130,8 +142,8 @@ static struct retro_core_option_v2_definition g_defs[OPT_COUNT + 1] = {
         AUDIO_PROCESSING_DEFAULT},
     [OPT_PRECISION] = {
         "hakux_combiner_precision", "Combiner Precision", NULL,
-        "Accurate rounds pixel-shader combiner outputs like the Xbox. Fast uses "
-        "floating-point outputs and may improve GPU performance." NEXT,
+        "Applies only when Accuracy Level is Custom. Accurate rounds pixel-shader combiner outputs "
+        "like the Xbox. Fast uses floating-point outputs and may improve GPU performance." NEXT,
         NULL, NULL,
         {{"disabled", "Fast"}, {"enabled", "Accurate"}, {NULL, NULL}},
         COMBINER_PRECISION_DEFAULT},
@@ -177,6 +189,9 @@ static struct retro_core_option_v2_definition g_defs[OPT_COUNT + 1] = {
         "disabled"},
     {NULL},
 };
+
+_Static_assert(HLE_ACCURACY_POTATO == 0 && HLE_ACCURACY_MEDIUM == 1 && HLE_ACCURACY_HIGH == 2 &&
+               HLE_ACCURACY_CUSTOM == 3, "hakux_accuracy_level's values are in HleAccuracyLevel's order");
 
 static int g_applied[OPT_COUNT];   /* the value each option booted with (its index) */
 
@@ -273,6 +288,16 @@ static int auto_language(void)
     }
 }
 
+/* Combiner Precision is the level's to decide unless the level is Custom:
+ * hidden then, where the frontend can hide an option (its help says so
+ * where it can't). By the level selected now, which a restart applies. */
+static void display_update(void)
+{
+    struct retro_core_option_display d = {g_defs[OPT_PRECISION].key,
+                                          value_of(OPT_ACCURACY) == HLE_ACCURACY_CUSTOM};
+    nc_lr_env(RETRO_ENVIRONMENT_SET_CORE_OPTIONS_DISPLAY, &d);
+}
+
 void nc_lr_options_apply(void)
 {
     for (int i = 0; i < OPT_COUNT; i++) {
@@ -329,15 +354,26 @@ void nc_lr_options_apply(void)
     const bool dsp = !strcmp(g_defs[OPT_PROCESSING].values[g_applied[OPT_PROCESSING]].value, "dsp");
     nc_dev_apu_set_dsp(dsp);
     nc_hle_set_frame_pace(pace_depth(g_applied[OPT_PACE]));
-    const bool precise = !strcmp(g_defs[OPT_PRECISION].values[g_applied[OPT_PRECISION]].value, "enabled");
-    hle_psh_set_precision(precise);
+    /* The accuracy level, resolved once for the run (accuracy.h). Custom:
+     * the individual settings, which are Combiner Precision and, for the
+     * rest, every path on, as before the level existed. */
+    const HleAccuracyLevel level = (HleAccuracyLevel)g_applied[OPT_ACCURACY];
+    HleGraphicsAccuracy custom = hle_accuracy_default();
+    custom.precise_combiners = !strcmp(g_defs[OPT_PRECISION].values[g_applied[OPT_PRECISION]].value, "enabled");
+    const HleGraphicsAccuracy acc = hle_accuracy_resolve(level, &custom);
+    hle_accuracy_set(level, &acc);
+    const bool precise = acc.precise_combiners;
+    display_update();
     nc_log("hakuX-libretro", "options: render scale %dx, overscan %s, screen %s, language %d (%s), video region %s, "
-           "rumble %s, network %s, resampler %s, audio processing %s, frame pacing %s, communicator %s%s%s, combiner %s",
+           "rumble %s, network %s, resampler %s, audio processing %s, frame pacing %s, communicator %s%s%s, "
+           "accuracy %s (combiners %s, signed blending %s, post-blend dithering %s)",
            scale, crop ? "cropped" : "shown", format, language,
            g_defs[OPT_LANGUAGE].values[g_applied[OPT_LANGUAGE]].value, region, rumble ? "on" : "off",
            strcmp(network, "disabled") ? "on" : "off", resampler, dsp ? "dsp" : "fast",
            pace_text(g_applied[OPT_PACE]), communicator ? "on (noise gate " : "off", communicator ? gate : "",
-           communicator ? ")" : "", precise ? "accurate" : "fast");
+           communicator ? ")" : "", hle_accuracy_level_name(level), precise ? "accurate" : "fast",
+           acc.precise_signed_blend ? "accurate" : "approximate",
+           acc.precise_postblend_dither ? "accurate" : "approximate");
 }
 
 void nc_lr_options_run(void)
@@ -346,6 +382,7 @@ void nc_lr_options_run(void)
     if (!nc_lr_env(RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE, &changed) || !changed) {
         return;
     }
+    display_update();
     const int crop = value_of(OPT_CROP);
     if (crop != g_applied[OPT_CROP]) {
         g_applied[OPT_CROP] = crop;

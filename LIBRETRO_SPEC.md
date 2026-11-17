@@ -349,6 +349,26 @@ the Xbox system ships a RetroArch override with `run_ahead_enabled =
 Options (`options.c`): only what the emulator backs.
 - The render scale (1-4x), and the overscan crop (on by default; off shows
   the whole frame).
+- The accuracy level (`hakux_accuracy_level`: `potato`, `medium`, `high`,
+  `custom`; `custom` by default while existing set-ups move over). It
+  selects graphics trade-offs only, and is resolved once at boot into the
+  renderer's settings (`hw/xbox/hle/accuracy.h`): combiner rounding, the
+  signed blend equations, dithering after a blend into a 16-bit target.
+  Potato has all three approximate, Medium the dithering only, High none;
+  Custom takes the combiners from `hakux_combiner_precision` and has the
+  rest accurate, as before the level existed. Each setting is in the shader
+  keys, so pipelines of different levels never mix. A path the device
+  lacks stays its approximation at any level; the log's `accuracy:` line
+  says what the run uses. `hakux_combiner_precision` is hidden unless the
+  level is Custom, where the frontend can hide options. The level never
+  changes render scale, audio, pacing, memory or CPU behaviour, and never
+  changes during a run.
+  For measurements, `debug.hakux.accuracy` (on Linux the environment
+  variable `HAKUX_PROP_DEBUG_HAKUX_ACCURACY`) overrides single settings at
+  boot, e.g. `combiners=0,sblend=1,dither=0`, and the renderer's
+  per-second `hakuX-hle-back` line counts the draws that ask for a signed
+  blend (`signed_blend=`) and for a dithered blend into a 16-bit target
+  (`dither_blend=`), whichever path they get.
 - The console's own settings, as its dashboard keeps them: screen format
   (normal, widescreen, letterbox), language (auto: RetroArch's) and video
   region (auto: the game's; NTSC-M, NTSC-J, PAL). 480p is on, as on the

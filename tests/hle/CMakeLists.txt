@@ -27,6 +27,7 @@ set(HLE_PURE_SOURCES
   ${REPO_ROOT}/hw/xbox/hle/shader/ffhw.c
   ${REPO_ROOT}/hw/xbox/hle/shader/vsh.c
   ${REPO_ROOT}/hw/xbox/hle/shader/psh.c
+  ${REPO_ROOT}/hw/xbox/hle/accuracy.c
   ${REPO_ROOT}/hw/xbox/hle/pb/pusher.c
   ${REPO_ROOT}/hw/xbox/hle/pb/objslot.c
   ${REPO_ROOT}/hw/xbox/hle/pb/wclip.c
@@ -59,6 +60,7 @@ hle_test(test_pusher)
 hle_test(test_objslot)
 hle_test(test_wclip)
 hle_test(test_prim)
+hle_test(test_accuracy)
 hle_test(test_blitclip)
 hle_test(test_kdma)
 hle_test(test_pvideo)

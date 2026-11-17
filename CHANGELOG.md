@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Added the **Accuracy Level** core option: Potato, Medium, High and Custom.
+  It selects graphics accuracy trade-offs only (combiner rounding, signed
+  blend equations, dithering after blending into 16-bit targets). Custom is
+  the default and keeps existing Combiner Precision settings, so nothing
+  changes until a level is chosen. The mapping is provisional and no speed
+  gain has been measured for it yet. Restart the game after changing it.
+
 ## linux-v0.32.2 (Linux, aarch64 and x86-64, and Android)
 
 Follow-up performance hotfix for the graphics decoder (#249). Vertex-array
