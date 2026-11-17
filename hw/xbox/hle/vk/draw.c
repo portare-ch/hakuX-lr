@@ -4738,6 +4738,17 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
             k.ps.fbfetch |= (uint8_t)g_hle_zeq;
         }
     }
+    /* A 16-bit depth buffer: the NV2A stores a depth's 16 bits truncated,
+     * D16_UNORM takes the nearest step. Nearly half a step toward the eye on every
+     * polygon makes the nearest step the one below (nxdk_pgraph_tests' Depth
+     * buffer, the z16 dumps: half their words were one higher). */
+    if (zt && tris && !(dbgf & 4) && !wbuf && ds->fmt == VK_FORMAT_D16_UNORM) {
+        zslope = bias ? zslope : 0.0f;
+        /* (a little under half: a depth that is a whole step, interpolated
+         * a hair off it, stays that step) */
+        zofs = (bias ? zofs : 0.0f) - 0.49f;
+        bias = true;
+    }
     /* the slope is per guest pixel; the target has scale pixels to one */
     zslope *= (float)(rt ? rt->scale : ds->scale);
     if (wbuf && wff) {
