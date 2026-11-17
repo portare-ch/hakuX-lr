@@ -1606,6 +1606,8 @@ void hle_pb_state_get(HlePbState *s)
     s->trap_wait = g_pb.trap_wait;
     memcpy(s->sub_r, g_pb.sub_r, sizeof(s->sub_r));
     memcpy(s->s2d, g_pb.s2d, sizeof(s->s2d));
+    memcpy(s->clip2d, g_pb.clip2d, sizeof(s->clip2d));
+    s->beta = g_pb.beta;
     s->disp_pa = g_pb.disp_pa;
     s->disp_req = g_pb.disp_req;
     s->disp_flip = g_pb.disp_flip;
@@ -1657,6 +1659,19 @@ void hle_pb_state_set(const HlePbState *s)
     g_sc.synced = false;
     memcpy(g_pb.sub_r, s->sub_r, sizeof(s->sub_r));
     memcpy(g_pb.s2d, s->s2d, sizeof(s->s2d));
+    memcpy(g_pb.clip2d, s->clip2d, sizeof(g_pb.clip2d));
+    g_pb.beta = s->beta;
+    /* a state from before PBD v3 has neither: what its subchannels' objects
+     * of those classes were last given (a rectangle of no size clips every
+     * blit away) */
+    for (unsigned i = 0; i < 8; i++) {
+        if (g_pb.obj_class[i] == NV_CLASS_CLIP2D && !s->clip2d[1]) {
+            g_pb.clip2d[0] = g_pb.sub_r[i][0x300 >> 2];
+            g_pb.clip2d[1] = g_pb.sub_r[i][0x304 >> 2];
+        } else if (g_pb.obj_class[i] == NV_CLASS_BETA && !s->beta) {
+            g_pb.beta = g_pb.sub_r[i][0x300 >> 2];
+        }
+    }
     g_pb.disp_pa = s->disp_pa;
     g_pb.disp_req = s->disp_req;
     g_pb.disp_flip = s->disp_flip;

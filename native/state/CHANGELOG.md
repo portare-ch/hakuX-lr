@@ -73,3 +73,8 @@ One entry per section version (tools/native/statelock.py).
 
 - NcFile.share_has, share_lets: the access each open of a hard disk file has and lets others have, checked at each open as NT's share access (v3 states: their open files take no part)
 - upgraded: v1..v3 states load
+
+## PBD v3 (2026-11-17, after 329a8e9235)
+
+- HlePbState.clip2d, beta: the 2D clip rectangle (class 0x19) and beta factor (class 0x12) the blits use; v1..v2 states: what the subchannels' objects of those classes were last given
+- upgraded: v1..v2 states load
