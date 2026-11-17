@@ -648,6 +648,7 @@ static int vk_init(PFN_vkGetInstanceProcAddr gipa_shared, VkInstance inst_shared
     c->dbias_exact = c->dbias_float && q_dbc.depthBiasExact;
     need(c, q.features.largePoints, "largePoints");
     c->depth_clamp = q.features.depthClamp;
+    c->cull_distance = q.features.shaderCullDistance;
     need(c, ok_tl, "timelineSemaphore");
     /* the bindless set: its arrays indexed nonuniformEXT, written while bound */
     c->bindless = ok_rda && ok_pb && ok_uab && ok_nui &&
@@ -868,6 +869,7 @@ static int vk_init(PFN_vkGetInstanceProcAddr gipa_shared, VkInstance inst_shared
     f.features.fillModeNonSolid = c->fill_modes;
     f.features.largePoints = VK_TRUE;
     f.features.depthClamp = c->depth_clamp;
+    f.features.shaderCullDistance = c->cull_distance;
     f.features.shaderSampledImageArrayDynamicIndexing = !c->bindless;
     f.features.logicOp = q.features.logicOp;
     f.features.dualSrcBlend = q.features.dualSrcBlend;
