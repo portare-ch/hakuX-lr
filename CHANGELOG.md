@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+## linux-v0.32.2 (Linux, aarch64 and x86-64, and Android)
+
+Follow-up performance hotfix for the graphics decoder (#249). Vertex-array
+checks now use a cached list of render-target memory ranges, rebuilt when
+targets or object slots change. The carried-attribute loop also stops at
+the last attribute in use. No change in rendering behaviour is intended.
+
+In the tested 120-second NBA Inside Drive 2003 sequence on a Ryzen 7
+9800X3D, decoder CPU time fell from 24.6–24.9 seconds with #248 to
+23.3–23.5 seconds, close to v0.26.0's 23.5–24.2 seconds. This measures CPU
+work, not an equivalent increase in game frame rate. Nova measurements
+for the final revision are pending; the OGU has not been measured.
+
+**Lower-end devices:** Use [v0.26.0](https://github.com/portare-ch/hakuX-lr/releases/tag/linux-v0.26.0)
+for now if recent versions remain too slow. A low accuracy mode is still
+being implemented and tested.
+
+### Testing
+
+PR #249 reports 29/29 HLE tests, 35/35 native tests, and passing Linux
+ARM64 and x86-64 CI. A full graphics-test run on an earlier revision
+matched the previous master, with 3,008 of 3,556 cases meeting the
+comparison threshold. That run predates the final cache-invalidation
+change. Android ARM64 remains experimental.
+
 ## linux-v0.32.1 (Linux, aarch64 and x86-64, and Android)
 
 Performance hotfix for the graphics decoder (#248). Render-target memory
