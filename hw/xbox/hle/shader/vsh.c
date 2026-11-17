@@ -226,7 +226,7 @@ static void head(Buf *bp, const HleVshKey *k)
             "layout(location = 7) %sout vec4 vBack0;\n"
             "layout(location = 8) %sout vec4 vBack1;\n", interp, interp, interp, interp);
     if (k->wbuf) {      /* W-buffering: perspective-correct w for the depth */
-        put(&b, "layout(location = 9) out float vW;\n");
+        put(&b, "layout(location = 9) %sout float vW;\n", k->wbuf == 2 ? "noperspective " : "");
     }
     put(&b, "%s", k_lib);
     put(&b, "void main() {\n");
@@ -395,6 +395,6 @@ static void tail(Buf *bp, const HleVshKey *k, bool fogw)
     if (g_hle_glsl_zw) {
         put(&b, HLE_ZW_NUDGE_GLSL);
     }
-    put(&b, "%s}\n", k->wbuf ? "  vW = w;\n" : "");
+    put(&b, "%s}\n", k->wbuf == 2 ? "  vW = oPos.z;\n" : k->wbuf ? "  vW = w;\n" : "");
     *bp = b;
 }

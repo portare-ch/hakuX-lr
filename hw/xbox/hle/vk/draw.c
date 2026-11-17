@@ -1322,6 +1322,8 @@ static unsigned shadow_fmt(uint32_t id)
     switch (s->d.xfmt) {
     case HLE_XFMT_D16: case HLE_XFMT_LIN_D16:   return 2;
     case HLE_XFMT_F24S8: case HLE_XFMT_LIN_F24S8:
+        /* (an image that holds the depth itself: read as an F24 texture's float) */
+        return g_hvk.caps.depth_unrestricted ? 4 : 3;
     case HLE_XFMT_F16: case HLE_XFMT_LIN_F16:   return 3;
     default:                                    return 1;
     }
@@ -2595,7 +2597,7 @@ static HlePbResult pipeline_build(const void *key, const uint32_t *tok, uint32_t
         VkPipelineRasterizationStateCreateInfo rs = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
             /* without depthClamp the vertex shader clamps (HLE_ZCLAMP_GLSL) */
-            .depthClampEnable = (k->vsh ? k->vk.zclamp : k->vs.zclamp) && g_hvk.caps.depth_clamp,
+            .depthClampEnable = (k->vsh ? k->vk.zclamp & 1 : k->vs.zclamp) && g_hvk.caps.depth_clamp,
             .polygonMode = (VkPolygonMode)(k->raster & 3), .lineWidth = 1.0f };
         /* Vulkan line rasterization applies coverage to fragment alpha. */
         VkPipelineRasterizationLineStateCreateInfoKHR ls = {
@@ -4631,6 +4633,16 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         (!s->zclamp || znf)) {
         wbuf = true;
     }
+    /* A 24-bit float depth buffer whose image holds the depth itself (the
+     * draw's zscale 1: VK_EXT_depth_range_unrestricted, pb/pbdraw.c
+     * zfloat_scale): any float, not a fraction of 1. The rasterizer's depth
+     * is within 0 .. 1, so the pixel shader stores the program's z, as it
+     * stores w under W-buffering (the keys' wbuf 2: z, linear on screen). */
+    const bool zlin = !wbuf && prog && ds && s->rs[RS_ZENABLE] == 1 && c->zscale == 1.0f &&
+                      g_hvk.caps.depth_unrestricted && ds->fmt == VK_FORMAT_D32_SFLOAT_S8_UINT;
+    if (zlin) {
+        wbuf = true;
+    }
     /* NV2A ZCLAMP_EN CLAMP: depth past the near and far planes is clamped to
      * them instead of clipping the primitive (MechAssault 2's sky, drawn past
      * the far plane, was black): the rasterizer's depth clamp */
@@ -4659,19 +4671,24 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         }
     }
     if (prog) {
-        k.vk.wbuf = wbuf;
+        k.vk.wbuf = zlin ? 2 : wbuf;
         k.vk.zfree = zt_off && !zrange;
         k.vk.zclamp = (zclamp || (znf && (zrange || wrange)) ? 1 : 0) | (znf && (zrange || wrange) ? 2 : 0);
+        /* the pixel shader's own depth, any float (zscale 1): the rasterizer's
+         * clamp would bring it back into the viewport's 0 .. 1 */
+        if (wbuf && c->zscale == 1.0f) {
+            k.vk.zclamp &= ~1u;
+        }
     } else {
-        k.vs.wbuf = wbuf;
+        k.vs.wbuf = zlin ? 2 : wbuf;
         k.vs.zclamp = zclamp;
     }
     if (s->psh) {
-        k.pk.wbuf = wbuf;
+        k.pk.wbuf = zlin ? 2 : wbuf;
         /* a depth DOT_ZW replaces is clamped the same way (psh.c) */
         k.pk.zclamp = (zclamp && !zcull && hle_psh_zrep(k.pk.tex_modes) ? 1 : 0) | (pk_zcull ? HLE_PSH_ZCULL : 0);
     } else {
-        k.ps.wbuf = wbuf;
+        k.ps.wbuf = zlin ? 2 : wbuf;
     }
     /* Polygon offset (decals over coplanar surfaces): NV2A adds the offset in
      * depth-buffer units and the slope factor times the polygon's depth slope,

@@ -281,6 +281,9 @@ static inline const char *hle_push_glsl(void)
  * (psc[18], psc[19], float bits; zero when SOLIDOFFSETENABLE is off). The
  * pixel generators declare vW (location 9, from the program vertex shader). */
 #define HLE_WBUF_IN_GLSL "layout(location = 9) in float vW;\n"
+/* (the keys' wbuf 2: not w but the program's screen z, linear on screen: a
+ * float depth buffer that holds the depth itself, vk/draw.c) */
+#define HLE_ZLIN_IN_GLSL "layout(location = 9) noperspective in float vW;\n"
 /* Screen-space depth z (0 .. the buffer's maximum, 2^n - 1) to [0, 1] as
  * `out`: pc.zscale is 2^-n for the integer formats (pbdraw.c), and
  * z 2^-n + z 2^-2n is z / (2^n - 1) to float precision, both products exact
@@ -299,7 +302,8 @@ static inline const char *hle_push_glsl(void)
     "  float wRaw = vW + uintBitsToFloat(pc.psc[18]) + uintBitsToFloat(pc.psc[19]) *\n" \
     "      max(abs(dFdx(vW)), abs(dFdy(vW)));\n" \
     HLE_ZNORM_GLSL("wRaw", "wN") \
-    "  float wDepth = pc.scr.y > pc.scr.x ? clamp(wN, pc.scr.x, pc.scr.y) : clamp(wN, 0.0, 1.0);\n"
+    "  float wDepth = pc.scr.y > pc.scr.x ? clamp(wN, pc.scr.x, pc.scr.y) :\n" \
+    "                 pc.zscale == 1.0 ? max(wN, 0.0) : clamp(wN, 0.0, 1.0);\n"
 #define HLE_WBUF_STORE_GLSL "  gl_FragDepth = wDepth;\n"
 
 /* EQUAL depth passes that do not write (vk/draw.c eq_tol) test LESSEQUAL a

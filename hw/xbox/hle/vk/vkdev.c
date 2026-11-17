@@ -282,6 +282,7 @@ static void caps_override(HleCaps *c)
         { "fillmodes", offsetof(HleCaps, fill_modes) },
         { "smoothlines", offsetof(HleCaps, smooth_lines) }, { "bary", offsetof(HleCaps, bary) },
         { "dbias", offsetof(HleCaps, dbias_float) },
+        { "zraw", offsetof(HleCaps, depth_unrestricted) },
     };
     for (char *save = NULL, *t = strtok_r(v, ", ", &save); t; t = strtok_r(NULL, ", ", &save)) {
         const char *name = *t == '-' ? t + 1 : t;
@@ -472,6 +473,7 @@ static int vk_init(PFN_vkGetInstanceProcAddr gipa_shared, VkInstance inst_shared
     bool e_roa = has_ext(ext, ne, VK_EXT_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_EXTENSION_NAME);
     bool e_bary = has_ext(ext, ne, VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME);
     bool e_dbc = has_ext(ext, ne, VK_EXT_DEPTH_BIAS_CONTROL_EXTENSION_NAME);
+    bool e_dru = has_ext(ext, ne, VK_EXT_DEPTH_RANGE_UNRESTRICTED_EXTENSION_NAME);
     bool e_pd = has_ext(ext, ne, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
     /* Use the API version supported by both the instance and device. */
     const uint32_t inst_api = g_inst_api ? g_inst_api : VK_API_VERSION_1_3;
@@ -646,6 +648,7 @@ static int vk_init(PFN_vkGetInstanceProcAddr gipa_shared, VkInstance inst_shared
     c->bary = e_bary && q_bary.fragmentShaderBarycentric;
     c->dbias_float = e_dbc && q_dbc.depthBiasControl && q_dbc.floatRepresentation;
     c->dbias_exact = c->dbias_float && q_dbc.depthBiasExact;
+    c->depth_unrestricted = e_dru;
     need(c, q.features.largePoints, "largePoints");
     c->depth_clamp = q.features.depthClamp;
     c->cull_distance = q.features.shaderCullDistance;
@@ -960,6 +963,7 @@ static int vk_init(PFN_vkGetInstanceProcAddr gipa_shared, VkInstance inst_shared
     }
     if (c->bary) exts[nx++] = VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME;
     if (c->dbias_float) exts[nx++] = VK_EXT_DEPTH_BIAS_CONTROL_EXTENSION_NAME;
+    if (c->depth_unrestricted) exts[nx++] = VK_EXT_DEPTH_RANGE_UNRESTRICTED_EXTENSION_NAME;
     if (c->fbfetch) {
         exts[nx++] = VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME;
         if (e_pd) {

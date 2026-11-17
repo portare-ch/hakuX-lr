@@ -658,6 +658,11 @@ uint32_t hle_res_rb_fb(uint32_t len)
     return off == HLE_ARENA_FULL ? 0 : off + 1;
 }
 
+bool hle_res_zfloat_raw(void)
+{
+    return g_hvk.caps.depth_unrestricted;
+}
+
 bool hle_res_ram_direct(void)
 {
     return g_hram.zero_copy;

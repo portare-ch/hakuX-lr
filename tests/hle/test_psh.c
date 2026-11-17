@@ -295,8 +295,8 @@ static void test_dot_zw(void)
     const char *q = strstr(buf, "float zq = zrw == 0.0 ? 0.0 : zrz / zrw;\n");
     const char *zn = strstr(buf, "precise float zrep = zq * pc.zscale + zq * (pc.zscale == "
                                  "uintBitsToFloat(0x33800000u) ||");
-    const char *far = strstr(buf, "if (zrw == 0.0) zrep = 1.0;");
-    const char *rej = strstr(buf, "if (!(zrep >= 0.0 && zrep <= 1.0)) discard;");
+    const char *far = strstr(buf, "if (zrw == 0.0) zrep = zraw ? uintBitsToFloat(0x7F800000u) : 1.0;");
+    const char *rej = strstr(buf, "if (!(zrep >= 0.0 && (zraw || zrep <= 1.0))) discard;");
     const char *out = strstr(buf, "gl_FragDepth = zrep;");
     HT_CHECK(q && zn && far && rej && out && q < zn && zn < far && far < rej && rej < out);
     /* replaces W-buffering's depth (its calculation not made); the EQUAL test
@@ -307,7 +307,7 @@ static void test_dot_zw(void)
     n = hle_psh_glsl(&k, buf, sizeof(buf), &un);
     HT_CHECK(n > 0 && n == strlen(buf));
     dump("psh_dot_zw_wbuf");
-    HT_CHECK(strstr(buf, "zrep = pc.scr.y > pc.scr.x ? clamp(zrep, pc.scr.x, pc.scr.y) : clamp(zrep, 0.0, 1.0);") != NULL);
+    HT_CHECK(strstr(buf, "zraw ? max(zrep, 0.0) : clamp(zrep, 0.0, 1.0);") != NULL);
     HT_CHECK(strstr(buf, "zrep >= 0.0") == NULL);
     HT_CHECK(strstr(buf, "if (zrep < subpassLoad(uZ).r") != NULL);
     HT_CHECK(strstr(buf, "gl_FragCoord.z <") == NULL);

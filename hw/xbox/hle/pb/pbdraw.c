@@ -1521,7 +1521,9 @@ static float zfloat_scale(bool z24)
 {
     static float s;
     if (z24) {
-        return ldexpf(1.0f, -HLE_ZFLOAT24_EXP);
+        /* the depth itself where the image can hold it: every word of the
+         * format then, from the smallest (0x00002F is 6.6e-44) to 3.4e38 */
+        return hle_res_zfloat_raw() ? 1.0f : ldexpf(1.0f, -HLE_ZFLOAT24_EXP);
     }
     if (!s) {
         const float m = 511.9375f;
@@ -1550,6 +1552,9 @@ static float zfloat_clear(uint32_t v, bool z24)
     uint32_t b = z24 ? (v << 7) | 0x7Du : ((v << 11) + 0x3C000000u) | 0x7FBu;
     float f;
     memcpy(&f, &b, 4);
+    if (z24 && hle_res_zfloat_raw()) {
+        return isfinite(f) ? f : INFINITY;      /* 0xFFFFFF (D3D's far): past every depth */
+    }
     return isfinite(f) ? MIN(f * zfloat_scale(z24), 1.0f) : 1.0f;
 }
 
@@ -4125,6 +4130,19 @@ static void emit(HleCmdDraw *d)
      * a range inside a fixed-point buffer's, and at least a step wide. */
     d->zclip[0] = d->zclip[1] = 0.0f;
     d->zclip_w = (R(NV097_SET_CONTROL0) & 0x10000u) != 0;
+    if ((R(NV097_SET_CONTROL0) & 0x1000u) && zf == 2 && hle_res_zfloat_raw()) {
+        /* a float buffer that holds the depth itself: the range as it is
+         * (the pixel shader's, vk/draw.c): past CLIP_MAX nothing is drawn
+         * (nxdk_pgraph_tests' Depth buffer sets it to each format's "max") */
+        const uint32_t r0 = R(0x0394), r1 = R(0x0398);
+        float lo, hi;
+        memcpy(&lo, &r0, 4);
+        memcpy(&hi, &r1, 4);
+        if (!isnan(lo) && !isnan(hi) && hi > MAX(lo, 0.0f)) {
+            d->zclip[0] = MAX(lo, 0.0f);
+            d->zclip[1] = hi;
+        }
+    }
     if (!(R(NV097_SET_CONTROL0) & 0x1000u) && (zf == 1 || zf == 2)) {
         const float zmax = zf == 2 ? 16777215.0f : 65535.0f;
         const uint32_t r0 = R(0x0394), r1 = R(0x0398);
@@ -5853,7 +5871,7 @@ uint64_t hle_pbd_copy_begin(uint32_t slo, uint32_t sp, uint32_t dlo, uint32_t dp
             if (d16) {
                 zid = zread(o->d.pa, o->d.w, o->d.h, map, HLE_XFMT_LIN_L16, o->d.pitch, o);
             } else if (hle_res_zread_map(HLE_XFMT_LIN_A8R8G8B8, map)) {
-                map[0] |= zfl ? HLE_ZREAD_FLOAT : 0;
+                map[0] |= zfl ? HLE_ZREAD_FLOAT | (hle_res_zfloat_raw() ? HLE_ZREAD_RAW : 0) : 0;
                 zid = zread(o->d.pa, o->d.w, o->d.h, map, HLE_XFMT_LIN_A8R8G8B8, 0, o);
             }
             o->fb_wb_v = 0;
