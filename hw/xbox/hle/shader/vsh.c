@@ -205,7 +205,9 @@ static const char k_lib[] =
 static void head(Buf *bp, const HleVshKey *k)
 {
     Buf b = *bp;
-    const char *interp = k->flat ? "flat " : "";
+    /* (flat 2: TEXTUREPERSPECTIVE off, everything linear on screen) */
+    const char *interp = k->flat == 2 ? "noperspective " : k->flat ? "flat " : "";
+    const char *np = k->flat == 2 ? "noperspective " : "";
     put(&b, "#version 450\n%s", hle_push_glsl());
     put(&b, "layout(set = 1, binding = 0, std140) uniform VshConst { vec4 c[192]; "
             "vec4 vcur[16]; vec4 vpsz; };\n"
@@ -218,13 +220,13 @@ static void head(Buf *bp, const HleVshKey *k)
     }
     put(&b, "layout(location = 0) %sout vec4 vDiffuse;\n"
             "layout(location = 1) %sout vec4 vSpecular;\n"
-            "layout(location = 2) out vec4 vTex0;\n"
-            "layout(location = 3) out vec4 vTex1;\n"
-            "layout(location = 4) out vec4 vTex2;\n"
-            "layout(location = 5) out vec4 vTex3;\n"
-            "layout(location = 6) out float vFog;\n"
+            "layout(location = 2) %sout vec4 vTex0;\n"
+            "layout(location = 3) %sout vec4 vTex1;\n"
+            "layout(location = 4) %sout vec4 vTex2;\n"
+            "layout(location = 5) %sout vec4 vTex3;\n"
+            "layout(location = 6) %sout float vFog;\n"
             "layout(location = 7) %sout vec4 vBack0;\n"
-            "layout(location = 8) %sout vec4 vBack1;\n", interp, interp, interp, interp);
+            "layout(location = 8) %sout vec4 vBack1;\n", interp, interp, np, np, np, np, np, interp, interp);
     if (k->wbuf) {      /* W-buffering: perspective-correct w for the depth */
         put(&b, "layout(location = 9) %sout float vW;\n", k->wbuf == 2 ? "noperspective " : "");
     }
@@ -376,13 +378,13 @@ static void tail(Buf *bp, const HleVshKey *k, bool fogw)
      * pixel stage's), and without a depth test nothing. The program's z then
      * must not clip the primitive (Forza's sky dome past the far plane, its
      * minimap at z far below 0), so the clip z only keeps w >= 0. */
-    if (!k->wbuf && !k->zfree) {
+    if ((!k->wbuf || k->wbuf == 3) && !k->zfree) {
         put(&b, HLE_ZNORM_GLSL("oPos.z", "zN"));
         /* a depth range less than the buffer's (CLIP_MIN .. CLIP_MAX, the
          * viewport's: vk/draw.c): the depth as a fraction of it */
         put(&b, "  if (pc.scr.w != 0.0) zN = (zN - pc.scr.z) * pc.scr.w;\n");
     }
-    put(&b, "  gl_Position = vec4(ndc * w, %s, w);\n", k->wbuf || k->zfree ? "0.0" : "zN * w");
+    put(&b, "  gl_Position = vec4(ndc * w, %s, w);\n", (k->wbuf && k->wbuf != 3) || k->zfree ? "0.0" : "zN * w");
     /* CULL_NEAR_FAR_EN with ZCLAMP_EN (the key's zclamp bit 1, vk/draw.c): a
      * primitive whose vertices are all before the depth range, or all past
      * it, is dropped; the others are clamped. By the program's z, also

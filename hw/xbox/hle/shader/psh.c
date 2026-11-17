@@ -524,7 +524,9 @@ static void alpha_kill(Buf *b, const HlePshKey *k, unsigned s, unsigned m)
 size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsupported)
 {
     Buf b = { buf, cap, 0, false };
-    const char *interp = k->flat ? "flat " : "";
+    /* (flat 2: TEXTUREPERSPECTIVE off, everything linear on screen) */
+    const char *interp = k->flat == 2 ? "noperspective " : k->flat ? "flat " : "";
+    const char *np = k->flat == 2 ? "noperspective " : "";
     /* Register-combiner outputs use signed 9-bit values (1.0 = 0xFF).
      * Round each stage after mapping and clamping, as in Xbox combiner
      * captures (116/116 matching pixels). Inputs remain interpolated. */
@@ -601,11 +603,11 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "layout(set = 0, binding = 3) uniform texture3D uTex3D[];\n"
             "layout(location = 0) %sin vec4 vDiffuse;\n"
             "layout(location = 1) %sin vec4 vSpecular;\n"
-            "layout(location = 2) in vec4 vTex0;\n"
-            "layout(location = 3) in vec4 vTex1;\n"
-            "layout(location = 4) in vec4 vTex2;\n"
-            "layout(location = 5) in vec4 vTex3i;\n"
-            "layout(location = 6) in float vFog;\n"
+            "layout(location = 2) %sin vec4 vTex0;\n"
+            "layout(location = 3) %sin vec4 vTex1;\n"
+            "layout(location = 4) %sin vec4 vTex2;\n"
+            "layout(location = 5) %sin vec4 vTex3i;\n"
+            "layout(location = 6) %sin float vFog;\n"
             "%s%s%s%s"
             "layout(location = 0) out vec4 oColor;\n"
             "vec4 col(uint c) { return unpackUnorm4x8(c).zyxw; }\n"
@@ -679,7 +681,7 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "%s%s%s"
             "void main() {\n"
             "%s"
-            "  vec4 vTex3 = %s;\n", interp, interp, back, k->wbuf == 2 ? HLE_ZLIN_IN_GLSL : k->wbuf ? HLE_WBUF_IN_GLSL : "",
+            "  vec4 vTex3 = %s;\n", interp, interp, np, np, np, np, np, back, k->wbuf == 2 ? HLE_ZLIN_IN_GLSL : k->wbuf ? HLE_WBUF_IN_GLSL : "",
         (k->fbfetch & ~HLE_FB_ZEQ) || k->sblend || k->fblend ?
             "layout(input_attachment_index = 0, set = 2, binding = 0) "
             "uniform subpassInput uFb;\n" : "",
@@ -1002,6 +1004,9 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
     if (k->zclamp & HLE_PSH_ZCULL) {        /* outside CLIP_MIN .. CLIP_MAX (vk/draw.c) */
         put(&b, "  if (%s < pc.scr.x || %s > pc.scr.y) discard;\n", k->wbuf ? "wN" : "gl_FragCoord.z",
             k->wbuf ? "wN" : "gl_FragCoord.z");
+        if (k->zclamp & 4) {                /* ... and of the program's z (CULL_NEAR_FAR_EN) */
+            put(&b, "  if (gl_FragCoord.z < pc.scr.x || gl_FragCoord.z > pc.scr.y) discard;\n");
+        }
     }
     if (k->alpha_test && k->alpha_func < 8) {
         put(&b, "  { int a = int(clamp(outc.a, 0.0, 1.0) * 255.0 + 0.5), r = int(pc.alpha_ref * 255.0 + 0.5);\n"

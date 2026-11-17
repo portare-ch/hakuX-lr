@@ -241,6 +241,13 @@ void hle_kelvin_state(HleCmdState *st)
     uint32_t *rs = st->rs;
     for (unsigned i = 0; i < ARRAY_SIZE(k_rs_map); i++) {
         if (W(k_rs_map[i].m)) {
+            /* a DEPTH_FUNC that is none of NEVER .. ALWAYS (0x200 .. 0x207)
+             * leaves the one before in effect (nxdk_pgraph_tests' Depth
+             * function writes 0, 10 .. 70 after each) */
+            if (k_rs_map[i].rs == RS_ZFUNC && (R(0x0354) < 0x200 || R(0x0354) > 0x207) &&
+                rs[RS_ZFUNC] >= 0x200 && rs[RS_ZFUNC] <= 0x207) {
+                continue;
+            }
             rs[k_rs_map[i].rs] = R(k_rs_map[i].m);
         }
     }
@@ -355,6 +362,7 @@ void hle_kelvin_state(HleCmdState *st)
     if (W(0x1D78)) {                    /* SET_ZMIN_MAX_CONTROL: ZCLAMP_EN (bits 4..7) CLAMP */
         /* (bit 1: with CULL_NEAR_FAR_EN, bit 0 of the register) */
         st->zclamp = ((R(0x1D78) >> 4) & 0xF) == 1 ? 1u | (R(0x1D78) & 1 ? 2u : 0) : 0;
+        st->znearfar = R(0x1D78) & 1;
     }
 }
 

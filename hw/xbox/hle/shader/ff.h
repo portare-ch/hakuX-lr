@@ -308,9 +308,11 @@ static inline const char *hle_push_glsl(void)
      * (the image may be a float one, finer than the NV2A's), an EQUAL pass \
      * over it compares what the NV2A compares. Two pipelines' w came out a \
      * float step apart, and nxdk_pgraph_tests' depth_equal under \
-     * W-buffering passed nowhere. */ \
-    "  if (pc.zscale == uintBitsToFloat(0x33800000u)) wDepth = floor(wDepth * 16777215.0 + 0.5) / 16777215.0;\n" \
-    "  else if (pc.zscale == uintBitsToFloat(0x37800000u)) wDepth = floor(wDepth * 65535.0 + 0.5) / 65535.0;\n"
+     * W-buffering passed nowhere. A 16-bit one's are truncated, as its \
+     * depths are (vk/draw.c); a hair is added for a whole step that came \
+     * out just under. */ \
+    "  if (pc.zscale == uintBitsToFloat(0x33800000u)) wDepth = floor(wDepth * 16777215.0 + 0.01) / 16777215.0;\n" \
+    "  else if (pc.zscale == uintBitsToFloat(0x37800000u)) wDepth = floor(wDepth * 65535.0 + 0.01) / 65535.0;\n"
 #define HLE_WBUF_STORE_GLSL "  gl_FragDepth = wDepth;\n"
 
 /* EQUAL depth passes that do not write (vk/draw.c eq_tol) test LESSEQUAL a

@@ -1322,6 +1322,8 @@ static unsigned shadow_fmt(uint32_t id)
     switch (s->d.xfmt) {
     case HLE_XFMT_D16: case HLE_XFMT_LIN_D16:   return 2;
     case HLE_XFMT_F24S8: case HLE_XFMT_LIN_F24S8:
+        /* (an image that holds the depth itself: read as an F24 texture's float) */
+        return g_hvk.caps.depth_unrestricted ? 4 : 3;
     case HLE_XFMT_F16: case HLE_XFMT_LIN_F16:   return 3;
     default:                                    return 1;
     }
@@ -4145,6 +4147,9 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
                    HLE_FVF_SPECULAR | (4u << HLE_FVF_TEXCOUNT_SHIFT) | 0xAA0000u;
     }
     k.vs.flat = k.ps.flat = s->rs[RS_SHADEMODE] == 0x1D00;
+    if (!k.ps.flat && c->nopersp && c->vsh) {
+        k.ps.flat = 2;                  /* (the program's side: k.vk.flat below) */
+    }
     HleFfPush pc;
     memset(&pc, 0, sizeof(pc));
     memcpy(pc.mvp, s->mvp, sizeof(pc.mvp));
@@ -4208,7 +4213,7 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         k.pk.fbfetch = hle_draw_fb_stages(c, rt_id);
         k.pk.alpha_test = s->rs[RS_ALPHATESTENABLE] != 0;
         k.pk.alpha_func = s->rs[RS_ALPHAFUNC] >= 0x200 ? (s->rs[RS_ALPHAFUNC] - 0x200) & 7 : 7;
-        k.pk.flat = s->rs[RS_SHADEMODE] == 0x1D00;
+        k.pk.flat = s->rs[RS_SHADEMODE] == 0x1D00 ? 1 : c->nopersp && prog ? 2 : 0;
         k.pk.fog = s->rs[RS_FOGENABLE] ? (s->rs[RS_FOGTABLEMODE] & 3) + 1 : 0;
         k.pk.fog_abs = (s->rs[RS_FOGTABLEMODE] >> 8) & 1;
         k.pk.specular = s->rs[RS_SPECULARENABLE] != 0;
@@ -4531,7 +4536,7 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         k.vk.in_mask = in;
         k.vk.int_mask = ints;
         k.vk.cmp_mask = cmps;
-        k.vk.flat = s->rs[RS_SHADEMODE] == 0x1D00;
+        k.vk.flat = s->rs[RS_SHADEMODE] == 0x1D00 ? 1 : c->nopersp ? 2 : 0;
         k.vk.spec_off = !(s->spec & 1);
         k.vk.spec_a1 = (s->spec & 3) == 1;
         /* (the mode itself: 1 EXP, 2 EXP2, 3 LINEAR) */
@@ -4680,23 +4685,32 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
     /* (under W-buffering the range is w's, kept by the pixel shader alone) */
     const bool wrange = prog && ds && wbuf && c->zclip[1] > c->zclip[0];
     const bool zcull = (zrange && !s->zclamp && g_hvk.caps.depth_clamp) || (wrange && !s->zclamp);
+    /* With CULL_NEAR_FAR_EN the range is the program's z's as well as w's
+     * (ZMinMaxControl: quads of w 10, inside 10 .. 100, are cut where their
+     * z leaves it): the program's z reaches the pixel shader as the
+     * rasterizer's depth (the vertex key's wbuf 3), unclipped. */
+    const bool wz = wrange && !zlin && c->zscale != 1.0f && !s->zclamp && s->znearfar &&
+                    g_hvk.caps.depth_clamp;      /* (W-buffering proper, a fixed-point buffer) */
     bool pk_zcull = false;
     if (zcull) {
         zclamp = zclamp || zrange;
         if (s->psh) {
             pk_zcull = true;
         } else {
-            k.ps.zcull = 1;
+            k.ps.zcull = wz ? 3 : 1;
         }
     }
     if (prog) {
-        k.vk.wbuf = zlin ? 2 : wbuf;
-        k.vk.zfree = zt_off && !zrange;
+        k.vk.wbuf = zlin ? 2 : wz ? 3 : wbuf;
+        k.vk.zfree = zt_off && !zrange && !wz;
         k.vk.zclamp = (zclamp || (znf && (zrange || wrange)) ? 1 : 0) | (znf && (zrange || wrange) ? 2 : 0);
         /* the pixel shader's own depth, any float (zscale 1): the rasterizer's
          * clamp would bring it back into the viewport's 0 .. 1 */
         if (wbuf && c->zscale == 1.0f) {
             k.vk.zclamp &= ~1u;
+        }
+        if (wz) {
+            k.vk.zclamp |= 1u;
         }
     } else {
         k.vs.wbuf = zlin ? 2 : wbuf;
@@ -4705,7 +4719,7 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
     if (s->psh) {
         k.pk.wbuf = zlin ? 2 : wbuf;
         /* a depth DOT_ZW replaces is clamped the same way (psh.c) */
-        k.pk.zclamp = (zclamp && !zcull && hle_psh_zrep(k.pk.tex_modes) ? 1 : 0) | (pk_zcull ? HLE_PSH_ZCULL : 0);
+        k.pk.zclamp = (zclamp && !zcull && hle_psh_zrep(k.pk.tex_modes) ? 1 : 0) | (pk_zcull ? HLE_PSH_ZCULL | (wz ? 4u : 0) : 0);
     } else {
         k.ps.wbuf = zlin ? 2 : wbuf;
     }
