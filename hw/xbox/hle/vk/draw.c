@@ -1533,9 +1533,27 @@ void hle_draw_rs_brief(uint32_t out[9])
 /* debug.hakux.eqtol=0: EQUAL depth tests exact; 1: one-sided (LESSEQUAL a step
  * toward the eye, no shader test) */
 static bool g_eqtol_off, g_zeq_off;
-/* debug.hakux.snap=trunc: vertex positions truncated to 1/16 pixel each, as
- * before the constant subpixel shift (ff.h HLE_SUBPIXEL_GLSL), for A/B */
-static bool g_snap_trunc;
+/* Vertex positions (ff.h HLE_SUBPIXEL_GLSL): each truncated to 1/16 pixel,
+ * as the NV2A does, where a polygon offset is exact (a fixed-point depth
+ * image, or depth bias control on a float one: snap_trunc); else all moved
+ * by the truncation's mean, 1/32 pixel. debug.hakux.snap=trunc / bias
+ * forces one or the other (A/B): 1 trunc, 2 bias, 0 by the device. */
+static int g_snap_mode;
+/* Truncated, a decal's vertices and the surface's under it move apart by up
+ * to 1/16 pixel, as on the NV2A, and the decal's polygon offset has to keep
+ * it in front. On a float depth image without depth bias control the offset
+ * is a fraction of what the title asked for (halved under each power of
+ * two): Burnout 3's road stains and Dead or Alive 2's eaves shadows
+ * flickered there, and those devices keep the uniform shift. */
+static bool snap_trunc(const HleVkSurf *ds)
+{
+    if (g_snap_mode) {
+        return g_snap_mode == 1;
+    }
+    return g_hvk.caps.dbias_float || !ds ||
+           (ds->fmt != VK_FORMAT_D32_SFLOAT && ds->fmt != VK_FORMAT_D32_SFLOAT_S8_UINT);
+}
+
 /* New at each hle_draw_psframe_poll that reads the properties (every 3
  * swaps): the draw path reads its own (skipvsh, vtok, psdbg) at its next draw */
 static unsigned g_prop_gen;
@@ -3517,10 +3535,12 @@ void hle_draw_psframe_poll(uint64_t swap)
     }
     v[0] = 0;
     hle_prop_get("debug.hakux.snap", v);
-    if (g_snap_trunc != !strcmp(v, "trunc")) {
-        g_snap_trunc = !strcmp(v, "trunc");
+    const int snap = !strcmp(v, "trunc") ? 1 : !strcmp(v, "bias") ? 2 : 0;
+    if (g_snap_mode != snap) {
+        g_snap_mode = snap;
         hle_log("hakuX-hle-pipe", "vertex positions: %s",
-                g_snap_trunc ? "each truncated to 1/16 pixel" : "all moved by the rounding bias (1/32 pixel)");
+                snap == 1 ? "each truncated to 1/16 pixel" : snap == 2 ? "all moved by the rounding bias "
+                "(1/32 pixel)" : "truncated where polygon offsets are exact, else moved by the rounding bias");
     }
     v[0] = 0;
     hle_prop_get("debug.hakux.probefocus", v);
@@ -4956,7 +4976,7 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
     /* the target's scale (point sizes, texel edges) and the scaled linear
      * surfaces' (stage_slot); antialiased: texel edges as they are (ff.h) */
     pc.flags |= MIN(rs, 255u) << 16 | MIN(g_hle_rscale, 255u) << 24 |
-                (aax > 1.0f || aay > 1.0f ? HLE_TEXEL_EDGE_FLAG : 0u) | (g_snap_trunc ? HLE_SNAP_TRUNC_FLAG : 0u);
+                (aax > 1.0f || aay > 1.0f ? HLE_TEXEL_EDGE_FLAG : 0u) | (snap_trunc(ds) ? HLE_SNAP_TRUNC_FLAG : 0u);
     if (!g_hvk.caps.bindless) {
         fixed_bind(cb, &pc);            /* the textures a set of the draw's own */
     }

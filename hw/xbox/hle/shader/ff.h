@@ -371,10 +371,15 @@ static inline const char *hle_push_glsl(void)
  * slope per pixel off (nxdk_pgraph_tests' Depth buffer, whose vertices are
  * whole pixels: 437 of 2^24 on its large quad). A position D3D gives is
  * never on the grid (its offset ends in 1/32).
- * debug.hakux.snap=trunc: the truncation (HLE_SNAP_TRUNC_FLAG), for A/B. */
+ * The truncation itself (HLE_SNAP_TRUNC_FLAG) where a polygon offset is
+ * exact (vk/draw.c snap_trunc): the decals' offsets hold there, and the
+ * depths are the NV2A's (nxdk_pgraph_tests' W buffering, the fixed-function
+ * floor: 25 of 2^24 off with the uniform shift). Not a coordinate too large
+ * to have sixteenths (times 16 it may not be a float at all). */
 #define HLE_SNAP_TRUNC_FLAG 8192u
 #define HLE_SUBPIXEL_GLSL(v) \
-    "  " v " = (pc.flags & 8192u) != 0u ? trunc(" v " * 16.0) / 16.0 :\n" \
+    "  " v " = (pc.flags & 8192u) != 0u ?\n" \
+    "      mix(" v ", trunc(" v " * 16.0) / 16.0, lessThan(abs(" v "), vec2(8388608.0))) :\n" \
     "      " v " - 0.03125 * vec2(notEqual(fract(" v " * 16.0), vec2(0.0)));\n"
 
 /* Screen positions v (D3D screen pixels, after HLE_SUBPIXEL_GLSL) at a
