@@ -56,6 +56,42 @@ static Contig g_contig[MAX_CONTIG];
 /* Track freed contiguous pages until reallocation so stale render targets
  * cannot write over memory the game has reused. */
 static uint8_t g_contig_freed[NC_RAM_MAX / NC_PAGE];
+/* ... and how many of each 64 pages are marked: a target's range is asked
+ * about at every draw (nc_mm_contig_freed), and most hold none */
+#define CONTIG_FREED_CHUNK 64u
+static uint8_t g_contig_freed_n[NC_RAM_MAX / NC_PAGE / CONTIG_FREED_CHUNK];
+
+static void contig_freed_mark(uint32_t pa, uint32_t len, bool freed)
+{
+    for (uint32_t p = pa / NC_PAGE, n = len / NC_PAGE; n && p < NC_RAM_MAX / NC_PAGE; p++, n--) {
+        if (g_contig_freed[p] != freed) {
+            __atomic_store_n(&g_contig_freed[p], freed, __ATOMIC_RELAXED);
+            __atomic_store_n(&g_contig_freed_n[p / CONTIG_FREED_CHUNK],
+                             (uint8_t)(g_contig_freed_n[p / CONTIG_FREED_CHUNK] + (freed ? 1 : -1)), __ATOMIC_RELAXED);
+        }
+    }
+}
+
+/* The end of the block each page is in, 0 for a page in none: kept as the
+ * blocks are made and freed (contig_pages), under g_contig_mu. Blocks are
+ * whole pages; should one not be, g_contig_inexact and the blocks are walked. */
+static uint32_t g_contig_page_end[NC_RAM_MAX / NC_PAGE];
+static bool g_contig_inexact;
+
+static void contig_pages(uint32_t pa, uint32_t size, bool live)
+{
+    if ((pa | size) & (NC_PAGE - 1) || (uint64_t)pa + size > NC_RAM_MAX) {
+        __atomic_store_n(&g_contig_inexact, true, __ATOMIC_RELAXED);
+        return;
+    }
+    for (uint32_t p = pa / NC_PAGE; p < (pa + size) / NC_PAGE; p++) {
+        __atomic_store_n(&g_contig_page_end[p], live ? pa + size : 0, __ATOMIC_RELAXED);
+    }
+}
+
+/* ... the whole table again (a state loaded, a reset) */
+static void contig_pages_all(void);
+
 static unsigned g_ncontig;
 /* Protect contiguous allocations and freed-page tracking across the guest
  * and GPU decoder threads. */
@@ -118,12 +154,27 @@ uint32_t nc_mm_contig_end(uint32_t pa, uint32_t limit)
 {
     static NcContigRun runs[MAX_CONTIG];
     static uint64_t scratch[MAX_CONTIG];
+    /* The block holding pa, by page (g_contig_page_end): the renderer asks
+     * for every target at every draw, and the walk of all the blocks was a
+     * quarter of its decode thread's time (NBA Inside Drive 2003). */
     uint32_t end = 0;
+    /* (read without the lock: the answer is as good as one taken a moment
+     * before the blocks change, which the lock doesn't prevent either) */
+    if (!__atomic_load_n(&g_contig_inexact, __ATOMIC_RELAXED)) {
+        end = pa < NC_RAM_MAX ? __atomic_load_n(&g_contig_page_end[pa / NC_PAGE], __ATOMIC_RELAXED) : 0;
+        if (!end || limit <= end) {
+            return end;
+        }
+    }
     pthread_mutex_lock(&g_contig_mu);
-    for (unsigned i = 0; i < g_ncontig && !end; i++) {
-        const uint32_t cpa = g_contig[i].va & ~NC_CONTIG_WINDOW, size = g_contig[i].size;
-        if (pa >= cpa && pa - cpa < size) {
-            end = cpa + size;
+    if (!g_contig_inexact) {
+        end = pa < NC_RAM_MAX ? g_contig_page_end[pa / NC_PAGE] : 0;
+    } else {
+        for (unsigned i = 0; i < g_ncontig && !end; i++) {
+            const uint32_t cpa = g_contig[i].va & ~NC_CONTIG_WINDOW, size = g_contig[i].size;
+            if (pa >= cpa && pa - cpa < size) {
+                end = cpa + size;
+            }
         }
     }
     if (end && limit > end) {
@@ -884,20 +935,33 @@ static uint32_t contig_alloc(NcKernel *k, uint32_t size, uint32_t lo, uint32_t h
     }
     const uint32_t va = NC_CONTIG_WINDOW | pa;
     pthread_mutex_lock(&g_contig_mu);
-    memset(g_contig_freed + pa / NC_PAGE, 0, (size + slack) / NC_PAGE);
+    contig_freed_mark(pa, size + slack, false);
     g_contig[g_ncontig++] = (Contig){va, size, ra, slack, protect};
+    contig_pages(pa, size, true);
     pthread_mutex_unlock(&g_contig_mu);
     return va;
+}
+
+static void contig_pages_all(void)
+{
+    memset(g_contig_page_end, 0, sizeof(g_contig_page_end));
+    g_contig_inexact = false;
+    for (unsigned i = 0; i < g_ncontig; i++) {
+        contig_pages(g_contig[i].va & ~NC_CONTIG_WINDOW, g_contig[i].size, true);
+    }
 }
 
 bool nc_mm_contig_freed(uint32_t pa, uint32_t limit)
 {
     bool freed = false;
-    pthread_mutex_lock(&g_contig_mu);
+    /* (read without the lock, as nc_mm_contig_end's table) */
     for (uint32_t p = pa / NC_PAGE; !freed && p < NC_RAM_MAX / NC_PAGE && (uint64_t)p * NC_PAGE < limit; p++) {
-        freed = g_contig_freed[p];
+        if (!__atomic_load_n(&g_contig_freed_n[p / CONTIG_FREED_CHUNK], __ATOMIC_RELAXED)) {
+            p |= CONTIG_FREED_CHUNK - 1;        /* none in this chunk: on to the next */
+            continue;
+        }
+        freed = __atomic_load_n(&g_contig_freed[p], __ATOMIC_RELAXED);
     }
-    pthread_mutex_unlock(&g_contig_mu);
     return freed;
 }
 
@@ -928,7 +992,8 @@ static void contig_free(NcKernel *k, uint32_t va, uint32_t ra)
     if (c) {
         nc_vm_free_phys(k->vm, va & ~NC_CONTIG_WINDOW, c->size + c->slack);
         pthread_mutex_lock(&g_contig_mu);
-        memset(g_contig_freed + (va & ~NC_CONTIG_WINDOW) / NC_PAGE, 1, (c->size + c->slack) / NC_PAGE);
+        contig_freed_mark(va & ~NC_CONTIG_WINDOW, c->size + c->slack, true);
+        contig_pages(va & ~NC_CONTIG_WINDOW, c->size, false);
         *c = g_contig[--g_ncontig];
         pthread_mutex_unlock(&g_contig_mu);
     } else if (va) {
@@ -1200,6 +1265,7 @@ uint32_t nc_mm_keep_restore(NcKernel *k)
         }
         pthread_mutex_lock(&g_contig_mu);
         g_contig[g_ncontig++] = (Contig){va, size, 0, 0, PAGE_READWRITE};
+        contig_pages(va & ~NC_CONTIG_WINDOW, size, true);
         pthread_mutex_unlock(&g_contig_mu);
         g_kept[g_nkept].va = va;
         g_kept[g_nkept++].len = len;
@@ -1396,6 +1462,7 @@ bool nc_mm_state_load(NcRd *r, unsigned v)
     memset(g_contig, 0, sizeof(g_contig));
     nc_recs_get(r, &nc_rec_Contig, g_contig, sizeof(g_contig[0]), st.ncontig, v);
     g_ncontig = st.ncontig;
+    contig_pages_all();
     pthread_mutex_unlock(&g_contig_mu);
     nc_recs_get(r, &nc_rec_KeptRange, g_kept, sizeof(g_kept[0]), st.nkept, v);
     g_nregions = st.nregions;
@@ -1411,7 +1478,9 @@ void nc_mm_reset(void)
     pthread_mutex_lock(&g_contig_mu);
     memset(g_contig, 0, sizeof(g_contig));
     memset(g_contig_freed, 0, sizeof(g_contig_freed));
+    memset(g_contig_freed_n, 0, sizeof(g_contig_freed_n));
     g_ncontig = 0;
+    contig_pages_all();
     pthread_mutex_unlock(&g_contig_mu);
     g_gpu_instance_end = 0;
     memset(g_kept, 0, sizeof(g_kept));      /* a relaunch's come back from kept.bin, as in a new process */
