@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- A render target that starts inside another target's memory (a surface placed partway into the back buffer) shares its pixels with it: what is drawn into one is seen in the other, also across a 2D blit in between. nxdk_pgraph_tests: the eight Image blit overlap tests and one antialiasing test now match the console (3017 of 3556).
+- A render target that starts inside another target's memory (a surface placed partway into the back buffer) shares its pixels with it: what is drawn into one is seen in the other, also across a 2D blit in between. nxdk_pgraph_tests: the eight Image blit overlap tests now match the console (3015 of 3556, with two tests that vary between runs not counted).
 
 - OutRun 2006: Coast 2 Coast no longer shows a screen of smoke in races (a regression in 0.32.0). A 2D blit's clip rectangle and blend apply only when the blit names a clip or beta object; Direct3D's own blits name the null object there, and every one of them was cut away.
 

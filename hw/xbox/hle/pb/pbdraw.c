@@ -3317,10 +3317,21 @@ static uint32_t target_part(uint32_t pa, uint32_t code, const HleFmtInfo *fi, ui
     return dst->id;
 }
 
+/* Two linear formats whose pixels are the same bits in memory and the same
+ * channels in their images: one format, or the 32-bit pair with and without
+ * alpha. Others of one size (R5G6B5 and X1R5G5B5) are different images of
+ * the same words, and an image copy would convert the colours instead. */
+static bool part_same_bits(uint32_t a, uint32_t b)
+{
+    const bool a8 = a == HLE_XFMT_LIN_A8R8G8B8 || a == HLE_XFMT_LIN_X8R8G8B8;
+    const bool b8 = b == HLE_XFMT_LIN_A8R8G8B8 || b == HLE_XFMT_LIN_X8R8G8B8;
+    return a == b || (a8 && b8);
+}
+
 /* A linear colour target whose memory starts inside another's of its pitch
- * and pixel size (past its first pixel): the two are one memory to the NV2A,
- * two images here. The one it lies in, the latest written, with o's first
- * pixel there at (*x, *y); NULL if none. */
+ * and pixel format (past its first pixel): the two are one memory to the
+ * NV2A, two images here. The one it lies in, the latest written, with o's
+ * first pixel there at (*x, *y); NULL if none. */
 static PbObj *part_whole(const PbObj *o, uint32_t *x, uint32_t *y)
 {
     const HleFmtInfo *fi = o->d.pitch && !o->cube && !o->d.parent ? hle_fmt_info(o->d.xfmt) : NULL;
@@ -3332,7 +3343,8 @@ static PbObj *part_whole(const PbObj *o, uint32_t *x, uint32_t *y)
         PbObj *t = &g_pd.objs[i];
         const HleFmtInfo *ti = t->id && !t->cube && !t->d.parent && t->d.pitch == o->d.pitch ?
                                hle_fmt_info(t->d.xfmt) : NULL;
-        if (ti && !(ti->flags & (HLE_FI_DEPTH | HLE_FI_DXT)) && ti->bpp == fi->bpp && t->d.pa < o->d.pa &&
+        if (ti && !(ti->flags & (HLE_FI_DEPTH | HLE_FI_DXT)) && part_same_bits(t->d.xfmt, o->d.xfmt) &&
+            t->d.pa < o->d.pa &&
             o->d.pa - t->d.pa < t->d.pitch * t->d.h && t->written && !obj_superseded(t) &&
             !past_block(&t->d) && (!c || t->written > c->written)) {
             c = t;
@@ -3349,16 +3361,21 @@ static PbObj *part_whole(const PbObj *o, uint32_t *x, uint32_t *y)
 
 /* The pixels the part p and the whole c share, copied from one image to the
  * other (out: p's into c): p's rows from c's column x on, and what of them
- * runs past c's right edge, which is the start of c's next row. */
+ * runs past the end of c's row in memory (its pitch: an image narrower than
+ * its pitch has padding there, no pixels), which is the start of c's next
+ * row. */
 static void part_copy(PbObj *p, PbObj *c, uint32_t x, uint32_t y, bool out)
 {
+    const HleFmtInfo *fi = hle_fmt_info(c->d.xfmt);
+    const uint32_t row = c->d.pitch / (fi->bpp / 8);    /* a row of c's memory, in pixels */
     const uint32_t w0 = MIN(p->d.w, c->d.w - x), h0 = MIN(p->d.h, c->d.h - y);
-    const uint32_t w1 = MIN(p->d.w - w0, c->d.w), h1 = c->d.h - y > 1 ? MIN(p->d.h, c->d.h - y - 1) : 0;
+    const uint32_t x1 = MIN(row - x, p->d.w);           /* p's column at c's next row's first */
+    const uint32_t w1 = MIN(p->d.w - x1, c->d.w), h1 = c->d.h - y > 1 ? MIN(p->d.h, c->d.h - y - 1) : 0;
     HleCmdCopy *k = begin(HLE_OP_COPY, sizeof(*k));
     memset(k, 0, sizeof(*k));
     k->src = out ? p->id : c->id;
     k->dst = out ? c->id : p->id;
-    const HleRect pr[2] = { { 0, 0, (int32_t)w0, (int32_t)h0 }, { (int32_t)w0, 0, (int32_t)(w0 + w1), (int32_t)h1 } };
+    const HleRect pr[2] = { { 0, 0, (int32_t)w0, (int32_t)h0 }, { (int32_t)x1, 0, (int32_t)(x1 + w1), (int32_t)h1 } };
     const int32_t cx[2] = { (int32_t)x, 0 }, cy[2] = { (int32_t)y, (int32_t)y + 1 };
     for (unsigned i = 0; i < 2; i++) {
         if (pr[i].x2 <= pr[i].x1 || pr[i].y2 <= pr[i].y1) {
@@ -3392,6 +3409,13 @@ static void part_in(PbObj *o, bool full)
 {
     uint32_t x, y;
     PbObj *c = part_whole(o, &x, &y);
+    if (c && o->written > o->part_w && o->written > c->written) {
+        /* written since the two matched, and after the whole was (a 2D copy
+         * into it while it was not bound): those pixels are the newer */
+        coh_first_write(c, false);
+        part_copy(o, c, x, y, true);
+        return;
+    }
     if (!c || c->written == o->part_seq) {
         return;
     }
