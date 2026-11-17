@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- OutRun 2006: Coast 2 Coast no longer shows a screen of smoke in races (a regression in 0.32.0). A 2D blit's clip rectangle and blend apply only when the blit names a clip or beta object; Direct3D's own blits name the null object there, and every one of them was cut away.
+
 ## linux-v0.33.0 (Linux, aarch64 and x86-64, and Android)
 
 Potato mode is here, designed with lower-powered handhelds in mind — especially the legendary OGU. NBA Inside Drive 2003 has been the test game of choice during the performance work.

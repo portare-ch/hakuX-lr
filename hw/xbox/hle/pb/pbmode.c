@@ -518,6 +518,15 @@ static uint32_t ctx_base(uint32_t handle)
     return inst ? dma_base(inst) : 0;
 }
 
+/* The class of the object a context method names, 0 if none. D3D binds its
+ * null object (NV01_NULL, class 0x30) where a blit has no clip, pattern or
+ * beta: a handle there is not by itself a context in effect. */
+static uint32_t ctx_class(uint32_t handle)
+{
+    uint32_t inst = handle ? ramht_find(handle) : 0;
+    return inst ? pramin(inst) & 0xFF : 0;
+}
+
 uint32_t hle_pb_dma_base(uint32_t handle)
 {
     return ctx_base(handle);
@@ -602,8 +611,11 @@ static void blit(const uint32_t *r)
     const uint32_t dbase = (ctx_base(s[0x188 >> 2]) + s[0x30C >> 2]) & 0x07FFFFFFu;
     uint32_t ix = pin & 0xFFFF, iy = pin >> 16, ox = pout & 0xFFFF, oy = pout >> 16;
     /* the clip rectangle, when the blit has one (SET_CONTEXT_CLIP_RECTANGLE,
-     * 0x188): what of the destination lies in it */
-    if (r[0x188 >> 2]) {
+     * 0x188, naming a clip object): what of the destination lies in it. D3D's
+     * own blits name the null object there: OutRun 2006's copies of its
+     * 160 x 120 effect buffer were all cut by a rectangle never set, and the
+     * race was drawn under the stale buffer (a screen of smoke). */
+    if (ctx_class(r[0x188 >> 2]) == NV_CLASS_CLIP2D) {
         const uint32_t cx = g_pb.clip2d[0] & 0xFFFF, cy = g_pb.clip2d[0] >> 16;
         const uint32_t cw = g_pb.clip2d[1] & 0xFFFF, ch = g_pb.clip2d[1] >> 16;
         const uint32_t x0 = MAX(ox, cx), y0 = MAX(oy, cy);
@@ -621,7 +633,7 @@ static void blit(const uint32_t *r)
     }
     /* SET_OPERATION (0x2FC): 2 BLEND_AND, by the beta factor of the context
      * bound (0x194); the others copy */
-    g_pb.blit_blend = r[0x2FC >> 2] == 2 && r[0x194 >> 2];
+    g_pb.blit_blend = r[0x2FC >> 2] == 2 && ctx_class(r[0x194 >> 2]) == NV_CLASS_BETA;
     /* As the NV2A copies (blitclip.c): rows no longer than the narrower
      * pitch, the destination cut at the limit of the GPU tile it starts in.
      * WWE WrestleMania 21 blits 1023 x 511 at pitch 4096 to its 640 x 480
