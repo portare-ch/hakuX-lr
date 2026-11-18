@@ -128,7 +128,21 @@ static bool protect_runs(uint32_t pa, uint32_t len, bool ro)
     bool any = false;
     const uint64_t end = ram_end(pa, len);
     uint32_t run_pa = 0, run_n = 0;
+    const uint64_t all = 0x0101010101010101ull * ro;
     for (uint64_t a = pa & ~(uint64_t)(NC_PAGE - 1); a < end; a += NC_PAGE) {
+        /* eight pages that have it already, in one look (most of a range
+         * that is tested again and again, a texture or a vertex buffer) */
+        while (!run_n && end - a >= 8 * NC_PAGE) {
+            uint64_t w;
+            memcpy(&w, &g_vm->wp[a / NC_PAGE], sizeof(w));
+            if (w != all) {
+                break;
+            }
+            a += 8 * NC_PAGE;
+        }
+        if (a >= end) {
+            break;
+        }
         if (g_vm->wp[a / NC_PAGE] == ro) {
             nc_vm_protect_pages(g_vm, run_pa, run_n, ro);
             run_n = 0;
@@ -150,6 +164,22 @@ static bool hdirty_take(uint32_t pa, uint32_t len, bool clear)
     bool any = false;
     const uint64_t end = ram_end(pa, len);
     for (uint64_t a = pa & ~(uint64_t)(NC_PAGE - 1); g_hdirty && a < end; a += NC_PAGE) {
+        /* eight pages with none set, in one look: an acquiring load a page
+         * (LDARB on ARM64) was most of this function there, 15% of the
+         * decoder's samples in Project Gotham Racing on a Snapdragon 8 Gen
+         * 2. A page set meanwhile is seen by the next call, as one set just
+         * after the page's own load was. */
+        while (end - a >= 8 * NC_PAGE) {
+            uint64_t w;
+            memcpy(&w, &g_hdirty[a / NC_PAGE], sizeof(w));
+            if (w) {
+                break;
+            }
+            a += 8 * NC_PAGE;
+        }
+        if (a >= end) {
+            break;
+        }
         if (__atomic_load_n(&g_hdirty[a / NC_PAGE], __ATOMIC_ACQUIRE)) {
             any = true;
             if (clear) {
