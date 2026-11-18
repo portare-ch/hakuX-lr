@@ -4,6 +4,8 @@
 
 - The `patches` submodule follows hakux-lr-patches' `main` (`git submodule update --init --remote patches`), so an Android build ships the current mods and cheats, not the ones of the commit last recorded here. The recorded commit is brought up to date: it adds the Need for Speed Underground and Underground 2 patches.
 
+- **Steam Deck setup** — Add a SteamOS install path with RetroArch Flatpak, a Steam shortcut and EmuDeck games-folder detection. Setup runs without requesting root; games still need KVM access. `--retroarch flatpak|appimage` selects either package on other distributions, and `tools/linux/hakux-steamdeck.desktop` provides a double-click installer. The launcher also follows game symlinks. Not yet tested on a Steam Deck.
+
 ## linux-v0.33.3 (Linux, aarch64 and x86-64, and Android)
 
 Fix an extra frame of display delay in games that queue multiple completed frames, including **Need for Speed Underground 2**, **Project Gotham Racing 2**, **Burnout 3** and **Midtown Madness 3** (#254).
