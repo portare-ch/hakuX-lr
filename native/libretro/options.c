@@ -20,10 +20,14 @@
 
 #define NEXT " Restart the game to apply."
 
+/* Audio Processing's Auto: Full DSP where the build has the DSP JIT, except
+ * at the Potato accuracy level. The DSP's frame thread is the core's largest
+ * cost after the guest CPU (a third to half of a core on a Snapdragon 8 Gen
+ * 2 in games), more than a low-end device has left. */
 #if NC_HAVE_DSP_JIT
-#define AUDIO_PROCESSING_DEFAULT "dsp"
+#define AUDIO_PROCESSING_AUTO_DSP 1
 #else
-#define AUDIO_PROCESSING_DEFAULT "fast"
+#define AUDIO_PROCESSING_AUTO_DSP 0
 #endif
 
 #if defined(__x86_64__) && !defined(__ANDROID__)
@@ -52,7 +56,8 @@ static struct retro_core_option_v2_definition g_defs[OPT_COUNT + 1] = {
         "Selects graphics accuracy trade-offs. Potato permits approximations for performance and may "
         "cause visual errors or compatibility problems. Medium is recommended for general play. High "
         "enables all implemented graphics accuracy features supported by the device. Custom uses the "
-        "individual settings (Combiner Precision). Render scale and audio settings are separate." NEXT,
+        "individual settings (Combiner Precision). Render scale is separate; Audio Processing's Auto "
+        "uses Fast at Potato." NEXT,
         NULL, NULL,
         {{"potato", "Potato - Performance"}, {"medium", "Medium - Balanced"}, {"high", "High - Accuracy"},
          {"custom", "Custom - Individual settings"}, {NULL, NULL}},
@@ -136,10 +141,12 @@ static struct retro_core_option_v2_definition g_defs[OPT_COUNT + 1] = {
     [OPT_PROCESSING] = {
         "hakux_audio_processing", "Audio Processing", NULL,
         "Full DSP runs the game's Xbox reverb and other audio effects with stereo output. "
-        "It uses more CPU. Fast plays the dry mix; try it if Full DSP crackles or runs slowly." NEXT,
+        "It uses more CPU. Fast plays the dry mix; try it if Full DSP crackles or runs slowly. "
+        "Auto uses Fast at the Potato accuracy level and where Full DSP is not available, "
+        "Full DSP otherwise." NEXT,
         NULL, NULL,
-        {{"fast", "Fast (dry mix)"}, {"dsp", "Full DSP (experimental)"}, {NULL, NULL}},
-        AUDIO_PROCESSING_DEFAULT},
+        {{"auto", "Auto"}, {"fast", "Fast (dry mix)"}, {"dsp", "Full DSP (experimental)"}, {NULL, NULL}},
+        "auto"},
     [OPT_PRECISION] = {
         "hakux_combiner_precision", "Combiner Precision", NULL,
         "Applies only when Accuracy Level is Custom. Accurate rounds pixel-shader combiner outputs "
@@ -351,13 +358,15 @@ void nc_lr_options_apply(void)
     nc_xblc_set_gate(gate);
     const char *resampler = g_defs[OPT_RESAMPLER].values[g_applied[OPT_RESAMPLER]].value;
     nc_dev_apu_set_resampler(resampler);
-    const bool dsp = !strcmp(g_defs[OPT_PROCESSING].values[g_applied[OPT_PROCESSING]].value, "dsp");
-    nc_dev_apu_set_dsp(dsp);
     nc_hle_set_frame_pace(pace_depth(g_applied[OPT_PACE]));
     /* The accuracy level, resolved once for the run (accuracy.h). Custom:
      * the individual settings, which are Combiner Precision and, for the
      * rest, every path on, as before the level existed. */
     const HleAccuracyLevel level = (HleAccuracyLevel)g_applied[OPT_ACCURACY];
+    const char *processing = g_defs[OPT_PROCESSING].values[g_applied[OPT_PROCESSING]].value;
+    const bool dsp = !strcmp(processing, "dsp") ||
+                     (!strcmp(processing, "auto") && AUDIO_PROCESSING_AUTO_DSP && level != HLE_ACCURACY_POTATO);
+    nc_dev_apu_set_dsp(dsp);
     HleGraphicsAccuracy custom = hle_accuracy_default();
     custom.precise_combiners = !strcmp(g_defs[OPT_PRECISION].values[g_applied[OPT_PRECISION]].value, "enabled");
     const HleGraphicsAccuracy acc = hle_accuracy_resolve(level, &custom);
