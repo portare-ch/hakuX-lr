@@ -176,6 +176,9 @@ typedef struct PbObj {
     bool display;                       /* shown: the front-buffer path keeps its memory */
     uint64_t fb_wb_w, fb_wb_v;          /* a frame buffer read back for a copy from it
                                            (hle_pbd_copy_begin): written then, its landing */
+    uint64_t part_seq, part_w;          /* a target inside another's memory (part_whole): the
+                                           other's written and its own when the two images
+                                           last held the same pixels there */
 } PbObj;
 
 /* A texture the stage registers described: the back end's image of it,
@@ -1312,6 +1315,9 @@ static void mode_sync(void)
 
 static uint64_t z_mem_sum(const PbObj *o);
 static void coh_drawn(PbObj *o);
+static void part_in(PbObj *o, bool full);
+static void part_out(uint32_t id);
+static void part_flush(void);
 static void ds_twin_clear(void);
 static void coh_first_write(PbObj *o, bool full);
 static bool coh_managed(const PbObj *o, uint32_t *len);
@@ -1408,6 +1414,7 @@ static void sync_rt(void)
     }
     if (rt != g_pd.rt || ds != g_pd.ds) {
         if (rt != g_pd.rt) {
+            part_out(g_pd.rt);
             writeback(g_pd.rt);
         }
         g_pd.rt = rt;
@@ -1491,6 +1498,7 @@ static void rt_first_write(bool full)
         PbObj *o = obj_of(g_pd.rt);
         if (o) {
             coh_first_write(o, full);
+            part_in(o, full);
         }
     }
 }
@@ -2753,6 +2761,7 @@ bool hle_pbd_blit_images(uint32_t sbase, uint32_t sp, uint32_t dbase, uint32_t d
     if (!g_pd.on || !g_pd.device) {
         return false;
     }
+    part_flush();
     uint32_t src = object_at(sbase), dst = object_at(dbase);
     PbObj *so = obj_of(src), *dd = obj_of(dst);
     if (g_dlog_left > 0) {
@@ -3306,6 +3315,145 @@ static uint32_t target_part(uint32_t pa, uint32_t code, const HleFmtInfo *fi, ui
     dst->written = ++g_pd.wseq;
     coh_drawn(dst);
     return dst->id;
+}
+
+/* Two linear formats whose pixels are the same bits in memory and the same
+ * channels in their images: one format, or the 32-bit pair with and without
+ * alpha. Others of one size (R5G6B5 and X1R5G5B5) are different images of
+ * the same words, and an image copy would convert the colours instead. */
+static bool part_same_bits(uint32_t a, uint32_t b)
+{
+    const bool a8 = a == HLE_XFMT_LIN_A8R8G8B8 || a == HLE_XFMT_LIN_X8R8G8B8;
+    const bool b8 = b == HLE_XFMT_LIN_A8R8G8B8 || b == HLE_XFMT_LIN_X8R8G8B8;
+    return a == b || (a8 && b8);
+}
+
+/* A linear colour target whose memory starts inside another's of its pitch
+ * and pixel format (past its first pixel): the two are one memory to the
+ * NV2A, two images here. The one it lies in, the latest written, with o's
+ * first pixel there at (*x, *y); NULL if none. */
+static PbObj *part_whole(const PbObj *o, uint32_t *x, uint32_t *y)
+{
+    const HleFmtInfo *fi = o->d.pitch && !o->cube && !o->d.parent ? hle_fmt_info(o->d.xfmt) : NULL;
+    if (!fi || (fi->flags & (HLE_FI_DEPTH | HLE_FI_DXT)) || fi->bpp < 8) {
+        return NULL;
+    }
+    PbObj *c = NULL;
+    for (unsigned i = 0; i < g_pd.nobjs; i++) {
+        PbObj *t = &g_pd.objs[i];
+        const HleFmtInfo *ti = t->id && !t->cube && !t->d.parent && t->d.pitch == o->d.pitch ?
+                               hle_fmt_info(t->d.xfmt) : NULL;
+        if (ti && !(ti->flags & (HLE_FI_DEPTH | HLE_FI_DXT)) && part_same_bits(t->d.xfmt, o->d.xfmt) &&
+            t->d.pa < o->d.pa &&
+            o->d.pa - t->d.pa < t->d.pitch * t->d.h && t->written && !obj_superseded(t) &&
+            !past_block(&t->d) && (!c || t->written > c->written)) {
+            c = t;
+        }
+    }
+    const uint32_t bytes = fi->bpp / 8, rel = c ? o->d.pa - c->d.pa : 0;
+    if (!c || rel % o->d.pitch % bytes || rel % o->d.pitch / bytes >= c->d.w) {
+        return NULL;
+    }
+    *x = rel % o->d.pitch / bytes;
+    *y = rel / o->d.pitch;
+    return c;
+}
+
+/* The pixels the part p and the whole c share, copied from one image to the
+ * other (out: p's into c): p's rows from c's column x on, and what of them
+ * runs past the end of c's row in memory (its pitch: an image narrower than
+ * its pitch has padding there, no pixels), which is the start of c's next
+ * row. */
+static void part_copy(PbObj *p, PbObj *c, uint32_t x, uint32_t y, bool out)
+{
+    const HleFmtInfo *fi = hle_fmt_info(c->d.xfmt);
+    const uint32_t row = c->d.pitch / (fi->bpp / 8);    /* a row of c's memory, in pixels */
+    const uint32_t w0 = MIN(p->d.w, c->d.w - x), h0 = MIN(p->d.h, c->d.h - y);
+    const uint32_t x1 = MIN(row - x, p->d.w);           /* p's column at c's next row's first */
+    const uint32_t w1 = MIN(p->d.w - x1, c->d.w), h1 = c->d.h - y > 1 ? MIN(p->d.h, c->d.h - y - 1) : 0;
+    HleCmdCopy *k = begin(HLE_OP_COPY, sizeof(*k));
+    memset(k, 0, sizeof(*k));
+    k->src = out ? p->id : c->id;
+    k->dst = out ? c->id : p->id;
+    const HleRect pr[2] = { { 0, 0, (int32_t)w0, (int32_t)h0 }, { (int32_t)x1, 0, (int32_t)(x1 + w1), (int32_t)h1 } };
+    const int32_t cx[2] = { (int32_t)x, 0 }, cy[2] = { (int32_t)y, (int32_t)y + 1 };
+    for (unsigned i = 0; i < 2; i++) {
+        if (pr[i].x2 <= pr[i].x1 || pr[i].y2 <= pr[i].y1) {
+            continue;
+        }
+        const unsigned n = k->nrects++;
+        if (out) {
+            k->rect[n] = pr[i];
+            k->x[n] = cx[i];
+            k->y[n] = cy[i];
+        } else {
+            k->rect[n] = (HleRect){ cx[i], cy[i], cx[i] + pr[i].x2 - pr[i].x1, cy[i] + pr[i].y2 - pr[i].y1 };
+            k->x[n] = pr[i].x1;
+            k->y[n] = pr[i].y1;
+        }
+    }
+    hle_fe_commit();
+    PbObj *d = out ? c : p;
+    d->written = ++g_pd.wseq;
+    coh_drawn(d);
+    p->part_seq = c->written;
+    p->part_w = p->written;
+}
+
+/* Before the first write into the bound target o since its bind: what the
+ * target it lies in was given since the two last matched (full: all of o is
+ * about to be cleared). nxdk_pgraph_tests' Image blit draws a quad into a
+ * surface that starts at (64, 64) of its back buffer; in an image of its own
+ * and nowhere else, the quad was never on the screen. */
+static void part_in(PbObj *o, bool full)
+{
+    uint32_t x, y;
+    PbObj *c = part_whole(o, &x, &y);
+    if (c && o->written > o->part_w && o->written > c->written) {
+        /* written since the two matched, and after the whole was (a 2D copy
+         * into it while it was not bound): those pixels are the newer */
+        coh_first_write(c, false);
+        part_copy(o, c, x, y, true);
+        return;
+    }
+    if (!c || c->written == o->part_seq) {
+        return;
+    }
+    if (full) {
+        o->part_seq = c->written;
+        return;
+    }
+    coh_first_write(c, false);              /* its memory's newer bytes first */
+    part_copy(o, c, x, y, false);
+}
+
+/* The target id is unbound: what was drawn into it goes into the one it
+ * lies in. */
+static void part_out(uint32_t id)
+{
+    PbObj *o = id ? obj_of(id) : NULL;
+    uint32_t x, y;
+    PbObj *c = o && o->written > o->part_w ? part_whole(o, &x, &y) : NULL;
+    if (!c) {
+        return;
+    }
+    coh_first_write(c, false);
+    part_copy(o, c, x, y, true);
+}
+
+/* Before a 2D copy: the surface registers are taken at the next draw, so a
+ * target the title has left may still be the bound one here. What it holds
+ * for the one it lies in goes there before the copy reads or writes that
+ * memory, and comes back from it at its next write (nxdk_pgraph_tests'
+ * DirtyOverlappedDestSurf blits over the back buffer right after drawing
+ * into a surface inside it: the surface's pixels went over the blit). */
+static void part_flush(void)
+{
+    PbObj *o = obj_of(g_pd.rt);
+    if (o && o->written > o->part_w) {
+        part_out(o->id);
+        g_pd.rt_fresh = true;
+    }
 }
 
 /* Count writes to fully covered depth-target pages. Ignore shared edge
@@ -5793,6 +5941,9 @@ uint64_t hle_pbd_copy_begin(uint32_t slo, uint32_t sp, uint32_t dlo, uint32_t dp
     const uint32_t s0 = (uint32_t)MIN((int64_t)slo, (int64_t)slo + sl), s1 = (uint32_t)MAX((int64_t)slo, (int64_t)slo + sl) + row;
     const uint32_t d0 = (uint32_t)MIN((int64_t)dlo, (int64_t)dlo + dl), d1 = (uint32_t)MAX((int64_t)dlo, (int64_t)dlo + dl) + row;
     coh_adopt();
+    if (g_pd.device) {
+        part_flush();
+    }
     uint32_t len;
     PbObj *rd = dbase && g_pd.device ? obj_of(object_at(dbase)) : NULL;
     if (rd && rd->d.pitch && !coh_managed(rd, &len)) {

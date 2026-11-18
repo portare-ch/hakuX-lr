@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- A render target that starts inside another target's memory (a surface placed partway into the back buffer) shares its pixels with it: what is drawn into one is seen in the other, also across a 2D blit in between. nxdk_pgraph_tests: the eight Image blit overlap tests now match the console (3015 of 3556, with two tests that vary between runs not counted).
+
 ## linux-v0.33.1 (Linux, aarch64 and x86-64, and Android)
 
 Fix rendering in **OutRun 2** and **OutRun 2006: Coast 2 Coast**. A regression introduced in v0.32.0 could leave races covered in persistent smoke.
