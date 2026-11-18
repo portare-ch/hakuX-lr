@@ -47,6 +47,52 @@ Back up your [saves](#saves) before changing versions.
 
 </details>
 
+<a id="play-on-steam-deck"></a>
+
+### Steam Deck (SteamOS)
+
+The Deck runs the AMD64 core, which uses KVM. SteamOS has KVM ready, and
+nothing here needs a root password. This setup is new and has not been
+tried on a Deck by the project yet: please
+[report](https://github.com/portare-ch/hakuX-lr/issues) how it goes.
+
+1. Switch to Desktop Mode: **Steam → Power → Switch to Desktop**.
+2. Open **Konsole** and run:
+
+   ```sh
+   curl -fsSLO https://raw.githubusercontent.com/portare-ch/hakuX-lr/master/tools/linux/setup-hakux.sh
+   sh setup-hakux.sh
+   ```
+
+   Or download
+   [hakux-steamdeck.desktop](https://raw.githubusercontent.com/portare-ch/hakuX-lr/master/tools/linux/hakux-steamdeck.desktop)
+   (right-click, **Save Link As**), open it and choose **Execute**: it runs
+   the same script in a window.
+3. Copy your Xbox `.iso` or DVD `.chd` files to the games folder the script
+   names at the end: `~/roms/xbox`, or EmuDeck's `Emulation/roms/xbox` when
+   that exists (also on an SD card).
+4. Return to Gaming Mode. **hakuX (Xbox)** is in your library under
+   **Non-Steam**. Start it, choose **Load Content** and pick a game.
+
+The script installs RetroArch as a Flatpak from Flathub for your user (or
+uses the one you have, as EmuDeck's), downloads the latest hakuX-lr release
+and adds it to Steam. hakuX gets its own RetroArch configuration in
+`~/.local/share/hakux-lr`, so an existing RetroArch setup is left alone.
+Run the script again to update the core.
+
+- **RetroArch's menu in a game:** hold **L1 + R1 + Start + Select**.
+- **If Steam was not running** during setup, add it yourself in Desktop Mode:
+  **Steam → Add a Game → Add a Non-Steam Game → hakuX (Xbox)**.
+- **If a game will not start**, the reason is in
+  `~/.local/share/hakux-lr/logs/hakux.log`; attach it to your report. The
+  script warns when `/dev/kvm` is not open to your user.
+- **Without Flatpak**, `sh setup-hakux.sh --retroarch appimage` uses
+  RetroArch's own AppImage instead, kept in the same folder.
+- **To remove it**, delete `~/.local/share/hakux-lr`,
+  `~/.local/bin/start-hakux.sh` and
+  `~/.local/share/applications/hakux-lr.desktop`, and remove the entry in
+  Steam.
+
 <a id="play-on-other-aarch64-linux-systems"></a>
 
 ### RetroArch on other Linux systems
@@ -86,8 +132,10 @@ RetroArch.
 
 The setup script installs RetroArch, downloads the latest stable hakuX-lr
 release for your CPU, and checks KVM access on AMD64. It supports pacman,
-apt, dnf and zypper. It creates a separate RetroArch configuration for
-hakuX, leaving your existing settings alone.
+apt, dnf and zypper; `--retroarch flatpak` or `--retroarch appimage` use
+RetroArch's Flatpak or AppImage instead of a distribution package. It
+creates a separate RetroArch configuration for hakuX, leaving your existing
+settings alone.
 
 ```sh
 curl -fsSLO https://raw.githubusercontent.com/portare-ch/hakuX-lr/master/tools/linux/setup-hakux.sh

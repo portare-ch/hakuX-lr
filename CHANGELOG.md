@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Steam Deck setup** — `tools/linux/setup-hakux.sh` now works on SteamOS without root: it installs RetroArch as a Flatpak for the user (or uses the one already there), adds hakuX to the Steam library so it starts from Gaming Mode, and looks for games in EmuDeck's `roms/xbox` folder. `--retroarch flatpak` and `--retroarch appimage` choose RetroArch's Flatpak or its AppImage on any distribution, and `tools/linux/hakux-steamdeck.desktop` runs the script from a double-click. Not yet tried on a Deck. The launcher now also finds games that are symbolic links.
+
 ## linux-v0.33.3 (Linux, aarch64 and x86-64, and Android)
 
 Fix an extra frame of display delay in games that queue multiple completed frames, including **Need for Speed Underground 2**, **Project Gotham Racing 2**, **Burnout 3** and **Midtown Madness 3** (#254).
