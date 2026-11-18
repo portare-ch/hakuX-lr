@@ -41,6 +41,16 @@ elseif(HAKUX_CPU STREQUAL "kvm")
 else()
   message(FATAL_ERROR "HAKUX_CPU must be fex or kvm, not ${HAKUX_CPU}")
 endif()
+# x86-64: the core is compiled for SSE4.1. The base x86-64 has no rounding
+# instruction, so every floor, ceil and trunc was a call into a software
+# routine: floorf alone was 7% of the core's samples in Project Gotham Racing
+# 2 (the voice processor rounds each sample), and with ROUNDSS inline the two
+# audio threads went from 37.6% to 28.1% of a core there. Every CPU the KVM
+# backend runs on has it: TSC scaling starts with Skylake and Zen 2, SSE4.1
+# with Penryn and Bulldozer.
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
+  add_compile_options(-msse4.1)
+endif()
 if(NOT ANDROID)
   target_compile_definitions(nc_platform INTERFACE _GNU_SOURCE)
 endif()

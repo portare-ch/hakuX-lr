@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **AMD64: less CPU for audio** — The x86-64 core is now built for SSE4.1. The base x86-64 instruction set has no rounding instruction, so each `floor` was a call into a software routine, and the audio voice processor rounds every sample. In a Project Gotham Racing 2 race the two audio threads went from 37.6% to 28.1% of a CPU core. Every CPU the KVM backend supports has SSE4.1.
+
 - The `patches` submodule follows hakux-lr-patches' `main` (`git submodule update --init --remote patches`), so an Android build ships the current mods and cheats, not the ones of the commit last recorded here. The recorded commit is brought up to date: it adds the Need for Speed Underground and Underground 2 patches.
 
 - **Steam Deck setup** — Add a SteamOS install path with RetroArch Flatpak, a Steam shortcut and EmuDeck games-folder detection. Setup runs without requesting root; games still need KVM access. `--retroarch flatpak|appimage` selects either package on other distributions, and `tools/linux/hakux-steamdeck.desktop` provides a double-click installer. The launcher also follows game symlinks. Not yet tested on a Steam Deck.
