@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Need for Speed Underground 2: menu sounds no longer click and cut the sound out for a moment (a regression in 0.25). A voice's low-pass filter took DirectSound's "not filtered" setting as a damping at which the filter is unstable, and such a voice ran off to infinity, silencing the mix until it ended. Any game whose sounds use that default was affected.
+
 - A render target that starts inside another target's memory (a surface placed partway into the back buffer) shares its pixels with it: what is drawn into one is seen in the other, also across a 2D blit in between. nxdk_pgraph_tests: the eight Image blit overlap tests now match the console (3015 of 3556, with two tests that vary between runs not counted).
 
 ## linux-v0.33.1 (Linux, aarch64 and x86-64, and Android)
