@@ -218,8 +218,8 @@ or [retroarch.com](https://www.retroarch.com/?page=platforms).
    `.iso` or `.chd` file.
 
 Saves are kept in `hdd/` under RetroArch's **Save Files** directory. The
-DSP JIT is Linux-only, so **Audio Processing** defaults to **Fast** (no Xbox
-reverb or effects); **Full DSP** runs on a slower interpreter. Save states,
+DSP JIT is Linux-only, so **Audio Processing**'s **Auto** is **Fast** here (no
+Xbox reverb or effects); **Full DSP** runs on a slower interpreter. Save states,
 rewind and run-ahead are not supported. The core logs to Android's log
 (`adb logcat`, tags starting with `hakuX`); include it when you report a
 problem.
@@ -297,9 +297,9 @@ take effect immediately.
 | Render Scale | The default is **2x**. Try **1x** if a game runs slowly. Higher values sharpen the picture but need more GPU power. |
 | Screen Format | Choose **Widescreen** for games that support it. Set RetroArch's aspect ratio to **Core provided**. |
 | Crop Overscan | On by default to hide borders around the picture. Turn it off to show the full frame. |
-| Accuracy Level | Selects graphics accuracy trade-offs; see the table below. **Custom** is the default for now and keeps Combiner Precision as you set it. Render scale and audio are separate settings. Restart the game after changing it. |
+| Accuracy Level | Selects graphics accuracy trade-offs; see the table below. **Custom** is the default for now and keeps Combiner Precision as you set it. Render scale is a separate setting; Audio Processing's **Auto** uses Fast at Potato. Restart the game after changing it. |
 | Combiner Precision | Used only when Accuracy Level is **Custom**. **Accurate** is the default on AMD64 Linux; **Fast** on ARM64 Linux and Android. Fast omits 9-bit combiner rounding to reduce GPU work. Restart the game after changing it. |
-| Audio Processing | Defaults to **Full DSP (experimental)**, which runs Xbox audio effects. Try **Fast** if audio crackles or a game runs slowly. |
+| Audio Processing | Defaults to **Auto**: **Full DSP (experimental)**, which runs Xbox audio effects, except at the **Potato** accuracy level and on Android, where it is **Fast** (the dry mix, much less CPU). Choose **Fast** yourself if audio crackles or a game runs slowly. Restart the game after changing it. |
 | Audio Resampler | Defaults to **Sinc**. Try **Linear** to reduce CPU use at the cost of some audio quality. |
 | Console Memory | **64 MB** (default), **128 MB**, or **256 MB**. Extra RAM is available to homebrew and compatible games. Most games keep their 64 MB limit unless the patch option below is enabled. Restart the game after changing it. |
 | Patch Games for Console Memory | Off by default. Removes the game's 64 MB limit when using 128 MB or 256 MB of console RAM. Some games may not work with extra memory. Game files are not changed. Restart the game after changing it. |
