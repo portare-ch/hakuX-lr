@@ -165,7 +165,8 @@ or `--core` to install a specific release or local build; see
 
 The AMD64 build uses Linux KVM and requires kernel 5.16+, TSC scaling,
 and UMIP. AMD Zen 2 and newer CPUs meet the CPU requirements; Intel KVM
-can provide UMIP in software.
+can provide UMIP in software. The core is built for SSE4.1, which every
+CPU with TSC scaling has.
 
 **Ubuntu 22.04:** Its glibc is compatible, but the original 5.15 kernel
 is too old. Check with `uname -r` and use kernel 5.16 or newer. Ubuntu's

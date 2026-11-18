@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **AMD64: less CPU for audio** — The x86-64 core is now built for SSE4.1. The base x86-64 instruction set has no rounding instruction, so each `floor` was a call into a software routine, and the audio voice processor rounds every sample. In a Project Gotham Racing 2 race the two audio threads went from 37.6% to 28.1% of a CPU core. Every CPU the KVM backend supports has SSE4.1.
+
 - **Audio Processing: Auto** — The new default. It uses **Fast** at the **Potato** accuracy level and **Full DSP** otherwise (Fast on Android, as before). Full DSP's audio thread is the core's largest cost after the emulated CPU: a third to half of a CPU core on a Snapdragon 8 Gen 2 in games, more than a low-end handheld has to spare. An explicit Fast or Full DSP is kept at every level; a set-up whose options file already says Full DSP keeps it until Auto or Fast is chosen.
 
 - The `patches` submodule follows hakux-lr-patches' `main` (`git submodule update --init --remote patches`), so an Android build ships the current mods and cheats, not the ones of the commit last recorded here. The recorded commit is brought up to date: it adds the Need for Speed Underground and Underground 2 patches.
