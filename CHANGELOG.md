@@ -2,9 +2,22 @@
 
 ## Unreleased
 
-- Need for Speed Underground 2: menu sounds no longer click and cut the sound out for a moment (a regression in 0.25). A voice's low-pass filter took DirectSound's "not filtered" setting as a damping at which the filter is unstable, and such a voice ran off to infinity, silencing the mix until it ended. Any game whose sounds use that default was affected.
+## linux-v0.33.2 (Linux, aarch64 and x86-64, and Android)
 
-- A render target that starts inside another target's memory (a surface placed partway into the back buffer) shares its pixels with it: what is drawn into one is seen in the other, also across a 2D blit in between. nxdk_pgraph_tests: the eight Image blit overlap tests now match the console (3015 of 3556, with two tests that vary between runs not counted).
+Hotfix for menu audio in **Need for Speed Underground 2** and rendering into overlapping framebuffers.
+
+### Fixes
+
+- **Need for Speed Underground 2 audio** (#253): Fix clicks and brief dropouts when navigating menus, caused by an unstable voice filter since v0.25. The correction also applies to other games using the same default filter setting.
+- **Overlapping framebuffers** (#252): Keep shared pixels in sync when one render target starts inside another's memory, including across 2D copies. This fixes all eight Image blit overlap tests.
+
+### Testing
+
+PR #253 reports 30/30 HLE tests and 35/35 native tests. A 57-second NFSU2 menu recording had no detected spikes or dropouts after the fix.
+
+The full graphics-test run gained eight passing overlap tests with no newly failing cases. Breakdown was checked for rendering regressions, and OutRun 2006 was played on Linux x86-64.
+
+Available for Linux ARM64, Linux x86-64 (KVM), and Android ARM64 (experimental).
 
 ## linux-v0.33.1 (Linux, aarch64 and x86-64, and Android)
 
