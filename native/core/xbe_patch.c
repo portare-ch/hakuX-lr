@@ -198,29 +198,88 @@ uint64_t nc_xbe_patch_front_hash(void)
     return h;
 }
 
+/* One byte a patch writes, for combining patches. */
+typedef struct PatchByte {
+    uint32_t off;
+    uint8_t byte;
+    uint8_t index;                      /* the cheat's (below NC_XBE_PATCH_FRONT_MAX) */
+} PatchByte;
+
+static int byte_cmp(const void *a, const void *b)
+{
+    const PatchByte *x = a, *y = b;
+    return x->off < y->off ? -1 : x->off > y->off ? 1 : (int)x->index - (int)y->index;
+}
+
 int nc_xbe_patch_front_match(uint32_t crc, uint32_t size, NcXbePatch *out, unsigned *index, unsigned *other,
-                             uint64_t *hash)
+                             uint32_t *at, uint64_t *hash)
 {
     int found = 0;
+    size_t nbytes = 0;
+    PatchByte *bytes = NULL;
     pthread_mutex_lock(&g_mu);
-    for (unsigned i = 0; i < NC_XBE_PATCH_FRONT_MAX && found >= 0; i++) {
+    if (hash) {
+        *hash = hash_locked();
+    }
+    for (unsigned i = 0; i < NC_XBE_PATCH_FRONT_MAX; i++) {
         const NcXbePatch *p = g_front[i].p;
         if (!p || p->crc != crc || p->size != size) {
             continue;
         }
-        if (found) {
-            *other = i;
-            found = -1;
-        } else {
-            *out = *p;
+        if (!found) {
+            *out = (NcXbePatch){.crc = crc, .size = size};
             *index = i;
-            found = 1;
+        }
+        found++;
+        out->widescreen |= p->widescreen;
+        size_t n = 0;
+        for (unsigned r = 0; r < p->nruns; r++) {
+            n += p->runs[r].len;
+        }
+        PatchByte *more = realloc(bytes, (nbytes + n) * sizeof(*bytes));
+        if (!more) {
+            found = NC_XBE_PATCH_TOO_BIG;
+            break;
+        }
+        bytes = more;
+        for (unsigned r = 0; r < p->nruns; r++) {
+            for (unsigned k = 0; k < p->runs[r].len; k++) {
+                bytes[nbytes++] = (PatchByte){p->runs[r].off + k, p->runs[r].bytes[k], (uint8_t)i};
+            }
         }
     }
-    if (hash) {
-        *hash = hash_locked();
-    }
     pthread_mutex_unlock(&g_mu);
+    if (found > 0) {
+        /* in offset order: a byte two patches write must be the same in
+         * both, and is kept once; then runs again, a new one where the
+         * offsets leave a gap or a run is full */
+        qsort(bytes, nbytes, sizeof(*bytes), byte_cmp);
+        NcXbePatchRun *run = NULL;
+        for (size_t k = 0; k < nbytes && found > 0; k++) {
+            if (k && bytes[k].off == bytes[k - 1].off) {
+                if (bytes[k].byte != bytes[k - 1].byte) {
+                    *index = bytes[k - 1].index;
+                    *other = bytes[k].index;
+                    if (at) {
+                        *at = bytes[k].off;
+                    }
+                    found = NC_XBE_PATCH_CONFLICT;
+                }
+                continue;
+            }
+            if (!run || run->len == NC_XBE_PATCH_RUN_MAX || bytes[k].off != run->off + run->len) {
+                if (out->nruns == NC_XBE_PATCH_RUNS_MAX) {
+                    found = NC_XBE_PATCH_TOO_BIG;
+                    break;
+                }
+                run = &out->runs[out->nruns++];
+                run->off = bytes[k].off;
+                run->len = 0;
+            }
+            run->bytes[run->len++] = bytes[k].byte;
+        }
+    }
+    free(bytes);
     return found;
 }
 

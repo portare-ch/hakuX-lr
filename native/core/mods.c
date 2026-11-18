@@ -378,17 +378,26 @@ static bool xbe_patches(NcDisc *disc, const char *xbe_path)
     }
     static NcXbePatch p;
     unsigned index = 0, other = 0;
+    uint32_t where = 0;
     uint64_t hash = 0;
-    const int found = nc_xbe_patch_front_match((uint32_t)crc, f.size, &p, &index, &other, &hash);
+    const int found = nc_xbe_patch_front_match((uint32_t)crc, f.size, &p, &index, &other, &where, &hash);
     __atomic_store_n(&g_xbe_patch_booted, hash, __ATOMIC_RELEASE);
     if (found == 0) {
         nc_log("hakuX-native-mods", "XBE patches (%s): none for %s (%08X:%08X), booting it unpatched", on, rel,
                (unsigned)crc, f.size);
         return false;
     }
+    /* Several patches for the XBE go on together (a widescreen one and a
+     * 60 fps one, each its own cheat), unless two of them write different
+     * bytes to the same place: then none is applied. */
+    if (found == NC_XBE_PATCH_CONFLICT) {
+        nc_log("hakuX-native-mods", "XBE patches: cheats %u and %u write different bytes at %08X of %s (%08X:%08X): "
+               "none applied", index, other, where, rel, (unsigned)crc, f.size);
+        return false;
+    }
     if (found < 0) {
-        nc_log("hakuX-native-mods", "XBE patches: cheats %u and %u both patch %s (%08X:%08X): neither applied", index,
-               other, rel, (unsigned)crc, f.size);
+        nc_log("hakuX-native-mods", "XBE patches: the cheats for %s (%08X:%08X) are more than %d runs together: "
+               "none applied", rel, (unsigned)crc, f.size, NC_XBE_PATCH_RUNS_MAX);
         return false;
     }
     static NcDiscRun runs[NC_XBE_PATCH_RUNS_MAX];
@@ -397,12 +406,18 @@ static bool xbe_patches(NcDisc *disc, const char *xbe_path)
         runs[i] = (NcDiscRun){p.runs[i].off, p.runs[i].len, p.runs[i].bytes};
         bytes += p.runs[i].len;
     }
+    char which[48];
+    if (found == 1) {
+        snprintf(which, sizeof(which), "XBE patch (cheat %u)", index);
+    } else {
+        snprintf(which, sizeof(which), "XBE patches (%d cheats, the first %u)", found, index);
+    }
     if (!nc_disc_overlay_patch_all(disc, rel, runs, p.nruns)) {
-        nc_log("hakuX-native-mods", "XBE patch (cheat %u): can't be applied to %s: booting it unpatched", index, rel);
+        nc_log("hakuX-native-mods", "%s: can't be applied to %s: booting it unpatched", which, rel);
         return false;
     }
-    nc_log("hakuX-native-mods", "XBE patch (cheat %u): %u runs, %u bytes over %s (%08X:%08X)", index, p.nruns, bytes,
-           rel, (unsigned)crc, f.size);
+    nc_log("hakuX-native-mods", "%s: %u runs, %u bytes over %s (%08X:%08X)", which, p.nruns, bytes, rel,
+           (unsigned)crc, f.size);
     nc_online_modified(NC_ONLINE_CHEATS, "an XBE patch");
     return p.widescreen;
 }
