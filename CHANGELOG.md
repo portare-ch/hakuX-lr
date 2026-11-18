@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Less input lag in games that keep two finished frames waiting for the display, such as Need for Speed Underground 2, Project Gotham Racing 2, Burnout 3 and Midtown Madness 3. When the game flipped the display to its newest frame, the frame before it was put on screen instead, one frame late throughout (33 ms in a 30 fps race). The flip now shows the frame the game flipped to.
+
 ## linux-v0.33.2 (Linux, aarch64 and x86-64, and Android)
 
 Hotfix for menu audio in **Need for Speed Underground 2** and rendering into overlapping framebuffers.

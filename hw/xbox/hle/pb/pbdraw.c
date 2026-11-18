@@ -257,6 +257,7 @@ static struct {
      * (pend_flipped: one whose flip came before it, hle_pb_flipped) */
     uint32_t pend[8];
     bool pend_flipped[8];
+    uint32_t pend_pa[8];                /* each one's front buffer */
     uint32_t pend_head, pend_tail;
     /* D3D's immediate flip (its trap's handler, before the frame's
      * FLIP_INCREMENT_WRITE): ahead_pa, the bound target's memory while it
@@ -2021,6 +2022,7 @@ static void swap(void)
     if (head - __atomic_load_n(&g_pd.pend_tail, __ATOMIC_ACQUIRE) < ARRAY_SIZE(g_pd.pend)) {
         g_pd.pend[head % ARRAY_SIZE(g_pd.pend)] = c->swap_id;
         g_pd.pend_flipped[head % ARRAY_SIZE(g_pd.pend)] = pa && flipped == pa;
+        g_pd.pend_pa[head % ARRAY_SIZE(g_pd.pend)] = pa;
         __atomic_store_n(&g_pd.pend_head, head + 1, __ATOMIC_RELEASE);
     }
     g_pd.swap_wseq = g_pd.wseq;
@@ -2388,14 +2390,28 @@ void hle_pb_flipped(uint32_t start)
     if (pa && __atomic_load_n(&g_pd.ahead_pa, __ATOMIC_ACQUIRE) == pa) {
         __atomic_store_n(&g_pd.flipped_pa, pa, __ATOMIC_RELEASE);
     }
-    /* the oldest swap waiting; hle_pbd_scanout may drop them meanwhile */
-    uint32_t tail = __atomic_load_n(&g_pd.pend_tail, __ATOMIC_ACQUIRE), id;
+    /* The swap this flip shows: the newest one waiting whose front buffer is
+     * the address flipped to, and the ones before it go (the console never
+     * shows them once it flips past). With none there, the oldest waiting
+     * (the immediate flip above; a start inside the buffer). Taking the
+     * oldest always showed the frame before the one flipped to wherever two
+     * waited: Need for Speed Underground 2 ran a frame late throughout, 33 ms
+     * in its 30 fps races. hle_pbd_scanout may drop them meanwhile. */
+    const size_t n = ARRAY_SIZE(g_pd.pend);
+    uint32_t tail = __atomic_load_n(&g_pd.pend_tail, __ATOMIC_ACQUIRE), take, id;
     do {
-        if (tail == __atomic_load_n(&g_pd.pend_head, __ATOMIC_ACQUIRE)) {
+        const uint32_t head = __atomic_load_n(&g_pd.pend_head, __ATOMIC_ACQUIRE);
+        if (tail == head) {
             return;                                 /* a flip of nothing we drew */
         }
-        id = g_pd.pend[tail % ARRAY_SIZE(g_pd.pend)];
-    } while (!__atomic_compare_exchange_n(&g_pd.pend_tail, &tail, tail + 1, false, __ATOMIC_ACQ_REL,
+        take = tail;
+        for (uint32_t i = tail; pa && i != head; i++) {
+            if (g_pd.pend_pa[i % n] == pa) {
+                take = i;
+            }
+        }
+        id = g_pd.pend[take % n];
+    } while (!__atomic_compare_exchange_n(&g_pd.pend_tail, &tail, take + 1, false, __ATOMIC_ACQ_REL,
                                           __ATOMIC_ACQUIRE));
     __atomic_store_n(&g_pd.flipped_ns, hle_now_ns(), __ATOMIC_RELAXED);     /* once a frame */
     hle_hitch_frame(id, HLE_FR_FLIP);
