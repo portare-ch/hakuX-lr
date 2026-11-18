@@ -37,6 +37,10 @@ void nc_mods_reset(void);
 /* Apply a uniquely matching patch to the booting disc XBE. Runs are
  * all-or-nothing; a NULL disc skips patching. */
 void nc_mods_xbe_patches(NcDisc *disc, const char *xbe_path);
+/* Told at each XBE boot whether the patch applied to it is one for a
+ * widescreen picture (screen=widescreen); false with none applied. Called
+ * before the XBE is loaded, on the thread that boots it. */
+void nc_mods_set_screen_hook(void (*hook)(bool widescreen));
 /* Hash of the patch set used at the last boot. */
 uint64_t nc_mods_xbe_patches_booted(void);
 /* The patches of [$u\...] sections (a title update's XBE, a host file) over

@@ -319,19 +319,40 @@ uint64_t nc_mods_xbe_patches_booted(void)
     return __atomic_load_n(&g_xbe_patch_booted, __ATOMIC_ACQUIRE);
 }
 
+static void (*g_screen_hook)(bool widescreen);
+
+void nc_mods_set_screen_hook(void (*hook)(bool widescreen))
+{
+    g_screen_hook = hook;
+}
+
+static bool xbe_patches(NcDisc *disc, const char *xbe_path);
+
 void nc_mods_xbe_patches(NcDisc *disc, const char *xbe_path)
+{
+    /* each XBE boot says it anew: a patch for another XBE of the disc, or
+     * one turned off since, leaves the screen as it is set */
+    const bool widescreen = xbe_patches(disc, xbe_path);
+    if (g_screen_hook) {
+        g_screen_hook(widescreen);
+    }
+}
+
+/* The frontend's patch for this XBE applied; true when it is one for a
+ * widescreen picture (screen=widescreen). */
+static bool xbe_patches(NcDisc *disc, const char *xbe_path)
 {
     static const char cd[] = "\\Device\\CdRom0\\";
     char on[160];
     const unsigned n = nc_xbe_patch_front_list(on, sizeof(on));
     if (!n) {
         __atomic_store_n(&g_xbe_patch_booted, 0, __ATOMIC_RELEASE);
-        return;
+        return false;
     }
     if (!nc_online_cheats()) {
         __atomic_store_n(&g_xbe_patch_booted, nc_xbe_patch_front_hash(), __ATOMIC_RELEASE);
         nc_log("hakuX-native-mods", "XBE patches (%s): Cheats are off: none applied", on);
-        return;
+        return false;
     }
     const char *rel = !strncasecmp(xbe_path, cd, sizeof(cd) - 1)                     ? xbe_path + sizeof(cd) - 1
                       : xbe_path[0] == '\\' && strncasecmp(xbe_path, "\\Device\\", 8) ? xbe_path + 1
@@ -340,7 +361,7 @@ void nc_mods_xbe_patches(NcDisc *disc, const char *xbe_path)
     if (!disc || !rel || !nc_disc_find(disc, rel, &f) || (f.attr & 0x10)) {
         __atomic_store_n(&g_xbe_patch_booted, nc_xbe_patch_front_hash(), __ATOMIC_RELEASE);
         nc_log("hakuX-native-mods", "XBE patches (%s): %s isn't on the disc; they patch disc XBEs", on, xbe_path);
-        return;
+        return false;
     }
     /* Identify the original XBE by CRC-32. */
     uLong crc = crc32(0, NULL, 0);
@@ -350,7 +371,7 @@ void nc_mods_xbe_patches(NcDisc *disc, const char *xbe_path)
         if (!nc_disc_read(disc, &f, at, buf, k)) {
             __atomic_store_n(&g_xbe_patch_booted, nc_xbe_patch_front_hash(), __ATOMIC_RELEASE);
             nc_log("hakuX-native-mods", "XBE patches: %s can't be read: none applied", rel);
-            return;
+            return false;
         }
         crc = crc32(crc, buf, k);
         at += k;
@@ -363,12 +384,12 @@ void nc_mods_xbe_patches(NcDisc *disc, const char *xbe_path)
     if (found == 0) {
         nc_log("hakuX-native-mods", "XBE patches (%s): none for %s (%08X:%08X), booting it unpatched", on, rel,
                (unsigned)crc, f.size);
-        return;
+        return false;
     }
     if (found < 0) {
         nc_log("hakuX-native-mods", "XBE patches: cheats %u and %u both patch %s (%08X:%08X): neither applied", index,
                other, rel, (unsigned)crc, f.size);
-        return;
+        return false;
     }
     static NcDiscRun runs[NC_XBE_PATCH_RUNS_MAX];
     unsigned bytes = 0;
@@ -378,11 +399,12 @@ void nc_mods_xbe_patches(NcDisc *disc, const char *xbe_path)
     }
     if (!nc_disc_overlay_patch_all(disc, rel, runs, p.nruns)) {
         nc_log("hakuX-native-mods", "XBE patch (cheat %u): can't be applied to %s: booting it unpatched", index, rel);
-        return;
+        return false;
     }
     nc_log("hakuX-native-mods", "XBE patch (cheat %u): %u runs, %u bytes over %s (%08X:%08X)", index, p.nruns, bytes,
            rel, (unsigned)crc, f.size);
     nc_online_modified(NC_ONLINE_CHEATS, "an XBE patch");
+    return p.widescreen;
 }
 
 /* The file name of a path (either slash). */

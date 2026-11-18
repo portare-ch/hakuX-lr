@@ -7,6 +7,7 @@
  */
 #include "native/libretro/libretro_int.h"
 #include "native/core/core.h"
+#include "native/core/mods.h"
 #include "native/core/online.h"
 #include "native/hle/hle_native.h"
 #include "native/kernel/kernel.h"
@@ -71,11 +72,12 @@ static struct retro_core_option_v2_definition g_defs[OPT_COUNT + 1] = {
     [OPT_FORMAT] = {
         "hakux_screen_format", "Screen Format", NULL,
         "Sets the console's screen format. Widescreen uses 16:9; Letterbox fits 16:9 inside 4:3. "
-        "Only games that support these formats use them." NEXT,
+        "Only games that support these formats use them. Auto uses Widescreen while a widescreen "
+        "patch (Cheats) is applied to the game, Normal otherwise." NEXT,
         NULL, NULL,
-        {{"normal", "Normal (4:3)"}, {"widescreen", "Widescreen (16:9)"}, {"letterbox", "Letterbox"},
-         {NULL, NULL}},
-        "normal"},
+        {{"auto", "Auto"}, {"normal", "Normal (4:3)"}, {"widescreen", "Widescreen (16:9)"},
+         {"letterbox", "Letterbox"}, {NULL, NULL}},
+        "auto"},
     [OPT_LANGUAGE] = {
         "hakux_language", "Language", NULL,
         "Sets the language in games that support it. Auto uses RetroArch's language, "
@@ -305,6 +307,21 @@ static void display_update(void)
     nc_lr_env(RETRO_ENVIRONMENT_SET_CORE_OPTIONS_DISPLAY, &d);
 }
 
+/* Screen Format's Auto: each XBE boot tells whether a widescreen patch was
+ * applied to it (mods.c), before the game reads the console's settings. */
+static bool g_format_auto;              /* atomic */
+
+static void screen_auto(bool widescreen)
+{
+    if (!__atomic_load_n(&g_format_auto, __ATOMIC_ACQUIRE)) {
+        return;
+    }
+    nc_kernel_set_video(NC_VIDEO_480P | NC_VIDEO_PAL60 | (widescreen ? NC_VIDEO_WIDESCREEN : 0), NC_AV_PACK_HDTV);
+    nc_lr_video_set_widescreen(widescreen);
+    nc_log("hakuX-libretro", "screen format auto: %s", widescreen ? "widescreen (a widescreen patch is applied)"
+                                                                    : "normal");
+}
+
 void nc_lr_options_apply(void)
 {
     for (int i = 0; i < OPT_COUNT; i++) {
@@ -330,6 +347,9 @@ void nc_lr_options_apply(void)
                                                                             : 0);
     nc_kernel_set_video(flags, NC_AV_PACK_HDTV);
     nc_lr_video_set_widescreen(flags & NC_VIDEO_WIDESCREEN);
+    /* Auto: normal until the booting XBE's patch says widescreen (screen_auto) */
+    __atomic_store_n(&g_format_auto, !strcmp(format, "auto"), __ATOMIC_RELEASE);
+    nc_mods_set_screen_hook(screen_auto);
 
     const int language = g_applied[OPT_LANGUAGE] ? g_applied[OPT_LANGUAGE] : auto_language();
     nc_kernel_set_language(language);

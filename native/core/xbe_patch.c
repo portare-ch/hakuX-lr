@@ -69,6 +69,7 @@ bool nc_xbe_patch_parse(const char *code, NcXbePatch *out, char *err, size_t err
         return fail(err, errlen, "no CRC32:SIZE (eight hex digits each)");
     }
     out->nruns = 0;
+    out->widescreen = false;
     uint32_t end = 4;                   /* the magic stays */
     while (*s == '+') {
         s++;
@@ -108,6 +109,15 @@ bool nc_xbe_patch_parse(const char *code, NcXbePatch *out, char *err, size_t err
     }
     while (blank(*s)) {
         s++;
+    }
+    /* the attributes: screen=widescreen */
+    static const char wide[] = "screen=widescreen";
+    if (!strncmp(s, wide, sizeof(wide) - 1) && (!s[sizeof(wide) - 1] || blank(s[sizeof(wide) - 1]))) {
+        out->widescreen = true;
+        s += sizeof(wide) - 1;
+        while (blank(*s)) {
+            s++;
+        }
     }
     if (*s) {
         return fail(err, errlen, "\"%.12s\" after run %u", s, out->nruns);

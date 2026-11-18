@@ -33,7 +33,9 @@ static struct {
     uint32_t gen, swap;      /* the read-back frame's display generation and swap */
     bool dupe_checked, can_dupe;
     bool repeat;             /* Repeat Frames: a video_cb every retro_run */
-    bool widescreen;         /* the console is set to widescreen */
+    bool widescreen;         /* the console is set to widescreen (atomic: a booting XBE's
+                              * patch can set it on the core's thread, Screen Format's Auto) */
+    bool told_wide;          /* ... as the geometry last told RetroArch had it */
     bool full;               /* the overscan shown, not cropped */
 } g_v;
 
@@ -43,7 +45,7 @@ static struct {
 static float aspect_of(uint32_t w, uint32_t h, uint32_t ow, uint32_t oh)
 {
     const float fa = (float)w / (float)h;
-    const float a = fa >= 1.6f ? fa : g_v.widescreen ? 16.0f / 9.0f : 4.0f / 3.0f;
+    const float a = fa >= 1.6f ? fa : __atomic_load_n(&g_v.widescreen, __ATOMIC_ACQUIRE) ? 16.0f / 9.0f : 4.0f / 3.0f;
     return a * ((float)ow / (float)w) * ((float)h / (float)oh);
 }
 
@@ -55,7 +57,7 @@ void nc_lr_video_reset(void)
 
 void nc_lr_video_set_widescreen(bool on)
 {
-    g_v.widescreen = on;
+    __atomic_store_n(&g_v.widescreen, on, __ATOMIC_RELEASE);
 }
 
 void nc_lr_video_set_repeat(bool on)
@@ -86,9 +88,15 @@ void nc_lr_overscan(uint32_t w, uint32_t h, uint32_t *cx, uint32_t *cy)
 
 void nc_lr_video_size(uint32_t w, uint32_t h, uint32_t ow, uint32_t oh)
 {
-    if (g_v.have && ow == g_v.w && oh == g_v.h && w == g_v.fw && h == g_v.fh) {
+    /* the size or the console's screen format changed: an XBE booted again
+     * at the same size (a relaunch, a restart with a widescreen patch turned
+     * on) can have another format with Screen Format's Auto, and RetroArch
+     * kept the aspect it was told for the one before */
+    const bool wide = __atomic_load_n(&g_v.widescreen, __ATOMIC_ACQUIRE);
+    if (g_v.have && ow == g_v.w && oh == g_v.h && w == g_v.fw && h == g_v.fh && wide == g_v.told_wide) {
         return;
     }
+    g_v.told_wide = wide;
     g_v.w = ow;
     g_v.h = oh;
     g_v.fw = w;
