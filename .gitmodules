@@ -5,3 +5,4 @@
 [submodule "patches"]
 	path = patches
 	url = https://github.com/portare-ch/hakux-lr-patches.git
+	branch = main

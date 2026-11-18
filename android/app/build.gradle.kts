@@ -117,7 +117,7 @@ val modSources = rootProject.file("../patches/mods")
 val checkModSources = tasks.register("checkModSources") {
   doLast {
     if (!modSources.isDirectory) {
-      throw GradleException("patches/mods is missing: run git submodule update --init patches")
+      throw GradleException("patches/mods is missing: run git submodule update --init --remote patches")
     }
   }
 }
