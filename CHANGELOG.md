@@ -2,7 +2,19 @@
 
 ## Unreleased
 
-- Less input lag in games that keep two finished frames waiting for the display, such as Need for Speed Underground 2, Project Gotham Racing 2, Burnout 3 and Midtown Madness 3. When the game flipped the display to its newest frame, the frame before it was put on screen instead, one frame late throughout (33 ms in a 30 fps race). The flip now shows the frame the game flipped to.
+## linux-v0.33.3 (Linux, aarch64 and x86-64, and Android)
+
+Fix an extra frame of display delay in games that queue multiple completed frames, including **Need for Speed Underground 2**, **Project Gotham Racing 2**, **Burnout 3** and **Midtown Madness 3** (#254).
+
+Display flips now show the frame whose front buffer the game requested, instead of always showing the oldest queued frame. In NFS Underground 2's 30 fps races, this removes an unnecessary frame of delay — about 33 ms.
+
+### Testing
+
+PR #254 reports 30/30 HLE unit tests and 35/35 native tests. In a 150-second headless x86-64 NFSU2 run, internal swap-to-guest-flip delay fell from 58 ms to 25 ms. The delivered frame rate was unchanged across the tested games.
+
+These are internal timing measurements; total controller-to-screen latency was not measured. The full graphics-test suite has not been rerun for this change.
+
+Available for Linux ARM64, Linux x86-64 (KVM), and Android ARM64 (experimental).
 
 ## linux-v0.33.2 (Linux, aarch64 and x86-64, and Android)
 
