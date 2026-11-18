@@ -237,7 +237,7 @@ def main():
                                        'option: hakux_mic_sensitivity (Communicator Microphone Sensitivity), '
                                        'default medium',
                                        'option: hakux_audio_resampler (Audio Resampler), default hardware',
-                                       f'option: hakux_audio_processing (Audio Processing), default {args.audio_default}',
+                                       'option: hakux_audio_processing (Audio Processing), default auto',
                                        'option: hakux_frame_pace (Frame Pacing), default disabled'))
     with tempfile.TemporaryDirectory(prefix='hakux-libretro-') as folder:
         root = Path(folder)
@@ -662,6 +662,17 @@ def main():
         run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
             ('audio processing fast', fast_processing, 'ran 30 frames'),
             dict(os.environ, HARNESS_OPTIONS=f'{OFF};hakux_audio_processing=fast'))
+        # Auto: Fast at the Potato accuracy level, what the build defaults to at the others;
+        # an explicit Full DSP stays at Potato
+        run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
+            ('audio processing fast', fast_processing, 'accuracy Potato', 'ran 30 frames'),
+            dict(os.environ, HARNESS_OPTIONS=f'{OFF};hakux_accuracy_level=potato'))
+        run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
+            (f'audio processing {args.audio_default}', 'accuracy Medium', 'ran 30 frames'),
+            dict(os.environ, HARNESS_OPTIONS=f'{OFF};hakux_accuracy_level=medium'))
+        run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
+            ('audio processing dsp', 'accuracy Potato', 'ran 30 frames'),
+            dict(os.environ, HARNESS_OPTIONS=f'{OFF};hakux_accuracy_level=potato;hakux_audio_processing=dsp'))
         run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
             ('audio processing dsp', 'processing: full DSP (GP interpreter, EP interpreter)', 'ran 30 frames'),
             dict(os.environ, HARNESS_OPTIONS=f'{OFF};hakux_audio_processing=dsp', NC_APU_DSP_JIT='0'))
