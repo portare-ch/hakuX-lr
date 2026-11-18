@@ -2,19 +2,27 @@
 
 ## Unreleased
 
-- **ARM64: less CPU in the graphics decoder** — The check for memory the game wrote since a resource was last used looked at one page at a time with an ordered load, which is slow on ARM cores, and was the decoder thread's largest single cost in Project Gotham Racing on a Snapdragon 8 Gen 2. It now passes over eight unchanged pages in one read. The decoder went from about 35% to 26% of a CPU core there.
+## linux-v0.34.0 (Linux, aarch64 and x86-64, and Android)
 
-- **XBE patches combine** — Several enabled patches for the same XBE are now applied together, so a game's widescreen and 60 fps patches can be separate entries of one `.cht` and be turned on independently. Before, any two patches for one XBE were a conflict and neither was applied. Two patches conflict only when they write different bytes to the same offset; the log names the two cheats and the offset. `tools/mods/cht-join.py` joins `.cht` files into one file with an entry per patch.
+Lower CPU usage on ARM64 and x86-64, easier widescreen and 60 fps patch selection, and a Steam Deck installer.
 
-- **Screen Format: Auto** — The new default. The console is set to widescreen while a widescreen patch from RetroArch's Cheats menu is applied to the game, and to 4:3 otherwise, so a widescreen patch no longer needs the option changed by hand. A patch says so with `screen=widescreen` after its runs (`xbe-patch-v1 CRC32:SIZE+OFFSET:BYTES... screen=widescreen`); `tools/mods/xbe-to-cht.py --widescreen` and a `screen: widescreen` line in a `mod.txt` write it. Cores before this release refuse a code with that marker.
+### Changes
 
-- **AMD64: less CPU for audio** — The x86-64 core is now built for SSE4.1. The base x86-64 instruction set has no rounding instruction, so each `floor` was a call into a software routine, and the audio voice processor rounds every sample. In a Project Gotham Racing 2 race the two audio threads went from 37.6% to 28.1% of a CPU core. Every CPU the KVM backend supports has SSE4.1.
+- **ARM64 performance** (#261): Reduce CPU work in the graphics decoder. On the Retroid Pocket Nova, Project Gotham Racing's decoder used about 26% of one CPU core, down from 35%.
+- **x86-64 audio performance** (#258): Use SSE4.1 rounding instructions in the audio processor. In the tested Project Gotham Racing 2 race, the two audio threads used 28.1% of one CPU core, down from 37.6%. These measurements describe CPU usage, not equivalent FPS gains.
+- **Audio Processing: Auto** (#257): The new default selects Fast with Potato accuracy and Full DSP at other levels; Android keeps Fast. Fast skips DSP reverb and effects. Explicit Fast or Full DSP settings are preserved, so existing users must select Auto to use the new behaviour.
+- **Independent patch toggles** (#260): Enable compatible widescreen and 60 fps patches together, with a separate entry for each feature. Conflicting byte writes are rejected before any patch is applied.
+- **Screen Format: Auto** (#259): The new default selects 16:9 when an applied patch requests widescreen, and 4:3 otherwise. Existing screen-format choices are preserved; select Auto to use this behaviour and set RetroArch's aspect ratio to Core provided. Patches carrying the new widescreen marker require this release or newer.
+- **Steam Deck setup** (#255): Install through RetroArch Flatpak, add a Steam shortcut, and detect EmuDeck's Xbox games folder. The setup script does not request root; KVM access is still required. Other Linux systems can select Flatpak or AppImage, and game symlinks are supported.
+- **Patch sources** (#256): Update the patches submodule with Need for Speed Underground and Underground 2 patches, and document how Android app builds fetch the latest mods.
 
-- **Audio Processing: Auto** — The new default. It uses **Fast** at the **Potato** accuracy level and **Full DSP** otherwise (Fast on Android, as before). Full DSP's audio thread is the core's largest cost after the emulated CPU: a third to half of a CPU core on a Snapdragon 8 Gen 2 in games, more than a low-end handheld has to spare. An explicit Fast or Full DSP is kept at every level; a set-up whose options file already says Full DSP keeps it until Auto or Fast is chosen.
+### Testing
 
-- The `patches` submodule follows hakux-lr-patches' `main` (`git submodule update --init --remote patches`), so an Android build ships the current mods and cheats, not the ones of the commit last recorded here. The recorded commit is brought up to date: it adds the Need for Speed Underground and Underground 2 patches.
+Linux ARM64 and x86-64 CI passed. PR #261 reports 30/30 HLE unit tests and 35/35 native tests; its full x86-64 graphics comparison was unchanged at 3,016 of 3,556 cases meeting the comparison threshold. This does not imply pixel-perfect rendering.
 
-- **Steam Deck setup** — Add a SteamOS install path with RetroArch Flatpak, a Steam shortcut and EmuDeck games-folder detection. Setup runs without requesting root; games still need KVM access. `--retroarch flatpak|appimage` selects either package on other distributions, and `tools/linux/hakux-steamdeck.desktop` provides a double-click installer. The launcher also follows game symlinks. Not yet tested on a Steam Deck.
+Steam Deck installation has installer and launcher regression coverage and an AppImage smoke test on CachyOS. Installation on a real Steam Deck, Flatpak with KVM, and Gaming Mode controls remain untested. Android ARM64 remains experimental.
+
+Available for Linux ARM64, Linux x86-64 (KVM), and Android ARM64.
 
 ## linux-v0.33.3 (Linux, aarch64 and x86-64, and Android)
 
