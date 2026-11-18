@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **XBE patches combine** — Several enabled patches for the same XBE are now applied together, so a game's widescreen and 60 fps patches can be separate entries of one `.cht` and be turned on independently. Before, any two patches for one XBE were a conflict and neither was applied. Two patches conflict only when they write different bytes to the same offset; the log names the two cheats and the offset. `tools/mods/cht-join.py` joins `.cht` files into one file with an entry per patch.
+
 - **Screen Format: Auto** — The new default. The console is set to widescreen while a widescreen patch from RetroArch's Cheats menu is applied to the game, and to 4:3 otherwise, so a widescreen patch no longer needs the option changed by hand. A patch says so with `screen=widescreen` after its runs (`xbe-patch-v1 CRC32:SIZE+OFFSET:BYTES... screen=widescreen`); `tools/mods/xbe-to-cht.py --widescreen` and a `screen: widescreen` line in a `mod.txt` write it. Cores before this release refuse a code with that marker.
 
 - **AMD64: less CPU for audio** — The x86-64 core is now built for SSE4.1. The base x86-64 instruction set has no rounding instruction, so each `floor` was a call into a software routine, and the audio voice processor rounds every sample. In a Project Gotham Racing 2 race the two audio threads went from 37.6% to 28.1% of a CPU core. Every CPU the KVM backend supports has SSE4.1.

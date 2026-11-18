@@ -112,38 +112,60 @@ static void test_front(void)
     char err[96], list[64];
     nc_xbe_patch_front_reset();
     HT_EQ_U32(nc_xbe_patch_front_hash(), 0);
-    HT_EQ_INT(nc_xbe_patch_front_match(0xDF0DB6D8, 0x157000, &p, &i, &j, &h), 0);
+    HT_EQ_INT(nc_xbe_patch_front_match(0xDF0DB6D8, 0x157000, &p, &i, &j, NULL, &h), 0);
     HT_CHECK(h == 0);
     HT_CHECK(nc_xbe_patch_front_set(2, true, A, err, sizeof(err)));
     HT_CHECK(nc_xbe_patch_front_set(5, true, B, err, sizeof(err)));
     const uint64_t two = nc_xbe_patch_front_hash();
     HT_CHECK(two != 0);
-    HT_EQ_INT(nc_xbe_patch_front_match(0xDF0DB6D8, 0x157000, &p, &i, &j, &h), 1);
+    HT_EQ_INT(nc_xbe_patch_front_match(0xDF0DB6D8, 0x157000, &p, &i, &j, NULL, &h), 1);
     HT_EQ_U32(i, 2);
     HT_CHECK(h == two);
     HT_EQ_U32(p.runs[0].off, 0x4E163);
-    HT_EQ_INT(nc_xbe_patch_front_match(0x6D3D7B26, 0x222000, &p, &i, &j, NULL), 1);
+    HT_EQ_INT(nc_xbe_patch_front_match(0x6D3D7B26, 0x222000, &p, &i, &j, NULL, NULL), 1);
     HT_EQ_U32(i, 5);
     /* the wrong revision: same CRC, other size; other CRC */
-    HT_EQ_INT(nc_xbe_patch_front_match(0xDF0DB6D8, 0x158000, &p, &i, &j, NULL), 0);
-    HT_EQ_INT(nc_xbe_patch_front_match(0xDF0DB6D9, 0x157000, &p, &i, &j, NULL), 0);
+    HT_EQ_INT(nc_xbe_patch_front_match(0xDF0DB6D8, 0x158000, &p, &i, &j, NULL, NULL), 0);
+    HT_EQ_INT(nc_xbe_patch_front_match(0xDF0DB6D9, 0x157000, &p, &i, &j, NULL, NULL), 0);
     HT_EQ_U32(nc_xbe_patch_front_list(list, sizeof(list)), 2);
     HT_EQ_STR(list, "DF0DB6D8:00157000, 6D3D7B26:00222000");
-    /* a second patch for the same XBE: neither */
+    /* a second patch for the same XBE, at another offset: the two as one */
     HT_CHECK(nc_xbe_patch_front_set(7, true, A2, err, sizeof(err)));
     i = j = 99;
-    HT_EQ_INT(nc_xbe_patch_front_match(0xDF0DB6D8, 0x157000, &p, &i, &j, NULL), -1);
+    HT_EQ_INT(nc_xbe_patch_front_match(0xDF0DB6D8, 0x157000, &p, &i, &j, NULL, NULL), 2);
     HT_EQ_U32(i, 2);
-    HT_EQ_U32(j, 7);
+    HT_EQ_U32(p.nruns, 2);
+    HT_EQ_U32(p.runs[0].off, 0x4E163);
+    HT_EQ_U32(p.runs[1].off, 0x4E18E);
+    HT_CHECK(!p.widescreen);
     HT_CHECK(nc_xbe_patch_front_hash() != two);
+    /* a third that writes the same byte where the first does, the next byte
+     * too, and is a widescreen one: one run of the two bytes */
+    HT_CHECK(nc_xbe_patch_front_set(8, true, "xbe-patch-v1 DF0DB6D8:00157000+0004E163:A0B1 screen=widescreen", err,
+                                    sizeof(err)));
+    HT_EQ_INT(nc_xbe_patch_front_match(0xDF0DB6D8, 0x157000, &p, &i, &j, NULL, NULL), 3);
+    HT_EQ_U32(p.nruns, 2);
+    HT_EQ_U32(p.runs[0].off, 0x4E163);
+    HT_EQ_U32(p.runs[0].len, 2);
+    HT_CHECK(p.runs[0].bytes[0] == 0xA0 && p.runs[0].bytes[1] == 0xB1);
+    HT_CHECK(p.widescreen);
+    /* another byte there: a conflict, with the two cheats and the offset */
+    uint32_t at = 0;
+    HT_CHECK(nc_xbe_patch_front_set(9, true, "xbe-patch-v1 DF0DB6D8:00157000+0004E164:C2", err, sizeof(err)));
+    HT_EQ_INT(nc_xbe_patch_front_match(0xDF0DB6D8, 0x157000, &p, &i, &j, &at, NULL), NC_XBE_PATCH_CONFLICT);
+    HT_EQ_U32(i, 8);
+    HT_EQ_U32(j, 9);
+    HT_EQ_U32(at, 0x4E164);
+    HT_CHECK(nc_xbe_patch_front_set(8, false, NULL, NULL, 0));
+    HT_CHECK(nc_xbe_patch_front_set(9, false, NULL, NULL, 0));
     /* turned off: the set as before */
     HT_CHECK(nc_xbe_patch_front_set(7, false, NULL, NULL, 0));
     HT_CHECK(nc_xbe_patch_front_hash() == two);
-    HT_EQ_INT(nc_xbe_patch_front_match(0xDF0DB6D8, 0x157000, &p, &i, &j, NULL), 1);
+    HT_EQ_INT(nc_xbe_patch_front_match(0xDF0DB6D8, 0x157000, &p, &i, &j, NULL, NULL), 1);
     /* a malformed code over one that was on: refused, and off */
     HT_CHECK(!nc_xbe_patch_front_set(2, true, "xbe-patch-v1 DF0DB6D8:00157000+00000000:A0", err, sizeof(err)));
     HT_EQ_STR(err, "run 1: below offset 4 (the XBE's magic)");
-    HT_EQ_INT(nc_xbe_patch_front_match(0xDF0DB6D8, 0x157000, &p, &i, &j, NULL), 0);
+    HT_EQ_INT(nc_xbe_patch_front_match(0xDF0DB6D8, 0x157000, &p, &i, &j, NULL, NULL), 0);
     /* the same codes at other indices (RetroArch renumbers the cheats that
      * are on): the same set */
     HT_CHECK(nc_xbe_patch_front_set(2, true, A, err, sizeof(err)));

@@ -50,10 +50,18 @@ bool nc_xbe_patch_front_set(unsigned index, bool on, const char *code, char *err
 void nc_xbe_patch_front_reset(void);
 /* Hash enabled patch codes independently of cheat indices (0 if none). */
 uint64_t nc_xbe_patch_front_hash(void);
-/* Match CRC-32 and size. Returns 1 for one match, 0 for none, or -1
- * for a conflict; fills the matched indices and patch-set hash. */
+/* The enabled patches for an XBE (its CRC-32 and size), combined into one:
+ * their bytes together, in runs of the format's limits, widescreen if any
+ * of them is. Patches combine when no two write different bytes to the same
+ * offset; the same byte from two of them is written once.
+ * Returns how many were combined (index: the first's cheat index), 0 for
+ * none, NC_XBE_PATCH_CONFLICT when two write different bytes (index and
+ * other: theirs; at: the offset), or NC_XBE_PATCH_TOO_BIG when together
+ * they need more runs than a patch holds. Fills the patch-set hash. */
+#define NC_XBE_PATCH_CONFLICT (-1)
+#define NC_XBE_PATCH_TOO_BIG  (-2)
 int nc_xbe_patch_front_match(uint32_t crc, uint32_t size, NcXbePatch *out, unsigned *index, unsigned *other,
-                             uint64_t *hash);
+                             uint32_t *at, uint64_t *hash);
 /* Summarize enabled patches for logging. */
 unsigned nc_xbe_patch_front_list(char *buf, size_t len);
 
