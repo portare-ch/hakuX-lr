@@ -51,7 +51,11 @@ def main():
               '+00001020:9090' in code, f'addresses at their file offsets: {code}')
         check('cheat0_desc = "60 fps [restart]"' in out and '# Faster.' in out and
               'title-update patches are left out' in out, 'the name, description and the left-out update')
-        for text, why in (('[default.xbe]\n0x00011020: 00 00 -> 90 90\n', 'other bytes there'),
+        rc, wide, err = convert(tmp, 'name: Widescreen\nscreen: widescreen\n\n[default.xbe]\n0x00011010: AA BB\n', stock)
+        check(rc == 0 and re.search(r'cheat0_code = "xbe-patch-v1 [^"]+:AABB screen=widescreen"', wide) and
+              'screen=' not in out, f'screen: widescreen marks the code ({err.strip()})')
+        for text, why in (('screen: tall\n[default.xbe]\n0x00011010: AA\n', 'screen: tall'),
+                          ('[default.xbe]\n0x00011020: 00 00 -> 90 90\n', 'other bytes there'),
                           ('refresh: 120\n[default.xbe]\n0x00011010: AA\n', 'refresh: 120'),
                           ('[default.xbe]\n0x00020000: AA\n', "not in the XBE's file"),
                           ('[default.xbe]\n0x00011010: AA\n[game.xbe]\n0x00011010: AA\n', 'patches 2 XBEs')):

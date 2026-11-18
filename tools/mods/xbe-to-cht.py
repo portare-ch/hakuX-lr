@@ -93,7 +93,7 @@ def runs(stock, patched, bridge=BRIDGE):
     return [(a, patched[a:b]) for a, b in out]
 
 
-def code(stock, patched):
+def code(stock, patched, widescreen=False):
     if stock[:4] != b'XBEH':
         fail('the stock file is not an XBE')
     if len(patched) != len(stock):
@@ -111,7 +111,9 @@ def code(stock, patched):
     if len(found) > RUNS_MAX:
         fail(f'{len(found)} runs: xbe-patch-v1 holds {RUNS_MAX}')
     text = f'xbe-patch-v1 {zlib.crc32(stock):08X}:{len(stock):08X}'
-    return text + ''.join(f'+{off:08X}:{data.hex().upper()}' for off, data in found)
+    text += ''.join(f'+{off:08X}:{data.hex().upper()}' for off, data in found)
+    # Screen Format's Auto sets the console to widescreen while such a patch is applied
+    return text + (' screen=widescreen' if widescreen else '')
 
 
 def main():
@@ -120,6 +122,9 @@ def main():
     ap.add_argument('patch', help='an IPS or BPS patch of it, or the patched XBE')
     ap.add_argument('--desc', default='Widescreen (16:9) [restart]', help='the entry\'s name in the menu')
     ap.add_argument('--flips', help='Floating IPS (default: flips on the PATH, or $FLIPS)')
+    ap.add_argument('--widescreen', action='store_true',
+                    help='mark the patch as one for a 16:9 picture (screen=widescreen): Screen Format\'s '
+                         'Auto then sets the console to widescreen while it is applied')
     ap.add_argument('--note', action='append', default=[],
                     help='a comment line at the top (the game, the patch\'s author and source...); repeatable')
     args = ap.parse_args()
@@ -142,7 +147,7 @@ def main():
                      'cheats = 1\n'
                      f'cheat0_desc = "{args.desc}"\n'
                      'cheat0_handler = 0\n'
-                     f'cheat0_code = "{code(stock, patched)}"\n'
+                     f'cheat0_code = "{code(stock, patched, args.widescreen)}"\n'
                      'cheat0_enable = false\n')
 
 

@@ -36,6 +36,15 @@ static void test_parse(void)
     /* adjacent runs, the last byte of the file, offset 4 */
     HT_CHECK(parse("xbe-patch-v1 00000000:00001000+00000004:01+00000005:02+00000FFF:03"));
     HT_EQ_U32(g_p.nruns, 3);
+    /* the screen attribute, after the runs */
+    HT_CHECK(!g_p.widescreen);
+    HT_CHECK(parse("xbe-patch-v1 1A2B3C4D:00200000+00001234:9090 screen=widescreen"));
+    HT_CHECK(g_p.widescreen);
+    HT_EQ_U32(g_p.nruns, 1);
+    HT_CHECK(parse("xbe-patch-v1 1A2B3C4D:00200000+00001234:9090  screen=widescreen \n"));
+    HT_CHECK(g_p.widescreen);
+    HT_CHECK(parse("xbe-patch-v1 1A2B3C4D:00200000+00001234:9090"));
+    HT_CHECK(!g_p.widescreen);
     HT_CHECK(nc_xbe_patch_is("xbe-patch-v1 junk"));
     HT_CHECK(nc_xbe_patch_is(" xbe-patch-v1"));
     HT_CHECK(!nc_xbe_patch_is("xbe-patch-v10 1:2"));
@@ -55,6 +64,9 @@ static void test_refused(void)
     HT_EQ_STR(refused("xbe-patch-v1 1A2B3C4:00200000+00001234:90"), "no CRC32:SIZE (eight hex digits each)");
     HT_EQ_STR(refused("xbe-patch-v1 1A2B3C4D-00200000+00001234:90"), "no CRC32:SIZE (eight hex digits each)");
     HT_EQ_STR(refused("xbe-patch-v1 1A2B3C4D:00200000"), "no runs");
+    HT_EQ_STR(refused("xbe-patch-v1 1A2B3C4D:00200000+00001234:90 screen=wide"), "\"screen=wide\" after run 1");
+    HT_EQ_STR(refused("xbe-patch-v1 1A2B3C4D:00200000+00001234:90 screen=widescreen x"), "\"x\" after run 1");
+    HT_EQ_STR(refused("xbe-patch-v1 1A2B3C4D:00200000 screen=widescreen"), "no runs");
     HT_EQ_STR(refused("xbe-patch-v1 1A2B3C4D:00200000+1234:90"), "run 1: no OFFSET: (eight hex digits)");
     HT_EQ_STR(refused("xbe-patch-v1 1A2B3C4D:00200000+00001234:909"), "run 1: an odd hex digit");
     HT_EQ_STR(refused("xbe-patch-v1 1A2B3C4D:00200000+00001234:"), "run 1: no bytes");

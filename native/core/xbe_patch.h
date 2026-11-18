@@ -2,11 +2,14 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /* XBE patch format for RetroArch's Cheats menu:
  *
- *   xbe-patch-v1 CRC32:SIZE+OFFSET:BYTES...
+ *   xbe-patch-v1 CRC32:SIZE+OFFSET:BYTES... [screen=widescreen]
  *
  * Fields use eight hex digits; each run holds 1–64 bytes. Up to 128 runs
  * are allowed, sorted and non-overlapping, starting at offset 4 to
- * preserve the XBE signature. See mods.c for application. */
+ * preserve the XBE signature. screen=widescreen after the runs marks a
+ * patch that makes the game draw for a 16:9 screen (Screen Format's Auto
+ * sets the console to widescreen while one is applied). See mods.c for
+ * application. */
 #ifndef NATIVE_CORE_XBE_PATCH_H
 #define NATIVE_CORE_XBE_PATCH_H
 
@@ -31,6 +34,7 @@ typedef struct NcXbePatchRun {
 
 typedef struct NcXbePatch {
     uint32_t crc, size;
+    bool widescreen;                    /* screen=widescreen */
     unsigned nruns;
     NcXbePatchRun runs[NC_XBE_PATCH_RUNS_MAX];
 } NcXbePatch;

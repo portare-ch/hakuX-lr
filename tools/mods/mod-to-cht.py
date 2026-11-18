@@ -91,7 +91,10 @@ def main():
         if old and stock[off:off + len(old)] != old:
             fail(f'[{section}] {va:#010x}: other bytes there (another revision?)')
         patched[off:off + len(new)] = new
-    code = xbe_to_cht.code(stock, bytes(patched))
+    screen = fields.get('screen', '')
+    if screen not in ('', 'widescreen'):
+        fail(f'screen: {screen}: only widescreen is known')
+    code = xbe_to_cht.code(stock, bytes(patched), screen == 'widescreen')
     notes = list(args.note)
     if fields.get('description'):
         notes.append(fields['description'])

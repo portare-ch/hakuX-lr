@@ -295,7 +295,7 @@ take effect immediately.
 | Setting | When to change it |
 | --- | --- |
 | Render Scale | The default is **2x**. Try **1x** if a game runs slowly. Higher values sharpen the picture but need more GPU power. |
-| Screen Format | Choose **Widescreen** for games that support it. Set RetroArch's aspect ratio to **Core provided**. |
+| Screen Format | **Auto** (default) sets the console to **Widescreen** while a widescreen patch from the Cheats menu is applied to the game, and to **Normal (4:3)** otherwise. Choose **Widescreen** yourself for games that support it without a patch. Set RetroArch's aspect ratio to **Core provided**. Restart the game after changing it. |
 | Crop Overscan | On by default to hide borders around the picture. Turn it off to show the full frame. |
 | Accuracy Level | Selects graphics accuracy trade-offs; see the table below. **Custom** is the default for now and keeps Combiner Precision as you set it. Render scale is a separate setting; Audio Processing's **Auto** uses Fast at Potato. Restart the game after changing it. |
 | Combiner Precision | Used only when Accuracy Level is **Custom**. **Accurate** is the default on AMD64 Linux; **Fast** on ARM64 Linux and Android. Fast omits 9-bit combiner rounding to reduce GPU work. Restart the game after changing it. |

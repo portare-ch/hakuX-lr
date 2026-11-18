@@ -58,6 +58,9 @@ def main():
                                  '--note', 'Patch: someone', '--desc', '60 fps [restart]')
         check(rc == 0 and noted.startswith('# Game (USA), default.xbe\n# Patch: someone\ncheats = 1\n') and
               'cheat0_desc = "60 fps [restart]"' in noted and code in noted, 'notes as comments, another name')
+        rc, wide, err = convert(tmp / 'stock.xbe', tmp / 'patched.xbe', '--widescreen')
+        check(rc == 0 and f'cheat0_code = "{code} screen=widescreen"' in wide and 'screen=' not in paired,
+              'the widescreen marker after the runs, only when asked for')
         flips = shutil.which(os.environ.get('FLIPS', 'flips'))
         if flips:
             for kind in ('ips', 'bps'):

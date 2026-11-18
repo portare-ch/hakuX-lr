@@ -229,7 +229,7 @@ def main():
                                        'av: 59.940060 fps, 48000 Hz', 'serialize size: 0', 'unloaded without a game',
                                        'option: hakux_render_scale (Render Scale), default 2',
                                        'option: hakux_crop_overscan (Crop Overscan), default enabled',
-                                       'option: hakux_screen_format (Screen Format), default normal',
+                                       'option: hakux_screen_format (Screen Format), default auto',
                                        'option: hakux_language (Language), default auto',
                                        'option: hakux_video_region (Video Region), default auto',
                                        'option: hakux_rumble (Rumble), default disabled',
@@ -307,7 +307,7 @@ def main():
         disc(root / 'settings.iso', SETTINGS, imports=(24,))
         env = dict(os.environ, HARNESS_LANGUAGE='4')
         run([args.harness, args.core, root / 'settings.iso', 600, root / 'saves'], 0,
-            ('options: render scale 2x, overscan cropped, screen normal, language 3 (auto), video region auto',
+            ('options: render scale 2x, overscan cropped, screen auto, language 3 (auto), video region auto',
              'aspect 1.333',
              'ex: video flags 00080000, AV pack 0, AV region 00400100, language 3', 'guest executed HLT'), env)
         env['HARNESS_OPTIONS'] = (f'{OFF};hakux_render_scale=1;hakux_screen_format=widescreen;hakux_language=french;'
@@ -320,7 +320,7 @@ def main():
         # A value the core doesn't know is its default.
         env['HARNESS_OPTIONS'] = f'{OFF};hakux_render_scale=9;hakux_video_region=pal;hakux_crop_overscan=disabled'
         run([args.harness, args.core, root / 'settings.iso', 600, root / 'saves'], 0,
-            ('options: render scale 2x, overscan shown, screen normal, language 3 (auto), video region pal',
+            ('options: render scale 2x, overscan shown, screen auto, language 3 (auto), video region pal',
              'ex: video flags 00480000, AV pack 0, AV region 00800300, language 3'), env)
         # Changed during the game (the menu), they wait for the next start;
         # the crop, rumble and frame pacing don't. Rumble on asks RetroArch
@@ -444,6 +444,16 @@ def main():
         xp = [args.harness, args.core, root / 'xbepatch.iso', 600, root / 'saves']
         run(xp, 0, ('XBE patch (cheat 1): 1 runs, 2 bytes over default.xbe', 'guest executed HLT'),
             dict(mods, HARNESS_CHEATS=f'{poke}|{patch()}'))
+        # Screen Format's Auto (the default): widescreen while a patch marked screen=widescreen is
+        # applied, normal with another patch; an explicit Normal is not changed
+        run(xp, 0, ('XBE patch (cheat 1): 1 runs, 2 bytes over default.xbe',
+                    'screen format auto: widescreen (a widescreen patch is applied)', 'guest executed HLT'),
+            dict(mods, HARNESS_CHEATS=f'{poke}|{patch()} screen=widescreen'))
+        run(xp, 0, ('XBE patch (cheat 1): 1 runs', 'screen format auto: normal', 'guest executed HLT'),
+            dict(mods, HARNESS_CHEATS=f'{poke}|{patch()}'))
+        run_without(xp, ('XBE patch (cheat 1): 1 runs', 'guest executed HLT'), ('screen format auto',),
+                    dict(mods, HARNESS_CHEATS=f'{poke}|{patch()} screen=widescreen',
+                         HARNESS_OPTIONS=mods['HARNESS_OPTIONS'] + ';hakux_screen_format=normal'))
         xp60 = xp[:3] + [60] + xp[4:]
         run_without(xp60, ('ran 60 frames',), ('guest executed HLT',), dict(mods, HARNESS_CHEATS=poke))
         run_without(xp60, ('XBE patch (cheat 0)', 'ran 60 frames'), ('guest executed HLT',),
