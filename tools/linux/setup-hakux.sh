@@ -14,12 +14,11 @@
 #   --games <dir>     where the games are (default: ~/roms/xbox)
 #   --prefix <dir>    where everything goes (default: ~/.local/share/hakux-lr)
 #   --no-packages     don't install distribution packages
-#   --retroarch <k>   which RetroArch: system (the distribution's package),
-#                     flatpak (org.libretro.RetroArch from Flathub, for this
-#                     user) or appimage (RetroArch's own AMD64 build, kept in
-#                     the prefix). Default: the one in PATH; on SteamOS, and
-#                     where there is no package manager, flatpak, or
-#                     appimage without Flatpak.
+#   --retroarch <k>   system, flatpak or appimage (AppImage is AMD64 only).
+#                     Defaults to RetroArch in PATH, then the distribution's
+#                     package.
+#                     On SteamOS or without a package manager, prefers
+#                     Flatpak, with AppImage as the AMD64 fallback.
 #   --no-steam        on SteamOS, don't add hakuX to the Steam library
 #
 # It installs RetroArch, Vulkan and menu assets with the distribution's
@@ -29,9 +28,9 @@
 # left alone. On AMD64 it checks KVM (/dev/kvm, TSC scaling, UMIP). Run it
 # again to update the core; your own settings go in <prefix>/user.cfg.
 #
-# On a Steam Deck (SteamOS) nothing needs root: RetroArch comes as a Flatpak
-# and hakuX is added to the Steam library, so it starts from Gaming Mode.
-# Games are looked for in EmuDeck's roms/xbox folder when there is one.
+# On SteamOS, installs RetroArch as a user Flatpak and adds hakuX to Steam.
+# Uses EmuDeck's roms/xbox folder when present. Setup does not request root;
+# missing KVM access needs a separate fix before games can run.
 #
 # start-hakux.sh runs on a desktop (Wayland, X11) or, without a display
 # server, straight on KMS (Vulkan VK_KHR_display, udev input), as on
@@ -41,7 +40,7 @@ set -eu
 
 REPO=portare-ch/hakuX-lr
 FLATPAK_ID=org.libretro.RetroArch
-# RetroArch's AMD64 AppImage (it publishes no checksum: this is that file's)
+# Pin the AMD64 AppImage archive; upstream provides no checksum file.
 APPIMAGE_VERSION=1.22.2
 APPIMAGE_URL=https://buildbot.libretro.com/stable/$APPIMAGE_VERSION/linux/x86_64/RetroArch.7z
 APPIMAGE_SHA256=7d62da9a21397d6e1b9490785cedbeafd262781b50115076736fbe8a77ef30e9
@@ -88,7 +87,7 @@ case $rakind in
 esac
 os_id=$(sed -n 's/^ID=//p' /etc/os-release 2>/dev/null | tr -d '"' | head -n1)
 if [ -z "$games" ]; then
-    # EmuDeck's folder, on the internal drive or a card, when there is one
+    # Prefer EmuDeck's folder on the internal drive or an SD card.
     games="$HOME/roms/xbox"
     for d in "$HOME/Emulation/roms/xbox" /run/media/*/Emulation/roms/xbox /run/media/*/*/Emulation/roms/xbox; do
         [ -d "$d" ] && { games=$d; break; }
@@ -102,7 +101,9 @@ case $(uname -m) in
 esac
 [ "$(uname -s)" = Linux ] || die "hakuX-lr needs Linux"
 
-if [ "$(id -u)" -eq 0 ]; then
+if [ "$os_id" = steamos ]; then
+    asroot=none
+elif [ "$(id -u)" -eq 0 ]; then
     asroot=
 elif have sudo; then
     asroot=sudo
@@ -199,9 +200,8 @@ install_packages() {
     fi
 }
 
-# Which RetroArch. SteamOS's system is read-only and its pacman of no use, so
-# there it is the Flatpak (as EmuDeck and Discover install it), which reaches
-# /dev/kvm (--device=all) and the home folder (--filesystem=host).
+# SteamOS has a read-only system. The Flathub package can access /dev/kvm
+# and files in the home folder without installing distribution packages.
 have_pm() { have pacman || have apt-get || have dnf || have zypper; }
 flatpak_has() { have flatpak && flatpak info "$FLATPAK_ID" >/dev/null 2>&1; }
 if [ -z "$rakind" ]; then
@@ -236,14 +236,14 @@ case $rakind in
         [ "$arch" = x86_64 ] || die "RetroArch's AppImage is AMD64 only; use --retroarch flatpak or system"
         ;;
 esac
-# RetroArch, however it is installed (the AppImage's path is set below)
+# The AppImage path is assigned after downloading it.
 ra() {
     case $rakind in
         flatpak) flatpak run "$FLATPAK_ID" "$@" ;;
         *) "$retroarch" "$@" ;;
     esac
 }
-# The Flatpak brings its own Vulkan loader and Mesa: the host's are not looked at.
+# Flatpak supplies its own Vulkan loader and graphics drivers.
 if [ "$rakind" = flatpak ]; then
     :
 elif [ -z "$(vulkan_icds)" ]; then
@@ -272,15 +272,16 @@ add_group() { # <group> <why>
     [ "$(id -u)" -ne 0 ] || return 0
     getent group "$1" >/dev/null 2>&1 || return 0
     id -nG "$user" | tr ' ' '\n' | grep -qx "$1" && return 0
-    if [ "$asroot" = none ]; then
+    if [ "$os_id" = steamos ]; then
+        warn "$user is not in the $1 group ($2). Set a password with passwd if needed, then run: sudo usermod -aG $1 $user"
+        return 0
+    elif [ "$asroot" = none ]; then
         warn "$user is not in the $1 group ($2): as root, run usermod -aG $1 $user"
         return 0
     fi
     say "adding $user to the $1 group ($2)"
     if root usermod -aG "$1" "$user"; then
         groups_added="$groups_added $1"
-    elif [ "$os_id" = steamos ]; then
-        warn "couldn't add $user to the $1 group ($2). In Desktop Mode, set a password with passwd, then run: sudo usermod -aG $1 $user"
     else
         warn "couldn't add $user to the $1 group ($2): run sudo usermod -aG $1 $user"
     fi
@@ -295,6 +296,8 @@ if [ "$arch" = x86_64 ]; then
         else kmod=; fi
         if [ -n "$kmod" ] && [ "$asroot" != none ]; then
             root modprobe "$kmod" || true
+        elif [ -n "$kmod" ] && [ "$os_id" = steamos ]; then
+            warn "KVM is not loaded. Set a password with passwd if needed, then run: sudo modprobe $kmod"
         fi
         [ -e /dev/kvm ] || warn "/dev/kvm is missing: enable AMD SVM / Intel VT-x in the BIOS/UEFI, then load kvm_amd or kvm_intel"
     fi
@@ -357,20 +360,19 @@ if [ "$rakind" = appimage ]; then
         [ "$got" = "$APPIMAGE_SHA256" ] || die "checksum mismatch for RetroArch.7z: $got, expected $APPIMAGE_SHA256"
         mkdir "$tmp/ra"
         in=RetroArch-Linux-x86_64
-        home=$in/RetroArch-Linux-x86_64.AppImage.home/.config/retroarch
+        asset_root=$in/RetroArch-Linux-x86_64.AppImage.home/.config/retroarch
         if have bsdtar; then
             bsdtar -xf "$tmp/RetroArch.7z" -C "$tmp/ra" "$in/RetroArch-Linux-x86_64.AppImage" \
-                "$home/assets/ozone" "$home/assets/pkg" "$home/assets/sounds" || die "couldn't unpack RetroArch.7z"
+                "$asset_root/assets/ozone" "$asset_root/assets/pkg" "$asset_root/assets/sounds" || die "couldn't unpack RetroArch.7z"
         else
             z=$(command -v 7z || command -v 7za)
             "$z" x -y -o"$tmp/ra" "$tmp/RetroArch.7z" "$in/RetroArch-Linux-x86_64.AppImage" \
-                "$home/assets/ozone" "$home/assets/pkg" "$home/assets/sounds" >/dev/null || die "couldn't unpack RetroArch.7z"
+                "$asset_root/assets/ozone" "$asset_root/assets/pkg" "$asset_root/assets/sounds" >/dev/null || die "couldn't unpack RetroArch.7z"
         fi
         mkdir -p "$prefix/retroarch"
         rm -rf "$prefix/retroarch/assets" "$prefix/retroarch/squashfs-root"
-        cp -R "$tmp/ra/$home/assets" "$prefix/retroarch/assets"
-        # the AppImage alone: beside a RetroArch.AppImage.home folder it
-        # would take that as its home
+        cp -R "$tmp/ra/$asset_root/assets" "$prefix/retroarch/assets"
+        # Keep the AppImage separate from its bundled portable home folder.
         cp "$tmp/ra/$in/RetroArch-Linux-x86_64.AppImage" "$prefix/retroarch/.RetroArch.AppImage.new"
         chmod +x "$prefix/retroarch/.RetroArch.AppImage.new"
         mv -f "$prefix/retroarch/.RetroArch.AppImage.new" "$app"
@@ -379,7 +381,7 @@ if [ "$rakind" = appimage ]; then
     fi
     retroarch=$app
     if ! "$app" --version >/dev/null 2>&1; then
-        # no FUSE to mount it with: unpacked, its AppRun starts it
+        # Fall back to extraction when FUSE mounting is unavailable.
         say "unpacking the AppImage (it couldn't be mounted)"
         (cd "$prefix/retroarch" && "$app" --appimage-extract >/dev/null 2>&1) ||
             die "RetroArch's AppImage doesn't run here; try --retroarch flatpak"
@@ -439,8 +441,13 @@ else
         cp "$rel/BUILD-INFO" "$prefix/licenses/" 2>/dev/null || true
     fi
 fi
-# Check this core's glibc requirement; it varies by architecture and build.
-glibc=$(ldd --version 2>/dev/null | sed -n '1s/.* \([0-9][0-9]*\.[0-9][0-9]*\)$/\1/p')
+# Check the libc used by RetroArch, which is inside the runtime for Flatpak.
+if [ "$rakind" = flatpak ]; then
+    libc_version=$(flatpak run --command=ldd "$FLATPAK_ID" --version 2>/dev/null || true)
+else
+    libc_version=$(ldd --version 2>/dev/null || true)
+fi
+glibc=$(printf '%s\n' "$libc_version" | sed -n '1s/.* \([0-9][0-9]*\.[0-9][0-9]*\)$/\1/p')
 need=$(LC_ALL=C grep -ao 'GLIBC_2\.[0-9][0-9]*' "$tmp/hakux_libretro.so" | sort -u -t. -k2,2n | tail -n1)
 need=${need#GLIBC_2.}
 if [ -n "$glibc" ] && [ -n "$need" ]; then
@@ -477,12 +484,11 @@ fi
 cfgval() { # <key> <file>: an uncommented value from a RetroArch config
     sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*\"\{0,1\}\([^\"]*\)\"\{0,1\}[[:space:]]*$/\1/p" "$2" 2>/dev/null | tail -n1
 }
-# Menu assets: the distribution's, which RetroArch finds by itself only
-# with its system configuration, which a --config file replaces.
+# Our --config replaces RetroArch's defaults, so set its asset path explicitly.
 assets=
 case $rakind in
     flatpak)
-        # inside the Flatpak, where its own configuration points
+        # These paths exist inside the sandbox, not on the host.
         assets=$(flatpak run --command=sh "$FLATPAK_ID" -c '
             for d in /app/share/libretro/assets /app/share/retroarch/assets; do
                 [ -d "$d/ozone" ] && { echo "$d"; exit 0; }
@@ -678,7 +684,7 @@ fi
 if [ "$ARCH" = x86_64 ]; then
     [ -e /dev/kvm ] || die "/dev/kvm is missing: enable virtualization (SVM / VT-x) and load kvm_amd or kvm_intel"
     { [ -r /dev/kvm ] && [ -w /dev/kvm ]; } ||
-        die "no access to /dev/kvm: log out and in again after setup-hakux.sh added you to its group"
+        die "no access to /dev/kvm: follow setup-hakux.sh's permission instructions, then log out and in again"
 fi
 
 rt=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
@@ -766,13 +772,13 @@ Categories=Game;Emulator;
 EOF
 fi
 
-# SteamOS: in the Steam library, hakuX starts from Gaming Mode with the
-# Deck's controls (Steam's own gamepad). steamos-add-to-steam asks the
-# running Steam to add it; a second run would add a second entry.
+# Send the shortcut to a running Steam client once, to avoid duplicates.
 steam_added=
-if [ $steam = 1 ] && [ -n "$desktop" ] && have steamos-add-to-steam; then
+if [ $steam = 1 ] && [ "$os_id" = steamos ] && [ -n "$desktop" ]; then
     if [ -f "$prefix/steam-added" ]; then
         steam_added=before
+    elif ! have steamos-add-to-steam || ! pgrep -x steam >/dev/null 2>&1; then
+        steam_added=failed
     elif steamos-add-to-steam "$desktop" >/dev/null 2>&1; then
         : > "$prefix/steam-added"
         steam_added=now
@@ -801,8 +807,8 @@ EOF
 case $steam_added in
     now)
         echo
-        echo "hakuX (Xbox) is in your Steam library now, under Non-Steam: start it there, also in"
-        echo "Gaming Mode, and pick a game with Load Content."
+        echo "Sent hakuX (Xbox) to Steam. Check Non-Steam in your library, then start it in"
+        echo "Gaming Mode and choose Load Content to pick a game."
         ;;
     failed)
         echo

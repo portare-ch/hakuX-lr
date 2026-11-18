@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
 Name=Install hakuX-lr
-Comment=Sets up the hakuX-lr Xbox emulator on a Steam Deck, or updates it
-Exec=sh -c 'f=$(mktemp) && curl -fsSL https://raw.githubusercontent.com/portare-ch/hakuX-lr/master/tools/linux/setup-hakux.sh -o "$f" && sh "$f"; rm -f "$f"; echo; echo "Press Enter to close this window."; read _'
+Comment=Install or update hakuX-lr on Steam Deck
+Exec=sh -c "f=\\$(mktemp) || exit 1; trap 'rm -f \\"\\$f\\"' EXIT; curl -fsSL https://raw.githubusercontent.com/portare-ch/hakuX-lr/master/tools/linux/setup-hakux.sh -o \\"\\$f\\" && sh \\"\\$f\\"; status=\\$?; echo; echo \\"Press Enter to close this window.\\"; read _; exit \\"\\$status\\""
 Icon=applications-games
 Terminal=true
 Categories=Game;Emulator;
