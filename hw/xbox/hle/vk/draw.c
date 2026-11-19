@@ -4345,6 +4345,13 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
             }
         }
         for (unsigned st = 0; st < 4; st++) {
+            /* R16B16 sampled as stored: its halves at 16 bits (psh.h) */
+            HleVkTex *tx = c->tex[st] ? tex_find(c->tex[st]) : NULL;
+            if (tx && tx->fmt == VK_FORMAT_R16G16_UNORM) {
+                k.pk.shadow_point |= (uint8_t)(0x10u << st);
+            }
+        }
+        for (unsigned st = 0; st < 4; st++) {
             /* colour sign (D3DTSIGN_*: A R G B): an uploaded texture's signed
              * 8-bit channels came offset binary (pb/pbres.c) and map back
              * exactly; a target's, and L8's, AL8's, A8's and A8L8's, are read

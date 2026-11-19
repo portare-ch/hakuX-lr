@@ -67,6 +67,10 @@ static const struct {
       { 0, 0, 0x8000u, 0x0080u }, { 0, 0, 2 | 8, 1 | 4 } },
     { { HLE_XFMT_R8B8, HLE_XFMT_LIN_R8B8 },             /* bytes B R */
       { 0, 0x8000u, 0, 0x0080u }, { 0, 1 | 8, 0, 2 | 4 } },
+    /* R16B16, two 16-bit halves: ASIGNED the high one (read as r and a),
+     * GSIGNED the low one (g and b) (nxdk_pgraph_tests' Bump map) */
+    { { HLE_XFMT_V16U16, HLE_XFMT_LIN_V16U16 },
+      { 0x80000000u, 0, 0x00008000u, 0 }, { 1 | 8, 0, 2 | 4, 0 } },
     { { HLE_XFMT_L8, HLE_XFMT_LIN_L8 }, { 0 }, { 0, 1, 2, 4 } },        /* (L, L, L, 1) */
     { { HLE_XFMT_AL8, HLE_XFMT_LIN_AL8 }, { 0 }, { 8, 1, 2, 4 } },      /* (L, L, L, L) */
     { { HLE_XFMT_A8, HLE_XFMT_LIN_A8 }, { 0 }, { 8, 0, 0, 0 } },        /* (1, 1, 1, A) */
