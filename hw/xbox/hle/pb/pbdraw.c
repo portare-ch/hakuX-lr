@@ -4876,11 +4876,7 @@ static void vb_land(void)
 static void draw(void)
 {
     sync_rt();
-    if (g_clip_empty) {
-        skip(SK_DRAW_EMPTY);
-        return;
-    }
-    if (!g_pd.rt && !g_pd.ds) {
+    if (!g_pd.rt && !g_pd.ds && !g_clip_empty) {
         skip(SK_DRAW_NO_TARGET);
         if (g_dlog_left > 0) {
             hle_log("hakuX-lr-hle-pb", "skipped draw: no target (surface format %08x colour %08x zeta "
@@ -4902,6 +4898,21 @@ static void draw(void)
             }
             hle_log("hakuX-lr-hle-pb", "skipped draw: no vertices (prim %u, methods%s)", g_pd.prim, t);
         }
+        return;
+    }
+    if (g_clip_empty) {
+        /* no pixel is drawn; the vertices are still fetched, and the
+         * attribute registers hold the last one's values after it */
+        vb_land();
+        float kept[ATTRS][4];
+        const uint32_t k = carry_take(kept);
+        for (unsigned a = 1; k >> a; a++) {
+            if (((k >> a) & 1) && memcmp(g_pd.cur[a], kept[a], 16)) {
+                memcpy(g_pd.cur[a], kept[a], 16);
+                g_pd.cgen++;
+            }
+        }
+        skip(SK_DRAW_EMPTY);
         return;
     }
     rt_first_land(false);
