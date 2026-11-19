@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## linux-v0.35.1 (Linux ARM64, Linux x86-64, and Android ARM64)
+
+- **Rendering above 1×.** Align scaled rendering with the Xbox pixel grid and use the corresponding pixel when a game reads back a render target. This improves the accuracy of edges and effects that sample rendered images. [#266](https://github.com/portare-ch/hakuX-lr/pull/266) · [#269](https://github.com/portare-ch/hakuX-lr/pull/269)
+- **RetroArch integration.** Add Libretro Buildbot jobs for all three platforms and update the bundled core info with their requirements. [#267](https://github.com/portare-ch/hakuX-lr/pull/267) · [#268](https://github.com/portare-ch/hakuX-lr/pull/268)
+
+On Linux x86-64, 2,996 of 3,576 NV2A test images matched the hardware capture at 2×, 3,008 at 3×, and 2,993 at 4×. Burnout 3 was smoke-tested at 2×. [#269](https://github.com/portare-ch/hakuX-lr/pull/269)
+
 ## linux-v0.35.0 (Linux ARM64, Linux x86-64, and Android ARM64)
 
 RetroArch now lists **Microsoft - Xbox (hakuX-lr)**. Linux and Android downloads use the `hakux-lr-` prefix.
