@@ -1454,6 +1454,39 @@ static bool dither_blend(const HleCmdState *s, uint32_t rt_id)
     return g_acc_fblend && dither_blend_want(s, rt_id);
 }
 
+/* A blended screen pass into a 16-bit target, not dithered: the shader
+ * blends with the target's pixel (fbfetch) and stores the top bits of the
+ * 8-bit result (psh.h HlePshKey.dither 3, 4), where the host's blend rounds
+ * to the nearest step. Rounding holds a buffer that a title fades by
+ * blending it over itself, frame after frame, at its lowest step for good
+ * once the factor is over a half: Burnout 3's glow buffer (ONE /
+ * CONSTANT_ALPHA at 0.56) kept the streaks of everything bright that had
+ * passed, over two fifths of its pixels, and added them to every frame. That
+ * the NV2A drops the low bits is inferred from that (such a buffer has to
+ * reach zero), not measured. Only a screen pass's draw, the kind such a
+ * buffer is fed with: at most two triangles in rasterization order
+ * (caps.raster_order), where one that overlaps the other blends over it as
+ * the fixed-function blend does; without it one triangle alone, which
+ * cannot overlap itself (Burnout 3's pass is one). Not the signed equations
+ * (signed_blend's, or drawn unsigned). */
+static bool top_bits_blend(const HleCmdDraw *c, const HleCmdState *s, uint32_t rt_id)
+{
+    const uint32_t op = s->rs[RS_BLENDOP];
+    if (!g_hvk.caps.fbfetch || !s->psh || s->rs[RS_DITHERENABLE] ||
+        !s->rs[RS_ALPHABLENDENABLE] || op == 0xF005 || op == 0xF006) {
+        return false;
+    }
+    const uint32_t tris = c->prim == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST ? c->count / 3 :
+                          c->prim == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP ||
+                          c->prim == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN ? MAX(c->count, 2u) - 2 : 0;
+    if (!tris || tris > (g_hvk.caps.raster_order ? 2u : 1u)) {
+        return false;
+    }
+    HleVkSurf *rt = hle_surf_get(rt_id);
+    return rt && (rt->aspect & VK_IMAGE_ASPECT_COLOR_BIT) &&
+           (rt->fmt == VK_FORMAT_R5G6B5_UNORM_PACK16 || rt->fmt == VK_FORMAT_A1R5G5B5_UNORM_PACK16);
+}
+
 /*
  * Fixed-function stages (the key's: from the cascade's first) whose texture
  * is the colour target the draw renders: they read its pixel (fbfetch), as
@@ -1543,7 +1576,7 @@ unsigned hle_draw_fb_stages(const HleCmdDraw *c, uint32_t rt_id)
         m |= conv;
     }
     m = m && is_colour_rt(rt_id) ? m : 0;
-    return m | (dither_blend(&g_dr.st, rt_id) ? 0x10 : 0);     /* the shader blends */
+    return m | (dither_blend(&g_dr.st, rt_id) || top_bits_blend(c, &g_dr.st, rt_id) ? 0x10 : 0);   /* the shader blends */
 }
 
 bool g_hle_fbbar_off;
@@ -2685,8 +2718,9 @@ static HlePbResult pipeline_build(const void *key, const uint32_t *tok, uint32_t
         VkPipelineColorBlendStateCreateInfo cb = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
             /* the shader blends (fblend): its reads of the target in
-             * rasterization order */
-            .flags = k->psh && k->pk.fblend ?
+             * rasterization order, where the device has it (without, only
+             * top_bits_blend's one triangle blends there) */
+            .flags = k->psh && k->pk.fblend && g_hvk.caps.raster_order ?
                      VK_PIPELINE_COLOR_BLEND_STATE_CREATE_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_BIT_EXT : 0,
             .logicOpEnable = k->logic != 0, .logicOp = k->logic ? (VkLogicOp)(k->logic - 1) : VK_LOGIC_OP_COPY,
             .attachmentCount = k->cfmt ? 1 : 0, .pAttachments = &ba };
@@ -4611,9 +4645,15 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
      * dither first and use fixed-function blending instead.
      * Signed blending ignores source alpha. */
     const bool vk_cov = lsmooth && g_hvk.caps.smooth_lines;
+    /* Not dithered, a screen pass's draw: the shader blends and stores the
+     * top bits (top_bits_blend). */
+    const bool top_bits = k.blend_en && rt && !k.pk.dither && !vk_cov && top_bits_blend(c, s, rt_id);
+    if (top_bits) {
+        k.pk.dither = rt->fmt == VK_FORMAT_R5G6B5_UNORM_PACK16 ? 3 : 4;
+    }
     if (k.blend_en && s->psh && k.pk.dither && k.op != 0xF005 && k.op != 0xF006 && !vk_cov) {
-        g_dr.dither_blend_want += dither_blend_want(s, rt_id);
-        if (dither_blend(s, rt_id)) {
+        g_dr.dither_blend_want += !top_bits && dither_blend_want(s, rt_id);
+        if (top_bits || dither_blend(s, rt_id)) {
             const bool cst = (k.src >= 0x8001 && k.src <= 0x8004) ||
                              (k.dst >= 0x8001 && k.dst <= 0x8004);
             k.pk.fblend = 1;

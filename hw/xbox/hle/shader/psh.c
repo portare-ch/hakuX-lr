@@ -1099,7 +1099,13 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
                 "    oColor = clamp(%s, 0.0, 1.0); }\n",
             k->fb_const, blend_factor(k->fb_src), blend_factor(k->fb_dst), blend_eq(k->fb_op));
     }
-    if (k->dither) {
+    if (k->dither >= 3) {
+        /* not dithered: the top bits of the blend's 8-bit result */
+        put(&b, "  { ivec3 v8 = ivec3(floor(clamp(oColor.rgb, 0.0, 1.0) * 255.0 + 0.5));\n"
+                "    oColor.rgb = vec3(v8 >> %s) / %s; }\n",
+            k->dither == 3 ? "ivec3(3, 2, 3)" : "ivec3(3)",
+            k->dither == 3 ? "vec3(31.0, 63.0, 31.0)" : "vec3(31.0)");
+    } else if (k->dither) {
         /* ordered dithering (a 4 x 4 Bayer matrix, by guest pixel: the
          * target's resolution scale divided out, so a scaled target holds the
          * pattern a title samples back) into the target's 5 / 6 bits. After
