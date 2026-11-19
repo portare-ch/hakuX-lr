@@ -1,5 +1,5 @@
 /*
- * hakuX native core — objects and handles.
+ * hakuX-lr native core — objects and handles.
  *
  * Objects live in guest memory as on the Xbox: an OBJECT_HEADER
  * (PointerCount, HandleCount, Type, Flags) followed by the body; handles
@@ -65,7 +65,7 @@ uint32_t nc_ob_create(NcKernel *k, enum NcObType type, uint32_t body_size)
 {
     if (freeable(type) && g_ob_size[type] != UINT32_MAX) {
         if (g_ob_size[type] && g_ob_size[type] != body_size) {
-            nc_log("hakuX-native", "ob: type %u objects of %u and %u bytes: not freed", type, g_ob_size[type],
+            nc_log("hakuX-lr-native", "ob: type %u objects of %u and %u bytes: not freed", type, g_ob_size[type],
                    body_size);
             g_ob_size[type] = UINT32_MAX;   /* for good: the sizes are mixed */
         } else {
@@ -92,7 +92,7 @@ uint32_t nc_ob_handle(NcKernel *k, uint32_t object, enum NcObType type)
             return i * 4;
         }
     }
-    nc_log("hakuX-native", "ob: out of handles");
+    nc_log("hakuX-lr-native", "ob: out of handles");
     return 0;
 }
 
@@ -198,7 +198,7 @@ static void name_ignored(NcKernel *k, uint32_t attrs, const char *who)
     static bool told;
     if (attrs && nc_vm_rd32(k->vm, attrs + 4) && !told) {
         told = true;
-        nc_log("hakuX-native", "ob: %s: the object's name is not entered in the namespace", who);
+        nc_log("hakuX-lr-native", "ob: %s: the object's name is not entered in the namespace", who);
     }
 }
 

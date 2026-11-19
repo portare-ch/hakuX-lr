@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — front-end -> back-end commands (spec §5.3).
+ * hakuX-lr HLE GPU — front-end -> back-end commands (spec §5.3).
  * Every record is { HleCmdHdr, payload } padded to 8 bytes.
  */
 #ifndef HW_XBOX_HLE_FRONT_CMD_H

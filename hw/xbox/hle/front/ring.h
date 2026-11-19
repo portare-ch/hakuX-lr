@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — single-producer single-consumer command ring (§5.3).
+ * hakuX-lr HLE GPU — single-producer single-consumer command ring (§5.3).
  * Producer: vCPU thread. Consumer: HLE render thread.
  */
 #ifndef HW_XBOX_HLE_FRONT_RING_H

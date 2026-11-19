@@ -42,7 +42,7 @@ jobs:
             *) v=ci-$(git rev-parse --short=10 HEAD) ;;
           esac
           echo "version=$v" >> "$GITHUB_OUTPUT"
-          echo "hakuX $v"
+          echo "hakuX-lr $v"
 
       # the pinned sources (linux-deps.json), fetched again when it changes
       - uses: actions/cache@v4
@@ -51,7 +51,7 @@ jobs:
           key: linux-deps-${{ hashFiles('tools/native/linux-deps.json') }}
 
       - name: Image
-        run: docker build --tag hakux-linux --file tools/native/Dockerfile.linux tools/native
+        run: docker build --tag hakux-lr-linux --file tools/native/Dockerfile.linux tools/native
 
       # root in the container, the checkout the runner's: git is told it's safe
       - name: Build and check
@@ -59,14 +59,14 @@ jobs:
           docker run --rm --volume "$PWD:/src" --workdir /src \
             --env JOBS=4 --env GIT_CONFIG_COUNT=1 \
             --env GIT_CONFIG_KEY_0=safe.directory --env GIT_CONFIG_VALUE_0='*' \
-            hakux-linux sh tools/native/linux-ci.sh "${{ steps.version.outputs.version }}"
+            hakux-lr-linux sh tools/native/linux-ci.sh "${{ steps.version.outputs.version }}"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: hakux-${{ steps.version.outputs.version }}-aarch64
+          name: hakux-lr-${{ steps.version.outputs.version }}-aarch64
           path: |
-            build/package/hakux-${{ steps.version.outputs.version }}-aarch64.tar.gz
-            build/package/hakux-${{ steps.version.outputs.version }}-aarch64.tar.gz.sha256
+            build/package/hakux-lr-${{ steps.version.outputs.version }}-aarch64.tar.gz
+            build/package/hakux-lr-${{ steps.version.outputs.version }}-aarch64.tar.gz.sha256
           if-no-files-found: error
 
   # Build and test the x86-64 KVM core and DSP JIT in the amd64 image.
@@ -85,7 +85,7 @@ jobs:
             *) v=ci-$(git rev-parse --short=10 HEAD) ;;
           esac
           echo "version=$v" >> "$GITHUB_OUTPUT"
-          echo "hakuX $v"
+          echo "hakuX-lr $v"
 
       - uses: actions/cache@v4
         with:
@@ -93,7 +93,7 @@ jobs:
           key: linux-deps-${{ hashFiles('tools/native/linux-deps.json') }}
 
       - name: Image
-        run: docker build --tag hakux-linux --file tools/native/Dockerfile.linux tools/native
+        run: docker build --tag hakux-lr-linux --file tools/native/Dockerfile.linux tools/native
 
       # the KVM backend's guest CPU (#56): the runner's /dev/kvm, handed in
       - name: Build and check
@@ -101,14 +101,14 @@ jobs:
           docker run --rm --volume "$PWD:/src" --workdir /src --device /dev/kvm \
             --env JOBS=4 --env GIT_CONFIG_COUNT=1 \
             --env GIT_CONFIG_KEY_0=safe.directory --env GIT_CONFIG_VALUE_0='*' \
-            hakux-linux sh tools/native/linux-ci-x86_64.sh "${{ steps.version.outputs.version }}"
+            hakux-lr-linux sh tools/native/linux-ci-x86_64.sh "${{ steps.version.outputs.version }}"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: hakux-${{ steps.version.outputs.version }}-x86_64
+          name: hakux-lr-${{ steps.version.outputs.version }}-x86_64
           path: |
-            build/package/hakux-${{ steps.version.outputs.version }}-x86_64.tar.gz
-            build/package/hakux-${{ steps.version.outputs.version }}-x86_64.tar.gz.sha256
+            build/package/hakux-lr-${{ steps.version.outputs.version }}-x86_64.tar.gz
+            build/package/hakux-lr-${{ steps.version.outputs.version }}-x86_64.tar.gz.sha256
           if-no-files-found: error
 
   # Experimental Android core for RetroArch: build with the pinned NDK r29.
@@ -142,10 +142,10 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: hakux-${{ steps.version.outputs.version }}-android-arm64
+          name: hakux-lr-${{ steps.version.outputs.version }}-android-arm64
           path: |
-            build/package/hakux-${{ steps.version.outputs.version }}-android-arm64.zip
-            build/package/hakux-${{ steps.version.outputs.version }}-android-arm64.zip.sha256
+            build/package/hakux-lr-${{ steps.version.outputs.version }}-android-arm64.zip
+            build/package/hakux-lr-${{ steps.version.outputs.version }}-android-arm64.zip.sha256
           if-no-files-found: error
 
   release:
@@ -161,7 +161,7 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          pattern: hakux-${{ needs.build.outputs.version }}-*
+          pattern: hakux-lr-${{ needs.build.outputs.version }}-*
           merge-multiple: true
           path: dist
 
@@ -173,7 +173,7 @@ jobs:
         run: |
           previous=$(git describe --tags --abbrev=0 --match 'linux-v*' --exclude "$GITHUB_REF_NAME" "$GITHUB_SHA" 2>/dev/null || true)
           python3 tools/native/linux-release-notes.py "$VERSION" "$GITHUB_SHA" "$previous" "$RUN_URL" > notes.md
-          title="hakuX-lr $VERSION for Linux (aarch64, x86-64)"
+          title="hakuX-lr $VERSION"
           case "$VERSION" in
             *-exp*) title="$title — experimental" ;;
           esac

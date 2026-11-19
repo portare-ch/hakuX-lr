@@ -105,13 +105,13 @@ void *nc_vk_layers(void *drv_gipa)
     VkNegotiateLayerInterface ni = { .sType = LAYER_NEGOTIATE_INTERFACE_STRUCT,
                                      .loaderLayerInterfaceVersion = 2 };
     if (!neg || neg(&ni) != VK_SUCCESS || !ni.pfnGetInstanceProcAddr) {
-        nc_log("hakuX-app", "Vulkan validation: %s not loaded (%s): none", LAYER_LIB,
+        nc_log("hakuX-lr-app", "Vulkan validation: %s not loaded (%s): none", LAYER_LIB,
                h ? "no layer interface" : dlerror());
         return drv_gipa;
     }
     g_drv_gipa = (PFN_vkGetInstanceProcAddr)drv_gipa;
     g_layer_gipa = ni.pfnGetInstanceProcAddr;
-    nc_log("hakuX-app", "Vulkan validation: %s over the custom driver (layer interface %u)",
+    nc_log("hakuX-lr-app", "Vulkan validation: %s over the custom driver (layer interface %u)",
            LAYER_LIB, ni.loaderLayerInterfaceVersion);
     return (void *)get_instance_proc;
 }

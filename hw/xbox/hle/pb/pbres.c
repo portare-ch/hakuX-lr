@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — push-buffer mode's resources (see pbres.h).
+ * hakuX-lr HLE GPU — push-buffer mode's resources (see pbres.h).
  */
 #include "hw/xbox/hle/base.h"
 #include "hw/xbox/hle/hle.h"
@@ -271,7 +271,7 @@ static bool yuv_define(uint32_t id, const uint32_t h5[5], const HleResDesc *d, u
     }
     hle_pvideo_convert(src, pitch, d->w, d->h, d->fmt == HLE_XFMT_UYVY, NULL, dst);
     if (g_lg.yuv++ < 4) {               /* movies: when their frames start converting */
-        hle_log("hakuX-hle-front", "YUV texture %u: %ux%u %s converted (#%u of 4 logged)", id,
+        hle_log("hakuX-lr-hle-front", "YUV texture %u: %ux%u %s converted (#%u of 4 logged)", id,
                 d->w, d->h, d->fmt == HLE_XFMT_UYVY ? "UYVY" : "YUY2", g_lg.yuv);
     }
     HleCmdTex *c = hle_fe_begin(HLE_OP_TEX, sizeof(*c));
@@ -296,7 +296,7 @@ static bool tex_desc(const uint32_t h5[5], HleResDesc *dp, HleResInfo *rip)
     HleResInfo ri;
     if (!hle_res_from_header(h5[0], h5[3], h5[4], &d) || !hle_res_info(&d, &ri)) {
         if (g_lg.headers++ < 8) {
-            hle_log("hakuX-hle-front", "texture header not understood: %08x %08x %08x %08x "
+            hle_log("hakuX-lr-hle-front", "texture header not understood: %08x %08x %08x %08x "
                     "%08x (not bound; first 8 logged)", h5[0], h5[1], h5[2], h5[3], h5[4]);
         }
         return false;
@@ -305,7 +305,7 @@ static bool tex_desc(const uint32_t h5[5], HleResDesc *dp, HleResInfo *rip)
         d.kind != HLE_RK_VOLUME) {
         if (!(g_lg.kinds & (1u << (d.kind & 31)))) {
             g_lg.kinds |= 1u << (d.kind & 31);
-            hle_log("hakuX-hle-front", "texture kind %u not bound (%08x %08x %08x %08x %08x)",
+            hle_log("hakuX-lr-hle-front", "texture kind %u not bound (%08x %08x %08x %08x %08x)",
                     d.kind, h5[0], h5[1], h5[2], h5[3], h5[4]);
         }
         return false;
@@ -337,7 +337,7 @@ static bool tex_define(uint32_t id, const uint32_t h5[5], const HleResDesc *dp,
             }
             if (!g_lg.fmts[i]) {
                 g_lg.fmts[i] = d.fmt + 1;
-                hle_log("hakuX-hle-front", "texture format 0x%x not uploaded yet (%ux%u kind %u)",
+                hle_log("hakuX-lr-hle-front", "texture format 0x%x not uploaded yet (%ux%u kind %u)",
                         d.fmt, d.w, d.h, d.kind);
                 break;
             }
@@ -496,7 +496,7 @@ static bool tex_define(uint32_t id, const uint32_t h5[5], const HleResDesc *dp,
                                                  hle_host_base_path(), id, oxfmt, d.w, d.h,
                                                  levels);
             g_file_set_contents(p, (const char *)dst, total, NULL);
-            hle_log("hakuX-hle-front", "texdump %s (%u bytes)", p, total);
+            hle_log("hakuX-lr-hle-front", "texdump %s (%u bytes)", p, total);
         }
     }
     *host_bytes = total;

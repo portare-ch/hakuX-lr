@@ -1,7 +1,7 @@
 /* Copyright (C) 2026-present PortareOS */
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * hakuX HLE GPU — the NV2A's primitives as the triangles, lines and points
+ * hakuX-lr HLE GPU — the NV2A's primitives as the triangles, lines and points
  * Vulkan draws (prim.h).
  */
 #include "hw/xbox/hle/pb/prim.h"

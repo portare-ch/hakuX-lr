@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — strip batching (see batch.c).
+ * hakuX-lr HLE GPU — strip batching (see batch.c).
  */
 #ifndef HW_XBOX_HLE_VK_BATCH_H
 #define HW_XBOX_HLE_VK_BATCH_H

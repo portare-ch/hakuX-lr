@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — the window's presenter (vk/swapchain.c): the front frame
+ * hakuX-lr HLE GPU — the window's presenter (vk/swapchain.c): the front frame
  * drawn into the app's window through a Vulkan swapchain: an Android window,
  * or on Linux an SDL window (KMSDRM) made with SDL_WINDOW_VULKAN.
  */

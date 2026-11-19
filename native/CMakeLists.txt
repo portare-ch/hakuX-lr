@@ -1,4 +1,4 @@
-# hakuX native core (QEMU-free): FEXCore fork + reimplemented Xbox kernel.
+# hakuX-lr native core (QEMU-free): FEXCore fork + reimplemented Xbox kernel.
 #
 # hakux_native is the core library; xboxrun runs a title from the command
 # line on the device (adb shell) for the frontier loop. Cross-compiled with
@@ -56,7 +56,7 @@ if(NOT ANDROID)
 endif()
 option(HAKUX_BUILD_APP "Android: build the app's native library (hakuxcore)" ${ANDROID})
 option(HAKUX_BUILD_TESTS "Build native Linux smoke tests" ON)
-option(HAKUX_BUILD_LIBRETRO "Build the libretro core (hakux_libretro.so; on Android hakux_libretro_android.so), everything as PIC" OFF)
+option(HAKUX_BUILD_LIBRETRO "Build the libretro core (hakux-lr_libretro.so; on Android hakux-lr_libretro_android.so), everything as PIC" OFF)
 option(HAKUX_LR_END_PROCESS "libretro, PortareOS's build: a stop that hangs ends RetroArch's process, and HAKUX_LR_STOP=0 brings back ending it when the game closes (a title's relaunch then starts it again)" OFF)
 set(HAKUX_VERSION "dev" CACHE STRING "The version the libretro core reports")
 if(HAKUX_BUILD_LIBRETRO)
@@ -188,7 +188,7 @@ else()
 endif()
 target_include_directories(hakux_native PUBLIC "${NC_REPO}")
 # Rebuild the embedded dashboard when the pinned XBE changes.
-set(NC_DASH_XBE "${NC_REPO}/native/dash/hakux-dash.xbe")
+set(NC_DASH_XBE "${NC_REPO}/native/dash/hakux-lr-dash.xbe")
 set_source_files_properties(core/dash_blob.c PROPERTIES
   COMPILE_DEFINITIONS "NC_DASH_XBE=\"${NC_DASH_XBE}\""
   OBJECT_DEPENDS "${NC_DASH_XBE}")

@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — the NV2A fixed-function vertex stage as GLSL (pure), for
+ * hakuX-lr HLE GPU — the NV2A fixed-function vertex stage as GLSL (pure), for
  * push-buffer mode's draws in Kelvin's fixed-function mode
  * (SET_TRANSFORM_EXECUTION_MODE 0). The state is the hardware's as the
  * methods set it, not D3D's (shader/ff_gen.c models D3D's): D3D

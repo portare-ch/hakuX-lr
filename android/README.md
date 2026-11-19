@@ -1,6 +1,8 @@
-# Android build (upstream)
+# Upstream hakuX Android app
 
-Upstream Android build notes. Android builds are not validated by this fork.
+The instructions below cover the upstream hakuX app kept in this tree.
+hakuX-lr ships on Android as a RetroArch core. See the
+[hakuX-lr installation guide](../README.md#play-on-android).
 
 The app packages native libraries from `app/src/main/jniLibs`. Build the
 core first, copy its libraries there, then build the APK.

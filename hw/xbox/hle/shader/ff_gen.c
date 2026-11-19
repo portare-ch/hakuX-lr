@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — fixed-function GLSL generators (pure). See ff.h.
+ * hakuX-lr HLE GPU — fixed-function GLSL generators (pure). See ff.h.
  * - VS: XYZRHW (screen space) and transformed positions; D3D8 lighting
  *   (directional, point, spot; material colour sources, specular, local
  *   viewer), vertex blending (up to 3 weights), texgen (camera-space

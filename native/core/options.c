@@ -1,5 +1,5 @@
 /*
- * hakuX native core — a run's options (options.h), shared by the app's front
+ * hakuX-lr native core — a run's options (options.h), shared by the app's front
  * end (native/app/app_main.c) and xboxrun (native/run/xboxrun.c).
  */
 #include "native/core/options.h"
@@ -38,7 +38,7 @@ bool nc_option(NcOptions *o, const char *arg)
         nc_core_set_dashboard(true);            /* no disc: the disc argument is "none" */
     } else if ((v = value(arg, "loadstate="))) {
         nc_core_set_loadstate(v);
-        nc_log("hakuX-app", "savestate %s", v);
+        nc_log("hakuX-lr-app", "savestate %s", v);
     } else if ((v = value(arg, "mods="))) {
         nc_mods_set_manifest(v);                /* read as the disc opens */
     } else if ((v = value(arg, "version="))) {
@@ -47,7 +47,7 @@ bool nc_option(NcOptions *o, const char *arg)
         nc_hle_set_frame_pace(atoi(v) ? 2 : 0); /* the app's on: two swaps back */
     } else if ((v = value(arg, "scale="))) {
         nc_hle_set_render_scale(atoi(v));
-        nc_log("hakuX-app", "render scale %sx", v);
+        nc_log("hakuX-lr-app", "render scale %sx", v);
     } else if ((v = value(arg, "asyncpipe="))) {
         o->async_pipe = atoi(v) != 0;
     } else if ((v = value(arg, "prebuild="))) {
@@ -70,14 +70,14 @@ bool nc_option(NcOptions *o, const char *arg)
                                             : NC_AV_PACK_HDTV;
     } else if ((v = value(arg, "lang="))) {
         nc_kernel_set_language(atoi(v));
-        nc_log("hakuX-app", "console language %s", v);
+        nc_log("hakuX-lr-app", "console language %s", v);
     } else if ((v = value(arg, "clock="))) {
         nc_kernel_set_clock(strtoll(v, NULL, 10));  /* none: the phone's time */
     } else if ((v = value(arg, "tz="))) {
         nc_kernel_set_time_zone(atoi(v));           /* none: the phone's zone */
     } else if ((v = value(arg, "cheats="))) {
         nc_online_set_cheats(atoi(v) != 0);
-        nc_log("hakuX-app", "Cheats %s", atoi(v) ? "on: Xbox Live off in a game they change" : "off");
+        nc_log("hakuX-lr-app", "Cheats %s", atoi(v) ? "on: Xbox Live off in a game they change" : "off");
     } else {
         return false;
     }
@@ -90,7 +90,7 @@ void nc_options_apply(const NcOptions *o)
      * 480p/720p/1080i) and the cable it finds (HD modes need component). */
     nc_kernel_set_video(o->video, o->av_pack);
     if (o->video >= 0) {
-        nc_log("hakuX-app", "video flags %08llx, AV pack %d", (unsigned long long)o->video, o->av_pack);
+        nc_log("hakuX-lr-app", "video flags %08llx, AV pack %d", (unsigned long long)o->video, o->av_pack);
     }
     if (o->uncap) {
         setenv("HAKUX_HLE_UNCAP", "1", 1);
@@ -98,6 +98,6 @@ void nc_options_apply(const NcOptions *o)
         unsetenv("HAKUX_HLE_UNCAP");
     }
     nc_hle_set_pipeline_options(o->async_pipe, o->prebuild);
-    nc_log("hakuX-app", "shaders: asynchronous compilation %s, cached ones built before the game %s",
+    nc_log("hakuX-lr-app", "shaders: asynchronous compilation %s, cached ones built before the game %s",
            o->async_pipe ? "on" : "off", o->prebuild ? "on" : "off");
 }

@@ -1,5 +1,5 @@
 /*
- * hakuX native core — threads and the scheduler.
+ * hakuX-lr native core — threads and the scheduler.
  *
  * Every guest thread runs on the core's one JIT thread. A thread that isn't
  * running keeps its CPU state in NcThread.ctx; switching happens inside a
@@ -82,7 +82,7 @@ bool nc_ps_stack_alloc(NcKernel *k, uint32_t size, uint32_t *base)
 {
     *base = nc_mm_sys_alloc(k, size, true, false);
     if (!*base) {
-        nc_log("hakuX-native", "ps: no room for a stack of %u KiB", size >> 10);
+        nc_log("hakuX-lr-native", "ps: no room for a stack of %u KiB", size >> 10);
     }
     return *base != 0;
 }
@@ -106,7 +106,7 @@ static NcThread *thread_create(NcKernel *k, uint32_t stack_size, uint32_t tls_si
         }
     }
     if (!t) {
-        nc_log("hakuX-native", "ps: out of thread slots");
+        nc_log("hakuX-lr-native", "ps: out of thread slots");
         return NULL;
     }
     if ((unsigned)(t - k->threads) + 1 > k->threads_hi) {
@@ -210,7 +210,7 @@ void nc_ps_old_stacks(NcKernel *k)
         }
     }
     if (n) {
-        nc_log("hakuX-native", "ps: %u threads from a state without the FX save area: a page over each stack", n);
+        nc_log("hakuX-lr-native", "ps: %u threads from a state without the FX save area: a page over each stack", n);
     }
 }
 
@@ -256,7 +256,7 @@ NcThread *nc_ps_kernel_thread(NcKernel *k, uint32_t stack_size, int priority)
     NcThread *t = thread_create(k, stack_size, 0, 0);
     if (t) {
         nc_ke_priority_init(k, t, priority);
-        nc_log("hakuX-native", "ps: kernel thread %u, priority %d, stack %08x-%08x", t->id, priority,
+        nc_log("hakuX-lr-native", "ps: kernel thread %u, priority %d, stack %08x-%08x", t->id, priority,
                t->stack_limit, t->stack_base);
     }
     return t;
@@ -547,7 +547,7 @@ static uint64_t PsCreateSystemThreadEx(NcKernel *k, NcFrame *f, const uint32_t *
     }
     t->state = NC_T_READY;
     t->suspend = (a[7] & 0xff) ? 1 : 0;
-    nc_log("hakuX-native", "ps: thread %u created: start %08x (%s), stack %08x-%08x, tls %u%s", t->id,
+    nc_log("hakuX-lr-native", "ps: thread %u created: start %08x (%s), stack %08x-%08x, tls %u%s", t->id,
            a[5], a[9] ? "via system routine" : "direct", t->stack_limit, t->stack_base, a[3],
            t->suspend ? ", suspended" : "");
     const uint32_t ctx[NC_KCONT_WORDS] = {0, t->ethread, t->id, 1, NC_STATUS_SUCCESS};
@@ -618,7 +618,7 @@ void nc_ps_debug_resume(NcKernel *k, unsigned id)
     for (unsigned i = 0; i < NC_MAX_THREADS; i++) {
         NcThread *t = &k->threads[i];
         if (t->state != NC_T_FREE && t->id == id) {
-            nc_log("hakuX-native", "debug: t%u resumed (suspend count was %u)", id, resume(k, t));
+            nc_log("hakuX-lr-native", "debug: t%u resumed (suspend count was %u)", id, resume(k, t));
             return;
         }
     }
@@ -686,7 +686,7 @@ static uint64_t KeAlertResumeThread(NcKernel *k, NcFrame *f, const uint32_t *a)
 /* PsTerminateSystemThread(ExitStatus): never returns. */
 static uint64_t PsTerminateSystemThread(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
-    nc_log("hakuX-native", "ps: thread %u exits (%08x)", k->current ? k->current->id : 0, a[0]);
+    nc_log("hakuX-lr-native", "ps: thread %u exits (%08x)", k->current ? k->current->id : 0, a[0]);
     if (k->current) {
         thread_exit(k, f, a[0]);
     }
@@ -723,7 +723,7 @@ void nc_kernel_dump_threads(NcKernel *k, int fd)
         const bool cur = t == k->current;
         const uint32_t eip = cur && k->frame ? nc_frame_eip(k->frame) : nc_context_eip(&t->ctx);
         const uint32_t esp = cur && k->frame ? nc_frame_gpr(k->frame, NC_ESP) : nc_context_gpr(&t->ctx, NC_ESP);
-        int n = snprintf(line, sizeof(line), "hakuX-native-frontier:   thread t%u %s prio %d%s eip %08x esp %08x",
+        int n = snprintf(line, sizeof(line), "hakuX-lr-native-frontier:   thread t%u %s prio %d%s eip %08x esp %08x",
                          t->id, k_state[t->state], t->priority, t->suspend ? " suspended" : "", eip, esp);
         if (t->state == NC_T_WAITING) {
             n += snprintf(line + n, sizeof(line) - (size_t)n, " | wait%s%s", t->wait.wait_all ? " all" : "",

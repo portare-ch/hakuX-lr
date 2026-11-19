@@ -1,5 +1,5 @@
 /*
- * hakuX HLE — the debug properties (debug.hakux.*): every read goes through
+ * hakuX-lr HLE — the debug properties (debug.hakux.*): every read goes through
  * hle_prop_get, and the on-demand ones that act on a new value through
  * hle_prop_new. For the latter, the value seen at the first poll is the
  * baseline, an empty one included (a property reset to '' before a run);

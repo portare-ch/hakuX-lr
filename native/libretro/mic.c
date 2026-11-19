@@ -41,7 +41,7 @@ static void mic_close(void)
     if (g_mic.handle) {
         g_mic.mic.close_mic(g_mic.handle);
         g_mic.handle = NULL;
-        nc_log("hakuX-libretro", "communicator: microphone closed");
+        nc_log("hakuX-lr", "communicator: microphone closed");
     }
 }
 
@@ -55,7 +55,7 @@ static void mic_open(int rate)
             mic.get_params && mic.set_mic_state && mic.read_mic) {
             g_mic.mic = mic;
         } else {
-            nc_log("hakuX-libretro", "communicator: RetroArch has no microphone (Settings > Audio > Microphone): "
+            nc_log("hakuX-lr", "communicator: RetroArch has no microphone (Settings > Audio > Microphone): "
                    "it hears silence");
         }
     }
@@ -66,7 +66,7 @@ static void mic_open(int rate)
     const retro_microphone_params_t want = {(unsigned)rate};
     g_mic.handle = g_mic.mic.open_mic(&want);
     if (!g_mic.handle) {
-        nc_log("hakuX-libretro", "communicator: RetroArch opened no microphone: it hears silence");
+        nc_log("hakuX-lr", "communicator: RetroArch opened no microphone: it hears silence");
         return;
     }
     retro_microphone_params_t got = want;
@@ -74,12 +74,12 @@ static void mic_open(int rate)
         got.rate = (unsigned)rate;
     }
     if (!g_mic.mic.set_mic_state(g_mic.handle, true)) {
-        nc_log("hakuX-libretro", "communicator: RetroArch's microphone didn't start: it hears silence");
+        nc_log("hakuX-lr", "communicator: RetroArch's microphone didn't start: it hears silence");
         mic_close();
         return;
     }
     g_mic.rate = got.rate;
-    nc_log("hakuX-libretro", "communicator: microphone open, %u Hz (the title's %d)", got.rate, rate);
+    nc_log("hakuX-lr", "communicator: microphone open, %u Hz (the title's %d)", got.rate, rate);
 }
 
 void nc_lr_mic_run(void)
@@ -96,7 +96,7 @@ void nc_lr_mic_run(void)
     if (!rate || !packets || g_mic.idle >= IDLE_RUNS) {
         if (g_mic.active) {
             g_mic.active = false;
-            nc_log("hakuX-libretro", "communicator: the title stopped reading the microphone");
+            nc_log("hakuX-lr", "communicator: the title stopped reading the microphone");
             mic_close();
         }
         return;

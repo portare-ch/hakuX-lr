@@ -16,7 +16,7 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, see <http://www.gnu.org/licenses/>.
  */
-/* hakuX native core: the same filter (31-tap HRIR convolution per channel,
+/* hakuX-lr native core: the same filter (31-tap HRIR convolution per channel,
  * an interaural delay with linear interpolation, parameters moved across
  * each frame), laid out for NEON (and SSE2, AVX2 + FMA on x86-64). The delay line holds its samples twice, so
  * any delay's window is contiguous; the coefficients are stored reversed

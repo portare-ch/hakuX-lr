@@ -146,7 +146,7 @@ static bool init(void)
         T.vkCreateSampler(g_hvk.dev, &sci, NULL, &g_gm.smp) != VK_SUCCESS ||
         T.vkCreateDescriptorPool(g_hvk.dev, &dpi, NULL, &g_gm.pool) != VK_SUCCESS ||
         T.vkCreateBuffer(g_hvk.dev, &bci, NULL, &g_gm.ubo) != VK_SUCCESS) {
-        hle_log("hakuX-hle-back", "display pass: setup failed (no gamma ramps, overlays blitted)");
+        hle_log("hakuX-lr-hle-back", "display pass: setup failed (no gamma ramps, overlays blitted)");
         return false;
     }
     VkMemoryRequirements mr;
@@ -159,7 +159,7 @@ static bool init(void)
         T.vkBindBufferMemory(g_hvk.dev, g_gm.ubo, g_gm.mem, 0) != VK_SUCCESS ||
         T.vkMapMemory(g_hvk.dev, g_gm.mem, 0, VK_WHOLE_SIZE, 0, (void **)&g_gm.map) !=
             VK_SUCCESS) {
-        hle_log("hakuX-hle-back", "display pass: buffer failed (no gamma ramps, overlays blitted)");
+        hle_log("hakuX-lr-hle-back", "display pass: buffer failed (no gamma ramps, overlays blitted)");
         return false;
     }
     VkDescriptorSetLayout ls[GM_SLOTS] = { g_gm.dsl, g_gm.dsl, g_gm.dsl };
@@ -219,12 +219,12 @@ static bool init(void)
         T.vkDestroyShaderModule(g_hvk.dev, fm, NULL);
     }
     if (!g_gm.pipe) {
-        hle_log("hakuX-hle-back", "display pass: pipeline failed (no gamma ramps, overlays blitted)");
+        hle_log("hakuX-lr-hle-back", "display pass: pipeline failed (no gamma ramps, overlays blitted)");
         return false;
     }
     g_gm.failed = false;
     g_gm.ready = true;
-    hle_log("hakuX-hle-back", "display pass ready");
+    hle_log("hakuX-lr-hle-back", "display pass ready");
     return true;
 }
 

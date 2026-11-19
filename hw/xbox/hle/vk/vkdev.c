@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — Vulkan instance/device, floor + plus capability tiers.
+ * hakuX-lr HLE GPU — Vulkan instance/device, floor + plus capability tiers.
  */
 #include "hw/xbox/hle/base.h"
 
@@ -55,7 +55,7 @@ void hle_vk_lose(VkResult r, const char *what)
     }
     char why[160];
     snprintf(why, sizeof(why), "stopped responding (%s in %s)", hle_vk_result_text(r), what);
-    hle_log("hakuX-hle-back", "FATAL: the GPU %s: nothing more is drawn", why);
+    hle_log("hakuX-lr-hle-back", "FATAL: the GPU %s: nothing more is drawn", why);
     hle_tl_lose();
     hle_host_gpu_lost(why);
 }
@@ -76,7 +76,7 @@ bool hle_vk_check(VkResult r, const char *what)
     }
     static unsigned s_said;
     if (__atomic_fetch_add(&s_said, 1, __ATOMIC_RELAXED) < 16) {
-        hle_log("hakuX-hle-back", "vk: %s: %s", what, hle_vk_result_text(r));
+        hle_log("hakuX-lr-hle-back", "vk: %s: %s", what, hle_vk_result_text(r));
     }
     return false;
 }
@@ -214,13 +214,13 @@ static void log_unsupported(const void *want, const void *have)
             h = h->pNext;
         }
         if (i == ARRAY_SIZE(k_feat) || !h) {
-            hle_log("hakuX-hle-back", "vk: features: sType %d not checked", (int)w->sType);
+            hle_log("hakuX-lr-hle-back", "vk: features: sType %d not checked", (int)w->sType);
             continue;
         }
         const VkBool32 *a = (const VkBool32 *)(w + 1), *b = (const VkBool32 *)(h + 1);
         for (unsigned f = 0; f < k_feat[i].n; f++) {
             if (a[f] && !b[f]) {
-                hle_log("hakuX-hle-back", "vk: features: %s[%u] asked for, not supported",
+                hle_log("hakuX-lr-hle-back", "vk: features: %s[%u] asked for, not supported",
                         k_feat[i].name, f);
             }
         }
@@ -291,11 +291,11 @@ static void caps_override(HleCaps *c)
             i++;
         }
         if (*t != '-' || i == ARRAY_SIZE(k_caps)) {
-            hle_log("hakuX-hle-back", "caps: \"%s\" ignored (\"-name\" turns one off)", t);
+            hle_log("hakuX-lr-hle-back", "caps: \"%s\" ignored (\"-name\" turns one off)", t);
             continue;
         }
         *(bool *)((char *)c + k_caps[i].off) = false;
-        hle_log("hakuX-hle-back", "caps: %s off (debug)", name);
+        hle_log("hakuX-lr-hle-back", "caps: %s off (debug)", name);
     }
 }
 
@@ -357,7 +357,7 @@ static int vk_init(PFN_vkGetInstanceProcAddr gipa_shared, VkInstance inst_shared
         if (gipa) {
             volkInitializeCustom(gipa);
         } else if (volkInitialize() != VK_SUCCESS) {
-            hle_log("hakuX-hle-back", "vk: volkInitialize failed");
+            hle_log("hakuX-lr-hle-back", "vk: volkInitialize failed");
             return -1;
         }
     }
@@ -374,7 +374,7 @@ static int vk_init(PFN_vkGetInstanceProcAddr gipa_shared, VkInstance inst_shared
     } else {
         VkApplicationInfo app = {
             .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-            .pApplicationName = "hakuX-hle",
+            .pApplicationName = "hakuX-lr-hle",
             .apiVersion = force11 ? VK_API_VERSION_1_1 : hle_vk_instance_version(),
         };
         /* the window's surface (vk/swapchain.c): where the loader has it */
@@ -398,7 +398,7 @@ static int vk_init(PFN_vkGetInstanceProcAddr gipa_shared, VkInstance inst_shared
             iexts[nix++] = g_window_exts[i];
         }
         if (g_window_nexts && !all) {
-            hle_log("hakuX-hle-back", "vk: the window's instance extensions are missing: no swapchain");
+            hle_log("hakuX-lr-hle-back", "vk: the window's instance extensions are missing: no swapchain");
         }
 #endif
         VkInstanceCreateInfo ici = {
@@ -407,7 +407,7 @@ static int vk_init(PFN_vkGetInstanceProcAddr gipa_shared, VkInstance inst_shared
             .enabledExtensionCount = nix, .ppEnabledExtensionNames = iexts,
         };
         if (vkCreateInstance(&ici, NULL, &v->inst) != VK_SUCCESS) {
-            hle_log("hakuX-hle-back", "vk: vkCreateInstance failed");
+            hle_log("hakuX-lr-hle-back", "vk: vkCreateInstance failed");
             return -1;
         }
     }
@@ -419,7 +419,7 @@ static int vk_init(PFN_vkGetInstanceProcAddr gipa_shared, VkInstance inst_shared
         vkEnumeratePhysicalDevices(v->inst, &n, &v->phys);
     }
     if (!n) {
-        hle_log("hakuX-hle-back", "vk: no physical device");
+        hle_log("hakuX-lr-hle-back", "vk: no physical device");
         return -1;
     }
     vkGetPhysicalDeviceProperties(v->phys, &v->props);
@@ -443,7 +443,7 @@ static int vk_init(PFN_vkGetInstanceProcAddr gipa_shared, VkInstance inst_shared
         }
     }
     for (uint32_t i = 0; i < nq; i++) {
-        hle_log("hakuX-hle-back", "vk: queue family %u: flags %x, %u queues%s", i, qf[i].queueFlags,
+        hle_log("hakuX-lr-hle-back", "vk: queue family %u: flags %x, %u queues%s", i, qf[i].queueFlags,
                 qf[i].queueCount, i == v->qfam ? " (used)" : "");
     }
 
@@ -497,7 +497,7 @@ static int vk_init(PFN_vkGetInstanceProcAddr gipa_shared, VkInstance inst_shared
     bool e_eds1 = has_ext(ext, ne, VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME);
     bool e_pcc = has_ext(ext, ne, VK_EXT_PIPELINE_CREATION_CACHE_CONTROL_EXTENSION_NAME);
     if (api < VK_API_VERSION_1_1) {     /* no vkGetPhysicalDeviceFeatures2 */
-        hle_log("hakuX-hle-back", "vk: \"%s\" is a Vulkan 1.0 device", v->props.deviceName);
+        hle_log("hakuX-lr-hle-back", "vk: \"%s\" is a Vulkan 1.0 device", v->props.deviceName);
         snprintf(g_hle_unavailable, sizeof(g_hle_unavailable), "%s lacks vulkan1.1",
                  v->props.deviceName);
         if (!v->shared) {
@@ -514,7 +514,7 @@ static int vk_init(PFN_vkGetInstanceProcAddr gipa_shared, VkInstance inst_shared
         for (uint32_t i = 0; i < mp.memoryTypeCount && o < (int)sizeof(mt) - 12; i++) {
             o += snprintf(mt + o, sizeof(mt) - (size_t)o, " %u:%x", i, mp.memoryTypes[i].propertyFlags);
         }
-        hle_log("hakuX-hle-back", "vk: memory: host_ptr=%d dma_buf=%d fd=%d ahb=%d, types%s",
+        hle_log("hakuX-lr-hle-back", "vk: memory: host_ptr=%d dma_buf=%d fd=%d ahb=%d, types%s",
                 has_ext(ext, ne, "VK_EXT_external_memory_host"),
                 has_ext(ext, ne, "VK_EXT_external_memory_dma_buf"),
                 has_ext(ext, ne, "VK_KHR_external_memory_fd"), e_ahb, mt);
@@ -779,7 +779,7 @@ static int vk_init(PFN_vkGetInstanceProcAddr gipa_shared, VkInstance inst_shared
         need(c, q.features.shaderSampledImageArrayDynamicIndexing, "sampledImageDynamicIndexing");
     }
     if (!c->floor_ok) {
-        hle_log("hakuX-hle-back", "vk: floor not met on \"%s\": missing %s",
+        hle_log("hakuX-lr-hle-back", "vk: floor not met on \"%s\": missing %s",
                 v->props.deviceName, c->missing);
         snprintf(g_hle_unavailable, sizeof(g_hle_unavailable), "%s lacks %s", v->props.deviceName,
                  c->missing);
@@ -981,7 +981,7 @@ static int vk_init(PFN_vkGetInstanceProcAddr gipa_shared, VkInstance inst_shared
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, .pNext = &f,
         .queueCreateInfoCount = 1, .pQueueCreateInfos = &qci,
         .enabledExtensionCount = nx, .ppEnabledExtensionNames = exts };
-    hle_log("hakuX-hle-back", "vk: device \"%s\" api %u.%u.%u (used as %u.%u) driver 0x%x floor=ok "
+    hle_log("hakuX-lr-hle-back", "vk: device \"%s\" api %u.%u.%u (used as %u.%u) driver 0x%x floor=ok "
             "plus: gpl=%d eds3=%d dbuf=%d m5=%d sscaled=%d local_read=%d fbfetch=%d "
             "raster_order=%d cache_control=%d swapchain=%d fill_modes=%d smooth_lines=%d bary=%d "
             "dbias_float=%d dbias_exact=%d",
@@ -992,7 +992,7 @@ static int vk_init(PFN_vkGetInstanceProcAddr gipa_shared, VkInstance inst_shared
             c->gpl, c->eds3, c->descriptor_buffer, c->maint5, c->sscaled,
             c->local_read, c->fbfetch, c->raster_order, c->cache_control, c->swapchain,
             c->fill_modes, c->smooth_lines, c->bary, c->dbias_float, c->dbias_exact);
-    hle_log("hakuX-hle-back", "vk: bc=%d vids=%d push=%d push_desc=%d cbc=%d cbc_any=%d bcs=%d "
+    hle_log("hakuX-lr-hle-back", "vk: bc=%d vids=%d push=%d push_desc=%d cbc=%d cbc_any=%d bcs=%d "
             "bcs_image=%d x4444=%d r16=%d r5551=%d r4444=%d d24s8=%d bda=%d ahb=%d vk13=%d "
             "dyn_render=%d sync2=%d eds1=%d eds2=%d bindless=%d depth_clamp=%d etc2=%d dxt_etc2=%d "
             "(0: the substitute runs)", c->bc, c->vids, c->push, c->push_desc, c->cbc, c->cbc_any, c->bcs, c->bcs_image,
@@ -1008,7 +1008,7 @@ static int vk_init(PFN_vkGetInstanceProcAddr gipa_shared, VkInstance inst_shared
         r = vkCreateDevice(v->phys, &dci, NULL, &v->dev);
     }
     if (r != VK_SUCCESS) {
-        hle_log("hakuX-hle-back", "vk: vkCreateDevice failed (%d)", r);
+        hle_log("hakuX-lr-hle-back", "vk: vkCreateDevice failed (%d)", r);
         if (!v->shared) {
             vkDestroyInstance(v->inst, NULL);
         }

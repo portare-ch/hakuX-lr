@@ -29,7 +29,7 @@ import kotlin.concurrent.thread
  * Export collects those archives and the current session in one ZIP.
  */
 object Logs {
-  private const val TAG = "hakuX-app"
+  private const val TAG = "hakuX-lr-app"
   private const val SESSIONS = 4
   private const val MAX_BYTES = 32L shl 20     /* a file stops growing here */
   private const val SESSION = "session.txt"

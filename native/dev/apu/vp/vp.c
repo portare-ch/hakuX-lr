@@ -44,7 +44,7 @@
 #if PERF_LOG
 
 #include <stdatomic.h>
-#define VP_SILENT_LOG(...) nc_log("hakuX-vp", __VA_ARGS__)
+#define VP_SILENT_LOG(...) nc_log("hakuX-lr-vp", __VA_ARGS__)
 
 static struct {
     atomic_uint_least64_t calls;          /* active calls reaching the eval point */
@@ -1060,7 +1060,7 @@ void mcpx_apu_vp_write(void *opaque, uint32_t addr, uint64_t val, unsigned int s
             /* the trap's method and argument stay for its handler (fe_method) */
             static unsigned s_kept;
             if (s_kept++ < 16) {
-                nc_log("hakuX-apu", "method %04x (%08x) while trapped: the trap's %04x (%08x) kept",
+                nc_log("hakuX-lr-apu", "method %04x (%08x) while trapped: the trap's %04x (%08x) kept",
                                     (unsigned)addr, (unsigned)val, d->regs[NV_PAPU_FEDECMETH],
                                     d->regs[NV_PAPU_FEDECPARAM]);
             }
@@ -2449,7 +2449,7 @@ static VoiceTake voice_take(MCPXAPUState *d, uint8_t *c, uint16_t v)
         if (!got) {
             apu_inc(&g_vp_held_skips);
             if (*held < UINT16_MAX && ++*held == HELD_STUCK_FRAMES) {
-                nc_log("hakuX-apu", "stuck: voice %u held by the guest (its VOICE_LOCK) for a second, "
+                nc_log("hakuX-lr-apu", "stuck: voice %u held by the guest (its VOICE_LOCK) for a second, "
                                     "left out of the frames since; FECTL %08x ISTS %08x",
                        v, apu_ld(&d->regs[NV_PAPU_FECTL]), apu_ld(&d->regs[NV_PAPU_ISTS]));
             }
@@ -2820,7 +2820,7 @@ void mcpx_apu_vp_init(MCPXAPUState *d)
 
 #if defined(__x86_64__)
     /* the vector paths (simd.h): the CPU's again, NC_APU_SIMD's cap */
-    nc_log("hakuX-apu", "vector paths: %s", vp_simd_name(vp_simd_init()));
+    nc_log("hakuX-lr-apu", "vector paths: %s", vp_simd_name(vp_simd_init()));
 #endif
     /* The voices' resampler quality: the content's (g_apu_config.resampler),
      * for the session; each voice's is made at its first VOICE_ON
@@ -2828,11 +2828,11 @@ void mcpx_apu_vp_init(MCPXAPUState *d)
     const int quality = g_apu_config.resampler == VP_RESAMPLE_SINC && !vp_resample_sinc_available()
                             ? VP_RESAMPLE_LINEAR : g_apu_config.resampler;
     if (quality != g_apu_config.resampler) {
-        nc_log("hakuX-apu", "resampler: %s not in this build, %s", vp_resample_name(g_apu_config.resampler),
+        nc_log("hakuX-lr-apu", "resampler: %s not in this build, %s", vp_resample_name(g_apu_config.resampler),
                vp_resample_name(quality));
     }
     d->vp.resample_quality = quality;
-    nc_log("hakuX-apu", "resampler: %s", vp_resample_name(quality));
+    nc_log("hakuX-lr-apu", "resampler: %s", vp_resample_name(quality));
 
     voice_work_init(d);
 }
@@ -2898,6 +2898,6 @@ void mcpx_apu_vp_restore_hrtf(MCPXAPUState *d)
         }
         entries += any;
     }
-    nc_log("hakuX-native-state", "apu: %u 3D voices' HRTF filters set again (%u entries hold coefficients)", set,
+    nc_log("hakuX-lr-native-state", "apu: %u 3D voices' HRTF filters set again (%u entries hold coefficients)", set,
            entries);
 }

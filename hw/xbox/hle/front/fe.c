@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — front-end command producer.
+ * hakuX-lr HLE GPU — front-end command producer.
  */
 #include "hw/xbox/hle/base.h"
 #include "hw/xbox/hle/hitch.h"

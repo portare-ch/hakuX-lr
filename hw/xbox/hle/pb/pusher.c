@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — the NV2A's DMA pusher (pusher.h).
+ * hakuX-lr HLE GPU — the NV2A's DMA pusher (pusher.h).
  */
 #include "hw/xbox/hle/pb/pusher.h"
 

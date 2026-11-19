@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — front-end command producer (vCPU thread only).
+ * hakuX-lr HLE GPU — front-end command producer (vCPU thread only).
  */
 #ifndef HW_XBOX_HLE_FRONT_FE_H
 #define HW_XBOX_HLE_FRONT_FE_H

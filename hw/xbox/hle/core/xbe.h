@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — pure XBE header parser.
+ * hakuX-lr HLE GPU — pure XBE header parser.
  * Layout reference: xemu-xbe.h (struct xbe_header, packed).
  */
 #ifndef HW_XBOX_HLE_CORE_XBE_H

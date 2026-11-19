@@ -1,7 +1,7 @@
 /* Copyright (C) 2026-present PortareOS */
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * hakuX native core — the runtime library's pure string, number and
+ * hakuX-lr native core — the runtime library's pure string, number and
  * formatting routines, on host buffers (tests/native/rtl tests them).
  *
  * The multibyte code page is Latin-1: a UTF-16 character above 0xFF becomes

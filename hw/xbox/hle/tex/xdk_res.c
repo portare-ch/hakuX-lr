@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — XDK resource model.
+ * hakuX-lr HLE GPU — XDK resource model.
  */
 #include "hw/xbox/hle/tex/xdk_res.h"
 

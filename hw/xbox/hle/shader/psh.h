@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — Xbox pixel shaders (NV2A register combiners and texture
+ * hakuX-lr HLE GPU — Xbox pixel shaders (NV2A register combiners and texture
  * modes) -> GLSL 4.50 (spec §5.8; pure). The key is the pixel-shader
  * render-state block (5659 render states 0..56, which SetPixelShader loads
  * from the D3DPIXELSHADERDEF); the combiner constants are push constants.

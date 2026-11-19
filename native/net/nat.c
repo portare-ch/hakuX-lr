@@ -64,7 +64,7 @@ static bool g_internet_off;
 void nc_net_internet(bool on)
 {
     if (__atomic_exchange_n(&g_internet_off, !on, __ATOMIC_ACQ_REL) != !on && !on) {
-        nc_log("hakuX-native-net", "nat: the Internet is off: only ARP and DHCP pass");
+        nc_log("hakuX-lr-native-net", "nat: the Internet is off: only ARP and DHCP pass");
     }
 }
 
@@ -102,7 +102,7 @@ static slirp_ssize_t cb_send_packet(const void *buf, size_t len, void *opaque)
 
 static void cb_guest_error(const char *msg, void *opaque)
 {
-    nc_log("hakuX-native-net", "nat: guest error: %s", msg);
+    nc_log("hakuX-lr-native-net", "nat: guest error: %s", msg);
 }
 
 static int64_t cb_clock_get_ns(void *opaque)
@@ -119,7 +119,7 @@ static void *cb_timer_new_opaque(SlirpTimerId id, void *cb_opaque, void *opaque)
             return t;
         }
     }
-    nc_log("hakuX-native-net", "nat: no timer free");
+    nc_log("hakuX-lr-native-net", "nat: no timer free");
     return NULL;
 }
 
@@ -165,16 +165,16 @@ static const SlirpCb g_cb = {
 static void nat_forward(const NcNetConfig *c, struct in_addr guest)
 {
     if (!c->nat_port) {
-        nc_log("hakuX-native-net", "nat: no UDP port forwarded to the console (natport=0)");
+        nc_log("hakuX-lr-native-net", "nat: no UDP port forwarded to the console (natport=0)");
         return;
     }
     const struct in_addr any = { .s_addr = htonl(INADDR_ANY) };
     if (slirp_add_hostfwd(g_nat.slirp, 1, any, c->nat_port, guest, XBOX_LIVE_PORT) < 0) {
-        nc_log("hakuX-native-net", "nat: UDP %u unavailable (%s): the console's UDP %u uses any free port, "
+        nc_log("hakuX-lr-native-net", "nat: UDP %u unavailable (%s): the console's UDP %u uses any free port, "
                "unreachable until it sends", c->nat_port, strerror(errno), XBOX_LIVE_PORT);
         return;
     }
-    nc_log("hakuX-native-net", "nat: UDP %u forwarded to the console's %u (Xbox Live)", c->nat_port,
+    nc_log("hakuX-lr-native-net", "nat: UDP %u forwarded to the console's %u (Xbox Live)", c->nat_port,
            XBOX_LIVE_PORT);
     if (c->upnp) {
         nc_upnp_start(c->nat_port);
@@ -250,12 +250,12 @@ static bool nat_start(const uint8_t mac[6], uint32_t ip)
     inet_ntop(AF_INET, &cfg.vdhcp_start, start, sizeof(start));
     g_nat.slirp = slirp_new(&cfg, &g_cb, NULL);
     if (!g_nat.slirp) {
-        nc_log("hakuX-native-net", "nat: libslirp didn't start");
+        nc_log("hakuX-lr-native-net", "nat: libslirp didn't start");
         return false;
     }
     char b[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &dns, b, sizeof(b));
-    nc_log("hakuX-native-net", "nat: libslirp %s, 10.0.2.0/24, the console's address %s, DNS %s",
+    nc_log("hakuX-lr-native-net", "nat: libslirp %s, 10.0.2.0/24, the console's address %s, DNS %s",
            slirp_version_string(), start, b);
     memcpy(g_nat.mac, mac, 6);
     __atomic_store_n(&g_nat.lease, ip, __ATOMIC_RELEASE);
@@ -273,7 +273,7 @@ static void nat_probe_round(uint32_t ip)
     g_nat.probes++;
     char a[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &ip, a, sizeof(a));
-    nc_log("hakuX-native-net", "nat: asking the LAN who has %s (round %u)", a, g_nat.probes);
+    nc_log("hakuX-lr-native-net", "nat: asking the LAN who has %s (round %u)", a, g_nat.probes);
     nc_net_lan_claim(g_nat.mac, ip, false);
     nc_net_lan_probe(ip);
     g_nat.probe_until = now_ms() + PROBE_MS;
@@ -327,7 +327,7 @@ static bool nat_init(void)
     const struct in_addr dns = nat_dns(nc_net_config());
     char b[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &dns, b, sizeof(b));
-    nc_log("hakuX-native-net", "nat: DNS %s, the stack starts with the console's first frame", b);
+    nc_log("hakuX-lr-native-net", "nat: DNS %s, the stack starts with the console's first frame", b);
     return true;
 }
 
@@ -422,7 +422,7 @@ static void nat_poll(struct pollfd *fds, int n)
     }
     static unsigned s_logged;
     if (g_nat.overflow && s_logged++ < 8) {
-        nc_log("hakuX-native-net", "nat: %llu descriptors over the poll's %d", (unsigned long long)g_nat.overflow,
+        nc_log("hakuX-lr-native-net", "nat: %llu descriptors over the poll's %d", (unsigned long long)g_nat.overflow,
                g_nat.maxfds);
     }
     g_nat.overflow = 0;

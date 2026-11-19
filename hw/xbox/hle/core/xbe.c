@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — pure XBE header parser.
+ * hakuX-lr HLE GPU — pure XBE header parser.
  */
 #include "hw/xbox/hle/core/xbe.h"
 

@@ -1,4 +1,4 @@
-# hakuX native core: the HLE GPU layer (hw/xbox/hle) on its host interface
+# hakuX-lr native core: the HLE GPU layer (hw/xbox/hle) on its host interface
 # (hw/xbox/hle/host.h, native/hle) and the GLib subset (native/compat/glib);
 # the MCPX APU (native/dev/apu).
 #

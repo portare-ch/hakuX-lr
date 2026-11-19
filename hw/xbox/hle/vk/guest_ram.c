@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — guest RAM import (AHB) and upload-arena buffer.
+ * hakuX-lr HLE GPU — guest RAM import (AHB) and upload-arena buffer.
  */
 #include "hw/xbox/hle/base.h"
 
@@ -76,7 +76,7 @@ static bool import(AHardwareBuffer *ahb, bool bda)
             .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = g_hram.buf };
         g_hram.bda = T.vkGetBufferDeviceAddress(g_hvk.dev, &ai);
     }
-    hle_log("hakuX-hle-back", "guest RAM imported zero-copy: %llu MiB memtype %d "
+    hle_log("hakuX-lr-hle-back", "guest RAM imported zero-copy: %llu MiB memtype %d "
             "flags 0x%x (of types 0x%x) bda=%s", (unsigned long long)(g_hram.size >> 20), mt,
             g_hvk.mem.memoryTypes[mt].propertyFlags, props.memoryTypeBits, bda ? "yes" : "no");
     return true;
@@ -90,12 +90,12 @@ int hle_vk_guest_ram_init(void)
     AHardwareBuffer *ahb = hle_uma_ahb();
     g_hram.zero_copy = ahb && ((g_hvk.caps.bda && import(ahb, true)) || import(ahb, false));
     if (!g_hram.zero_copy) {
-        hle_log("hakuX-hle-back", "guest RAM not imported (%s): copy fallback",
+        hle_log("hakuX-lr-hle-back", "guest RAM not imported (%s): copy fallback",
                 ahb ? "import failed" : "RAM is not an AHB");
     }
 #else
     g_hram.zero_copy = false;
-    hle_log("hakuX-hle-back", "Linux guest RAM: copy fallback (no external-memory import)");
+    hle_log("hakuX-lr-hle-back", "Linux guest RAM: copy fallback (no external-memory import)");
 #endif
     return 0;
 }
@@ -162,7 +162,7 @@ int hle_vk_land_init(uint32_t size)
     uint8_t *map = NULL;
     if (mt < 0 || T.vkAllocateMemory(g_hvk.dev, &mai, NULL, &mem) != VK_SUCCESS) {
         T.vkDestroyBuffer(g_hvk.dev, buf, NULL);
-        hle_log("hakuX-hle-back", "readback landing: no host-cached memory, the arena serves");
+        hle_log("hakuX-lr-hle-back", "readback landing: no host-cached memory, the arena serves");
         return 0;
     }
     T.vkBindBufferMemory(g_hvk.dev, buf, mem, 0);
@@ -176,7 +176,7 @@ int hle_vk_land_init(uint32_t size)
     g_hland.map = map;
     hle_arena_init(&g_hland.alloc, size);
     g_hland.buf = buf;                  /* last: the front reads it as "ready" */
-    hle_log("hakuX-hle-back", "readback landing: %u MiB host-cached (type %d, %scoherent)",
+    hle_log("hakuX-lr-hle-back", "readback landing: %u MiB host-cached (type %d, %scoherent)",
             size >> 20, mt, g_hland_coherent ? "" : "not ");
     return 0;
 }

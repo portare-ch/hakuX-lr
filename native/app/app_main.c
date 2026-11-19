@@ -1,5 +1,5 @@
 /*
- * hakuX native core, app front end — SDL_main for NativeCoreActivity.
+ * hakuX-lr native core, app front end — SDL_main for NativeCoreActivity.
  *
  *   argv[1]  the disc image: a path, or "fd:<n>" for a descriptor the activity opened
  *   argv[2]  the hard disk folder (Partition0-5 and the raw sector files)
@@ -193,7 +193,7 @@ EXPORT JNIEXPORT jstring JNICALL Java_com_rfandango_haku_1x_NativeCoreActivity_n
     if (!v[0] || !strcmp(v, "none")) {
         return NULL;
     }
-    nc_log("hakuX-app", "debug.hakux.state: %s", v);
+    nc_log("hakuX-lr-app", "debug.hakux.state: %s", v);
     return (*env)->NewStringUTF(env, v);
 }
 
@@ -432,7 +432,7 @@ EXPORT JNIEXPORT jboolean JNICALL Java_com_rfandango_haku_1x_NativeCoreActivity_
 static void *core_thread(void *arg)
 {
     if (!nc_core_boot(&g_core, g_disc_fd)) {
-        nc_log("hakuX-app", "core: boot failed");
+        nc_log("hakuX-lr-app", "core: boot failed");
         if (!nc_hle_fatal()) {
             nc_hle_set_fatal(NC_FATAL_BOOT, "The game stopped while starting.");
         }
@@ -441,7 +441,7 @@ static void *core_thread(void *arg)
     }
     SDL_SetAtomicInt(&g_core_state, 1);
     nc_core_run(&g_core);
-    nc_log("hakuX-app", "core: stopped");
+    nc_log("hakuX-lr-app", "core: stopped");
     SDL_SetAtomicInt(&g_core_state, -1);
     return NULL;
 }
@@ -459,7 +459,7 @@ static void make_hdd(const char *root)
 EXPORT int SDL_main(int argc, char *argv[])
 {
     if (argc < 3) {
-        nc_log("hakuX-app", "usage: <disc path | fd:N> <hdd folder>");
+        nc_log("hakuX-lr-app", "usage: <disc path | fd:N> <hdd folder>");
         return 1;
     }
     const char *disc = argv[1];
@@ -469,7 +469,7 @@ EXPORT int SDL_main(int argc, char *argv[])
                                            : open(disc, O_RDONLY | O_CLOEXEC);
     if (g_disc_fd < 0 && strcmp(disc, "none")) {
         /* the boot says so (NC_FATAL_BOOT), and the activity goes back */
-        nc_log("hakuX-app", "can't open the disc %s", disc);
+        nc_log("hakuX-lr-app", "can't open the disc %s", disc);
     }
     /* debug: debug.hakux.hdd=NAME runs on the hard disk <hdd>-NAME instead,
      * made empty the first time: a title's first boot (its cache partition
@@ -482,7 +482,7 @@ EXPORT int SDL_main(int argc, char *argv[])
         if (hle_prop_get("debug.hakux.hdd", name) > 0 && strcmp(name, "none") && !strchr(name, '/') &&
             name[0] != '.') {
             snprintf(hdd, sizeof(hdd), "%s-%s", argv[2], name);
-            nc_log("hakuX-app", "debug.hakux.hdd: the hard disk is %s", hdd);
+            nc_log("hakuX-lr-app", "debug.hakux.hdd: the hard disk is %s", hdd);
         }
     }
     make_hdd(hdd);
@@ -508,7 +508,7 @@ EXPORT int SDL_main(int argc, char *argv[])
                 if (eq && eq != t) {
                     *eq = 0;
                     setenv(t, eq + 1, 1);
-                    nc_log("hakuX-app", "debug.hakux.env: %s=%s", t, eq + 1);
+                    nc_log("hakuX-lr-app", "debug.hakux.env: %s=%s", t, eq + 1);
                 }
             }
         }
@@ -528,7 +528,7 @@ EXPORT int SDL_main(int argc, char *argv[])
                                   : !strcmp(a, "16:9")    ? NC_ASPECT_16_9
                                   : !strcmp(a, "stretch") ? NC_ASPECT_STRETCH
                                                           : NC_ASPECT_AUTO);
-            nc_log("hakuX-app", "aspect ratio %s", a);
+            nc_log("hakuX-lr-app", "aspect ratio %s", a);
         }
         if (!strncmp(argv[i], "fxaa=", 5)) {
             nc_present_set_fxaa(atoi(argv[i] + 5) != 0);
@@ -544,20 +544,20 @@ EXPORT int SDL_main(int argc, char *argv[])
     }
     nc_options_apply(&opt);
     nc_present_set_widescreen(opt.video >= 0 && (opt.video & NC_VIDEO_WIDESCREEN));
-    nc_log("hakuX-app", "native core: disc %s, hdd %s%s", disc, argv[2], opt.uncap ? ", frame rate uncapped" : "");
+    nc_log("hakuX-lr-app", "native core: disc %s, hdd %s%s", disc, argv[2], opt.uncap ? ", frame rate uncapped" : "");
 
     SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
     /* the gamepads are the activity's (its controller router), unless the
      * legacy SDL input was asked for: SDL then doesn't open them either */
     if (!SDL_Init(SDL_INIT_VIDEO | (g_sdl_pads ? SDL_INIT_GAMEPAD : 0))) {
-        nc_log("hakuX-app", "SDL_Init: %s", SDL_GetError());
+        nc_log("hakuX-lr-app", "SDL_Init: %s", SDL_GetError());
         return 1;
     }
     /* no GL or Vulkan flag: the HLE GPU makes its own Vulkan surface of the
      * window's ANativeWindow (hw/xbox/hle/vk/swapchain.c) */
     SDL_Window *win = SDL_CreateWindow("hakuX", 0, 0, SDL_WINDOW_FULLSCREEN);
     if (!win) {
-        nc_log("hakuX-app", "window: %s", SDL_GetError());
+        nc_log("hakuX-lr-app", "window: %s", SDL_GetError());
         return 1;
     }
     if (!nc_present_init()) {
@@ -591,7 +591,7 @@ EXPORT int SDL_main(int argc, char *argv[])
             case SDL_EVENT_GAMEPAD_ADDED:
                 if (!pad) {
                     pad = SDL_OpenGamepad(ev.gdevice.which);
-                    nc_log("hakuX-app", "gamepad: %s", pad ? SDL_GetGamepadName(pad) : SDL_GetError());
+                    nc_log("hakuX-lr-app", "gamepad: %s", pad ? SDL_GetGamepadName(pad) : SDL_GetError());
                 }
                 break;
             case SDL_EVENT_GAMEPAD_REMOVED:
@@ -636,6 +636,6 @@ EXPORT int SDL_main(int argc, char *argv[])
             SDL_Delay(16);
         }
     }
-    nc_log("hakuX-app", "native core: leaving");
+    nc_log("hakuX-lr-app", "native core: leaving");
     _exit(0); /* the core thread has no stop yet; the activity's process ends with it */
 }

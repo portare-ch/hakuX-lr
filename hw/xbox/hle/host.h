@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — what the host core gives the HLE: the guest CPU's
+ * hakuX-lr HLE GPU — what the host core gives the HLE: the guest CPU's
  * registers at a probe, guest memory, write tracking of guest RAM, the
  * JIT, the GPU device and configuration. The native core implements it
  * (native/hle/host_native.c). Nothing else outside hw/xbox/hle is included by
@@ -105,7 +105,7 @@ void hle_host_gpu_reg_mask(uint32_t off, uint32_t mask, uint32_t bits);
 void hle_host_gpu_irq_update(void);
 /* debug: the GPU event trace (push-buffer mode): the host records the
  * guest's interrupt handshake, the HLE its traps and flips; a dump logs the
- * last events (hakuX-native-trace). Any thread. */
+ * last events (hakuX-lr-native-trace). Any thread. */
 enum {
     HLE_GTR_VBLANK = 1,     /* vblank raised (value: count, | 1 << 31 an early one) */
     HLE_GTR_PCRTC_CLR,      /* the guest cleared PCRTC_INTR (value written) */

@@ -1,5 +1,5 @@
 /*
- * hakuX native core — XBE loader.
+ * hakuX-lr native core — XBE loader.
  *
  * Header fields beyond hle_xbe_parse (offsets from the base address):
  *   0x12C TLS directory VA, 0x130 PE stack commit size.
@@ -82,13 +82,13 @@ bool nc_xbe_load(NcVm *vm, const NcDisc *disc, const char *path, NcKernel *k, Nc
         snprintf(g_host, sizeof(g_host), "%s", host);
         out->fd = open(host, O_RDONLY | O_CLOEXEC);
         if (out->fd < 0 || fstat(out->fd, &st) != 0 || st.st_size > UINT32_MAX) {
-            nc_log("hakuX-native", "xbe: %s (%s) can't be opened", path, host);
+            nc_log("hakuX-lr-native", "xbe: %s (%s) can't be opened", path, host);
             return false;
         }
         out->file.size = (uint32_t)st.st_size;
     } else if (!nc_disc_find(disc, !strncasecmp(path, cd, sizeof(cd) - 1) ? path + sizeof(cd) - 1 : path,
                              &out->file)) {
-        nc_log("hakuX-native", "xbe: %s not on the disc", path);
+        nc_log("hakuX-lr-native", "xbe: %s not on the disc", path);
         return false;
     }
 
@@ -101,7 +101,7 @@ bool nc_xbe_load(NcVm *vm, const NcDisc *disc, const char *path, NcKernel *k, Nc
     const bool unlimit = g_unlimit && (out->init_flags & NC_XBE_INIT_LIMIT_64MB) && vm->ram_size > NC_RAM_RETAIL;
     if (unlimit) {
         out->init_flags &= ~NC_XBE_INIT_LIMIT_64MB;
-        nc_log("hakuX-native", "xbe: the 64 MiB limit (initialization flag 4) patched out: the title has the "
+        nc_log("hakuX-lr-native", "xbe: the 64 MiB limit (initialization flag 4) patched out: the title has the "
                "console's %u MiB", vm->ram_size >> 20);
     }
     if (out->init_flags & NC_XBE_INIT_LIMIT_64MB) {
@@ -111,7 +111,7 @@ bool nc_xbe_load(NcVm *vm, const NcDisc *disc, const char *path, NcKernel *k, Nc
     const uint32_t hdr_size = nc_rd32(probe + 0x108);
     const uint32_t image_size = nc_rd32(probe + 0x10C);
     if (hdr_size < sizeof(probe) || hdr_size > out->file.size || base & (NC_PAGE - 1)) {
-        nc_log("hakuX-native", "xbe: bad header (base %08x, headers %u)", base, hdr_size);
+        nc_log("hakuX-lr-native", "xbe: bad header (base %08x, headers %u)", base, hdr_size);
         return false;
     }
 
@@ -128,7 +128,7 @@ bool nc_xbe_load(NcVm *vm, const NcDisc *disc, const char *path, NcKernel *k, Nc
     }
     int rc = hle_xbe_parse(hdr, hdr_size, &out->info);
     if (rc != HLE_XBE_OK) {
-        nc_log("hakuX-native", "xbe: parse failed (%d)", rc);
+        nc_log("hakuX-lr-native", "xbe: parse failed (%d)", rc);
         return false;
     }
     const HleXbeInfo *x = &out->info;
@@ -142,16 +142,16 @@ bool nc_xbe_load(NcVm *vm, const NcDisc *disc, const char *path, NcKernel *k, Nc
             continue; /* XeLoadSection brings it in */
         }
         if ((uint64_t)s->va + s->vsize > (uint64_t)base + span || s->va < base) {
-            nc_log("hakuX-native", "xbe: section %s outside the image", s->name);
+            nc_log("hakuX-lr-native", "xbe: section %s outside the image", s->name);
             return false;
         }
         if (!nc_xbe_back(vm, s->va, s->vsize)) {
-            nc_log("hakuX-native", "xbe: no memory for section %s", s->name);
+            nc_log("hakuX-lr-native", "xbe: no memory for section %s", s->name);
             return false;
         }
         uint32_t n = s->raw_size < s->vsize ? s->raw_size : s->vsize;
         if (n && !nc_xbe_read(disc, out, s->raw_off, nc_vm_host(vm, s->va), n)) {
-            nc_log("hakuX-native", "xbe: read of section %s failed", s->name);
+            nc_log("hakuX-lr-native", "xbe: read of section %s failed", s->name);
             return false;
         }
         /* Loaded once, as XeLoadSection counts: an XeUnloadSection frees it. */
@@ -170,13 +170,13 @@ bool nc_xbe_load(NcVm *vm, const NcDisc *disc, const char *path, NcKernel *k, Nc
             break;
         }
         if (!(v & 0x80000000u)) {
-            nc_log("hakuX-native", "xbe: thunk %08x is not an ordinal import (%08x)", t, v);
+            nc_log("hakuX-lr-native", "xbe: thunk %08x is not an ordinal import (%08x)", t, v);
             return false;
         }
         unsigned ordinal = v & 0x7FFFFFFFu;
         uint32_t target = nc_kernel_resolve(k, ordinal);
         if (!target) {
-            nc_log("hakuX-native", "xbe: import of unknown kernel ordinal %u", ordinal);
+            nc_log("hakuX-lr-native", "xbe: import of unknown kernel ordinal %u", ordinal);
             return false;
         }
         nc_vm_wr32(vm, t, target);
@@ -203,15 +203,15 @@ bool nc_xbe_load(NcVm *vm, const NcDisc *disc, const char *path, NcKernel *k, Nc
         }
     }
 
-    nc_log("hakuX-native-frontier",
+    nc_log("hakuX-lr-native-frontier",
            "stage S0 xbe loaded: title %08x base %08x image %u KiB (%u KiB in memory), %u/%u sections, "
            "entry %08x, %u kernel imports, tls %08x",
            x->title_id, base, span >> 10, backed >> 10, loaded, x->nsections, x->entry, out->thunks,
            out->tls_dir);
-    nc_log("hakuX-native-imports", "title %08x %s", x->title_id, imports);
+    nc_log("hakuX-lr-native-imports", "title %08x %s", x->title_id, imports);
     if (nmissing) {
         /* told now, not at the call (that stops the game) */
-        nc_log("hakuX-native-imports", "title %08x imports %u kernel functions not implemented here: %s",
+        nc_log("hakuX-lr-native-imports", "title %08x imports %u kernel functions not implemented here: %s",
                x->title_id, nmissing, missing);
     }
     return true;

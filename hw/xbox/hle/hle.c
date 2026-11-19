@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — runtime state, posture, logging, diagnostics.
+ * hakuX-lr HLE GPU — runtime state, posture, logging, diagnostics.
  */
 #include "hw/xbox/hle/base.h"
 #include "hw/xbox/hle/hle.h"
@@ -75,7 +75,7 @@ static void pch_tick(void *opaque)
         if (s_reg_pc >= 0 && pc == (uint32_t)s_reg_pc && s_reg_n < 8) {
             s_reg_n++;
             HleCpu *env = hle_host_cpu();
-            hle_log("hakuX-hle-hooks", "pcreg %08x eax=%08x ecx=%08x esi=%08x", pc,
+            hle_log("hakuX-lr-hle-hooks", "pcreg %08x eax=%08x ecx=%08x esi=%08x", pc,
                     (uint32_t)env->regs[R_EAX], (uint32_t)env->regs[R_ECX],
                     (uint32_t)env->regs[R_ESI]);
         }
@@ -116,7 +116,7 @@ static void pch_report(void)
         m += snprintf(buf + m, sizeof(buf) - m, " %08x:%u", g_pch[best].pc, g_pch[best].n);
         g_pch[best].n = 0;
     }
-    hle_log("hakuX-hle-hooks", "%s", buf);
+    hle_log("hakuX-lr-hle-hooks", "%s", buf);
     memset(g_pch, 0, sizeof(g_pch));
     g_pch_samples = g_pch_other = 0;
 }
@@ -142,7 +142,7 @@ static void peek_report(void)
                 hle_va_rw(cva + i * stride, &v, 4, false);
                 used += v != 0;
             }
-            hle_log("hakuX-hle-hooks", "peekcount %08x: %u/%u", cva, used, cnt);
+            hle_log("hakuX-lr-hle-hooks", "peekcount %08x: %u/%u", cva, used, cnt);
             continue;
         }
         bool ind = tok[0] == '*';           /* *va:len = through the pointer at va */
@@ -157,7 +157,7 @@ static void peek_report(void)
         for (uint32_t off = 0; off < len; off += 32) {
             uint32_t w[8] = { 0 };
             hle_va_rw(va + off, w, sizeof(w), false);
-            hle_log("hakuX-hle-hooks", "peek %08x: %08x %08x %08x %08x %08x %08x %08x %08x",
+            hle_log("hakuX-lr-hle-hooks", "peek %08x: %08x %08x %08x %08x %08x %08x %08x %08x",
                     va + off, w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7]);
         }
     }
@@ -177,7 +177,7 @@ static void diag_tick(void *opaque)
     }
     if (pclog && hle_host_cpu()) {
         HleCpu *env = hle_host_cpu();
-        hle_log("hakuX-hle-hooks", "pc=%08x esp=%08x if=%d halted=%d",
+        hle_log("hakuX-lr-hle-hooks", "pc=%08x esp=%08x if=%d halted=%d",
                 (uint32_t)env->eip, (uint32_t)env->regs[R_ESP],
                 (env->eflags & HLE_EFLAGS_IF) != 0, env->halted);
         uint8_t code[48];
@@ -191,9 +191,9 @@ static void diag_tick(void *opaque)
             for (unsigned i = 0; i < ARRAY_SIZE(stk); i++) {
                 snprintf(sx + 9 * i, 10, "%08x ", stk[i]);
             }
-            hle_log("hakuX-hle-hooks", "code@pc-16 %s", hx);
-            hle_log("hakuX-hle-hooks", "stack %s", sx);
-            hle_log("hakuX-hle-hooks", "eax=%08x ecx=%08x edx=%08x ebx=%08x esi=%08x edi=%08x "
+            hle_log("hakuX-lr-hle-hooks", "code@pc-16 %s", hx);
+            hle_log("hakuX-lr-hle-hooks", "stack %s", sx);
+            hle_log("hakuX-lr-hle-hooks", "eax=%08x ecx=%08x edx=%08x ebx=%08x esi=%08x edi=%08x "
                     "ebp=%08x", (uint32_t)env->regs[R_EAX], (uint32_t)env->regs[R_ECX],
                     (uint32_t)env->regs[R_EDX], (uint32_t)env->regs[R_EBX],
                     (uint32_t)env->regs[R_ESI], (uint32_t)env->regs[R_EDI],
@@ -291,7 +291,7 @@ static void smp_stop(void)
     hle_thread_join(&g_smp.th);
     g_smp.started = false;
     uint64_t n = MAX(g_smp.n, 1);
-    hle_log("hakuX-hle-prof", "eip samples=%llu halted=%.1f%% dropped=%llu",
+    hle_log("hakuX-lr-hle-prof", "eip samples=%llu halted=%.1f%% dropped=%llu",
             (unsigned long long)g_smp.n, 100.0 * g_smp.halted / n,
             (unsigned long long)g_smp.dropped);
     for (unsigned r = 0; r < 40; r++) {         /* top 40, selection by count */
@@ -307,10 +307,10 @@ static void smp_stop(void)
         const uint32_t e = g_smp.eip[best];
         if (g_hle_pc_sampler && (e & HLE_PC_HOST) == HLE_PC_HOST) {
             /* host code: the offset in the core library (addr2line it) */
-            hle_log("hakuX-hle-prof", "  host+%06x %5u %.1f%% (%s)", (e & ~(HLE_PC_HOST | HLE_PC_SYSOP)) << 4,
+            hle_log("hakuX-lr-hle-prof", "  host+%06x %5u %.1f%% (%s)", (e & ~(HLE_PC_HOST | HLE_PC_SYSOP)) << 4,
                     g_smp.cnt[best], 100.0 * g_smp.cnt[best] / n, e & HLE_PC_SYSOP ? "kernel call / hook" : "FEX");
         } else {
-            hle_log("hakuX-hle-prof", "  eip %08x %5u %.1f%%", e, g_smp.cnt[best],
+            hle_log("hakuX-lr-hle-prof", "  eip %08x %5u %.1f%%", e, g_smp.cnt[best],
                     100.0 * g_smp.cnt[best] / n);
         }
         g_smp.cnt[best] = 0;
@@ -336,13 +336,13 @@ static void prof_poll(void)
         until = hle_now_ns() + (int64_t)sec * 1000000000;
         g_hle_prof_on = armed = true;
         smp_start();
-        hle_log("hakuX-hle-prof", "perf capture on for %d s", sec);
+        hle_log("hakuX-lr-hle-prof", "perf capture on for %d s", sec);
     }
     if (armed && hle_now_ns() >= until) {
         armed = false;
         g_hle_prof_on = env_on != 0;
         smp_stop();
-        hle_log("hakuX-hle-prof", "perf capture off");
+        hle_log("hakuX-lr-hle-prof", "perf capture off");
     }
 #endif
 }
@@ -366,7 +366,7 @@ void hle_prof_diag(void)
         ns0[k] = ns;
         n0[k] = n;
     }
-    hle_log("hakuX-hle-prof", "%s", buf);
+    hle_log("hakuX-lr-hle-prof", "%s", buf);
 }
 
 
@@ -377,7 +377,7 @@ void hle_init(void)
     g_hle.posture = parse_posture(mode ? mode : hle_host_hle_mode());
     hle_prof_init();
     hle_barrier_init(hle_ram_size());
-    hle_log("hakuX-hle", "init posture=%s", hle_posture_name(g_hle.posture));
+    hle_log("hakuX-lr-hle", "init posture=%s", hle_posture_name(g_hle.posture));
     if (hle_active()) {
         g_diag_timer = hle_timer_new(diag_tick, NULL);
         hle_timer_mod(g_diag_timer, hle_now_ms() + 1000);

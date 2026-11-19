@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — stutter / hang monitor (see hitch.h).
+ * hakuX-lr HLE GPU — stutter / hang monitor (see hitch.h).
  *
  * Cost: activity spans at rare transitions (a counter read each), one
  * snapshot per guest flip (two thread-CPU clock reads, a short lock), and a
@@ -19,7 +19,7 @@ HleHitchThr g_hitch_thr[HLE_HT_N];
 __thread int8_t t_hitch = -1;
 bool g_hitch_on;
 
-#define TAG          "hakuX-hle-hitch"
+#define TAG          "hakuX-lr-hle-hitch"
 #define EIP_SLOTS    64
 #define TICK_IDLE_US 10000
 #define TICK_SMP_US  1000

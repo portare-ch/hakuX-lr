@@ -1,5 +1,5 @@
 /*
- * hakuX native core — kernel area, kernel calls and system ops.
+ * hakuX-lr native core — kernel area, kernel calls and system ops.
  */
 #include "native/kernel/kernel.h"
 #include "native/kernel/xc_crypto.h"
@@ -98,7 +98,7 @@ void nc_kernel_impl(NcKernel *k, const char *name, NcKFn fn)
 {
     const NcKExport *e = export_named(name);
     if (!e || e->abi == NC_KABI_DATA) {
-        nc_log("hakuX-native", "kernel: no function export named %s", name);
+        nc_log("hakuX-lr-native", "kernel: no function export named %s", name);
         abort();
     }
     k->impl[e->ordinal] = fn;
@@ -431,12 +431,12 @@ bool nc_kernel_init(NcKernel *k, NcVm *vm)
     memset(k, 0, sizeof(*k));
     k->vm = vm;
     if (!nc_vm_claim_phys(vm, NC_KERNEL_PA, NC_KERNEL_SIZE)) {
-        nc_log("hakuX-native", "kernel: physical 0x%x-0x%x taken", NC_KERNEL_PA,
+        nc_log("hakuX-lr-native", "kernel: physical 0x%x-0x%x taken", NC_KERNEL_PA,
                NC_KERNEL_PA + NC_KERNEL_SIZE);
         return false;
     }
     if (!nc_mm_hold_top(k)) {
-        nc_log("hakuX-native", "kernel: the top of RAM is taken");
+        nc_log("hakuX-lr-native", "kernel: the top of RAM is taken");
         return false;
     }
     uint8_t *km = nc_vm_host(vm, NC_KERNEL_VA);
@@ -663,7 +663,7 @@ void nc_kernel_trace_trigger(const char *what)
         armed = false;
         const char *t = getenv("NC_TRACE_KCALL");
         g_trace_left = t ? atol(t) : 2000;
-        nc_log("hakuX-ktrace", "trace starts at %s", what);
+        nc_log("hakuX-lr-ktrace", "trace starts at %s", what);
     }
 }
 
@@ -695,7 +695,7 @@ NcSchedStats g_nc_sched;
 static void dump_int_samples(NcKernel *k);
 
 /* debug: NC_PEEK="va:len,*va:len" logs guest memory with the stats line:
- * hakuX-native-peek, up to 256 bytes each (hex); *va reads the pointer at
+ * hakuX-lr-native-peek, up to 256 bytes each (hex); *va reads the pointer at
  * va and dumps what it points to. */
 static void peek(NcKernel *k)
 {
@@ -722,7 +722,7 @@ static void peek(NcKernel *k)
         }
         hex[n] = 0;
         const uint32_t pa = nc_vm_phys(k->vm, va);
-        nc_log("hakuX-native-peek", "%s%08x (pa %08x, rmap %08x): %s", deref ? "*" : "", va, pa,
+        nc_log("hakuX-lr-native-peek", "%s%08x (pa %08x, rmap %08x): %s", deref ? "*" : "", va, pa,
                pa != UINT32_MAX ? k->vm->rmap[pa / NC_PAGE] : 0, hex);
         s = *end == ',' ? end + 1 : end;
         if (*s && *s != '*' && !isxdigit((unsigned char)*s)) {
@@ -775,7 +775,7 @@ static void stats_tick(NcKernel *k)
     const uint64_t mmio = nc_mmio_total();
     uint64_t held_out_ns, held_max_ns;
     const unsigned holds = nc_ke_held(&held_out_ns, &held_max_ns);  /* in the window, not per s */
-    nc_log("hakuX-native-stats",
+    nc_log("hakuX-lr-native-stats",
            "per s: kcalls %.0f sysops %.0f (int %.0f, of them ticks %.0f; hook %.0f) schedules %.0f switches %.0f idle %.0f "
            "slices %.0f page faults %.0f mmio %.0f apu waits %.0f vm pages +%.0f -%.0f "
            "isr%s | dpc max wait %.1f run %.1f ms, %llu over 8 ms | holds %u (longest %.1f ms), %.1f ms left out |%s",
@@ -810,7 +810,7 @@ static void stats_tick(NcKernel *k)
                        ndi = __atomic_load_n(&g_nc_faults_dirty, __ATOMIC_RELAXED),
                        nmm = __atomic_load_n(&g_nc_faults_mmio, __ATOMIC_RELAXED),
                        nua = __atomic_load_n(&g_nc_faults_unaligned, __ATOMIC_RELAXED);
-        nc_log("hakuX-native-stats", "host faults per s: call-return %.0f dirty pages %.0f (pages%s) mmio %.0f "
+        nc_log("hakuX-lr-native-stats", "host faults per s: call-return %.0f dirty pages %.0f (pages%s) mmio %.0f "
                "(eips%s) unaligned atomics %.0f", (double)(ncr - cr) / s, (double)(ndi - di) / s, ds,
                (double)(nmm - mm) / s, ms, (double)(nua - ua) / s);
         cr = ncr;
@@ -830,7 +830,7 @@ static void stats_tick(NcKernel *k)
     for (unsigned i = 0; i < k->pool_nfree; i++) {
         pool_free += k->pool_free[i].len;
     }
-    nc_log("hakuX-native-stats",
+    nc_log("hakuX-lr-native-stats",
            "ram: free %u KiB, contiguous %u KiB (%u blocks), virtual %u KiB, kernel pool %u of %u KiB "
            "(Ex %u, objects %u, lost %u KiB, %u free ranges)",
            nc_vm_free_bytes(k->vm) >> 10, contig >> 10, blocks, virt >> 10, (k->pool_len - pool_free) >> 10,
@@ -847,7 +847,7 @@ static void stats_tick(NcKernel *k)
     char v[PROP_VALUE_MAX] = "";
     hle_prop_get("debug.hakux.ncdump", v);
     if (dump_seen && strcmp(v, dump_last)) {
-        nc_log("hakuX-native-frontier", "dump on demand (debug.hakux.ncdump=%s)", v);
+        nc_log("hakuX-lr-native-frontier", "dump on demand (debug.hakux.ncdump=%s)", v);
         nc_kernel_dump_recent(-1);
         nc_mmio_dump_stats(-1);
         dump_int_samples(k);
@@ -894,7 +894,7 @@ void nc_kernel_dump_recent(int fd)
         char result[16];
         snprintf(result, sizeof(result), g_recent[i].running ? "(running)" : "%08x", g_recent[i].result);
         int len = snprintf(line, sizeof(line),
-                           "hakuX-native-frontier:   call t%u %s from %08x [%08x %08x %08x %08x %08x] -> %s\n",
+                           "hakuX-lr-native-frontier:   call t%u %s from %08x [%08x %08x %08x %08x %08x] -> %s\n",
                            g_recent[i].thread, e ? e->name : "?", g_recent[i].ret, g_recent[i].args[0],
                            g_recent[i].args[1], g_recent[i].args[2], g_recent[i].args[3], g_recent[i].args[4],
                            result);
@@ -1324,7 +1324,7 @@ static void slow_note(const char *what, uint32_t at, const uint32_t *args, uint6
         logged = 0;
     }
     if (logged++ < 10) {
-        nc_log("hakuX-native-slow", "%s from %08x held the CPU %.1f ms [%08x %08x %08x %08x %08x %08x]", what, at,
+        nc_log("hakuX-lr-native-slow", "%s from %08x held the CPU %.1f ms [%08x %08x %08x %08x %08x %08x]", what, at,
                ns / 1e6, args[0], args[1], args[2], args[3], args[4], args[5]);
     }
 }
@@ -1391,7 +1391,7 @@ static void kcall(NcKernel *k, NcFrame *f, unsigned ordinal)
     }
     if (ordinal == NC_KORDINAL_THREAD_RETURN) {
         /* As the kernel's thread startup does when the start routine returns. */
-        nc_log("hakuX-native", "ps: thread %u start routine returned (eax=%08x)",
+        nc_log("hakuX-lr-native", "ps: thread %u start routine returned (eax=%08x)",
                k->current ? k->current->id : 0, nc_frame_gpr(f, NC_EAX));
         nc_ps_thread_returned(k, f);
         return;
@@ -1419,7 +1419,7 @@ static void kcall(NcKernel *k, NcFrame *f, unsigned ordinal)
     k->calls++;
     if (!k->first_ordinal) {
         k->first_ordinal = ordinal;
-        nc_log("hakuX-native-frontier", "stage S2 first kernel call: %s (%u) from %08x",
+        nc_log("hakuX-lr-native-frontier", "stage S2 first kernel call: %s (%u) from %08x",
                e->name, ordinal, ret);
     }
 
@@ -1459,7 +1459,7 @@ static void kcall(NcKernel *k, NcFrame *f, unsigned ordinal)
         g_recent[slot].running = false;
         static unsigned s_logged;
         if (s_logged++ < 64) {
-            nc_log("hakuX-native", "kernel: %s from %08x touched %08x, paged out: it runs again", e->name, ret,
+            nc_log("hakuX-lr-native", "kernel: %s from %08x touched %08x, paged out: it runs again", e->name, ret,
                    t_fault_va);
         }
         if (!nc_kernel_page_fault(k, f, t_fault_va, t_fault_write) &&
@@ -1489,7 +1489,7 @@ static void kcall(NcKernel *k, NcFrame *f, unsigned ordinal)
         g_trace_left--;
         char calls[96];
         nc_kernel_frame_chain(k, f, calls, sizeof(calls));
-        nc_log("hakuX-ktrace", "t%u %s from %08x [%08x %08x %08x %08x %08x %08x] -> %08x%s | frames%s",
+        nc_log("hakuX-lr-ktrace", "t%u %s from %08x [%08x %08x %08x %08x %08x %08x] -> %08x%s | frames%s",
                caller ? caller->id : 0, e->name, ret, args[0], args[1], args[2], args[3], args[4], args[5],
                (uint32_t)r, k->redirected ? " (callout)" : "", calls);
     } else if ((uint32_t)r >= 0xC0000000u && !k->redirected &&
@@ -1501,7 +1501,7 @@ static void kcall(NcKernel *k, NcFrame *f, unsigned ordinal)
         if (failed++ < 400 || failed % 100 == 0) {
             char calls[96];
             nc_kernel_frame_chain(k, f, calls, sizeof(calls));
-            nc_log("hakuX-ktrace", "t%u %s from %08x [%08x %08x %08x %08x %08x %08x] -> %08x | frames%s%s",
+            nc_log("hakuX-lr-ktrace", "t%u %s from %08x [%08x %08x %08x %08x %08x %08x] -> %08x | frames%s%s",
                    caller ? caller->id : 0, e->name, ret, args[0], args[1], args[2], args[3], args[4], args[5],
                    (uint32_t)r, calls, failed > 400 ? " (one of 100)" : "");
         }
@@ -1560,7 +1560,7 @@ static void msr(NcFrame *f, bool wr)
     static unsigned s_logged;
     if (s_logged < 16) {
         s_logged++;
-        nc_log("hakuX-native", "cpu: %s %08x (%08x:%08x)%s", wr ? "wrmsr" : "rdmsr", m,
+        nc_log("hakuX-lr-native", "cpu: %s %08x (%08x:%08x)%s", wr ? "wrmsr" : "rdmsr", m,
                nc_frame_gpr(f, NC_EDX), nc_frame_gpr(f, NC_EAX), s_logged == 16 ? " (first 16 logged)" : "");
     }
     if (!wr) {
@@ -1680,7 +1680,7 @@ static void dump_int_samples(NcKernel *k)
         for (unsigned b = 0; b < 32 && nc_vm_phys(k->vm, eip + b) != UINT32_MAX; b++) {
             n += snprintf(code + n, sizeof(code) - (size_t)n, "%02x", *(const uint8_t *)nc_vm_host(k->vm, eip + b));
         }
-        nc_log("hakuX-native-frontier", "guest at %08x: %u of %u interrupt exits | %s", eip, g_int_eips[best].count,
+        nc_log("hakuX-lr-native-frontier", "guest at %08x: %u of %u interrupt exits | %s", eip, g_int_eips[best].count,
                total, code);
         g_int_eips[best].count = 0;
     }
@@ -1710,7 +1710,7 @@ static void debug_service(NcKernel *k, NcFrame *f, uint32_t eip)
         }
         text[n] = 0;
         logged++;
-        nc_log("hakuX-native-dbg", "%s", text);
+        nc_log("hakuX-lr-native-dbg", "%s", text);
     }
     nc_frame_set_gpr(f, NC_EAX, 0);
     const uint32_t next = eip + 2;
@@ -1721,7 +1721,7 @@ static void debug_service(NcKernel *k, NcFrame *f, uint32_t eip)
 volatile int g_nc_in_sysop;
 
 /* debug (NC_IRQ_SCHED=1): a kernel entry other than an export's call (those
- * are hakuX-native-slow's) the guest CPU spent over 4 ms in, idling in none
+ * are hakuX-lr-native-slow's) the guest CPU spent over 4 ms in, idling in none
  * of it: hooks, MMIO sites, the kernel's own stubs (DPC and callout returns,
  * the APU mailbox wait). Its interrupts waited meanwhile. */
 static int g_slow_sysops = -1;
@@ -1750,14 +1750,14 @@ static void slow_sysop(NcKernel *k, enum NcSysOp op, uint32_t eip, uint16_t ordi
     if (logged++ >= 10) {
         return;
     }
-    nc_log("hakuX-native-irq", "kernel entry took %.1f ms: op %d at %08x (ordinal %u, thread t%u, "
+    nc_log("hakuX-lr-native-irq", "kernel entry took %.1f ms: op %d at %08x (ordinal %u, thread t%u, "
            "%llu interrupts taken in it)", ns / 1e6, (int)op, eip, ordinal, k->current ? k->current->id : 0,
            (unsigned long long)ints);
 }
 
 void nc_kernel_set_paused(NcKernel *k, bool on)
 {
-    nc_log("hakuX-native", "%s requested (the activity: paused, or its menu open)", on ? "pause" : "resume");
+    nc_log("hakuX-lr-native", "%s requested (the activity: paused, or its menu open)", on ? "pause" : "resume");
     nc_pause_set(on);
 }
 
@@ -1783,7 +1783,7 @@ void nc_kernel_pause_point(NcKernel *k, NcFrame *f, bool idle)
     hle_hitch_pause();
     const uint64_t c0 = nc_cpu_host_cycles();
     g_pause_c0 = c0;
-    nc_log("hakuX-native", "paused: the guest's CPU waits");
+    nc_log("hakuX-lr-native", "paused: the guest's CPU waits");
     /* Paused, the guest's CPU still takes a savestate (nc_state_save):
      * here its frame is whole (a kernel entry: nothing of the call done
      * yet; idle: every thread switched out). */
@@ -1801,7 +1801,7 @@ void nc_kernel_pause_point(NcKernel *k, NcFrame *f, bool idle)
         nc_cpu_cycle_offset_add(k->cpu, c1 - c0);
     }
     const uint64_t ns = nc_ke_pause_end();
-    nc_log("hakuX-native", "resumed after %.1f s: the guest's time leaves it out", ns / 1e9);
+    nc_log("hakuX-lr-native", "resumed after %.1f s: the guest's time leaves it out", ns / 1e9);
 }
 
 /* The samplers tell a kernel call or an HLE hook (set) from FEX itself. */

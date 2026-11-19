@@ -1,5 +1,5 @@
 /*
- * hakuX native core — what the native core gives the HLE GPU
+ * hakuX-lr native core — what the native core gives the HLE GPU
  * (hw/xbox/hle/host.h): the guest's registers at a probe, guest memory
  * by VA, the JIT and configuration. Write tracking of guest RAM
  * is dirty.c's, the GPU device's interrupts and display timing dev/nv2a.c's.
@@ -230,7 +230,7 @@ void *hle_host_vk_loader(void)
         void *lib = dlopen("libvulkan.so", RTLD_NOW | RTLD_LOCAL);
         gipa = lib ? (PFN_vkGetInstanceProcAddr)dlsym(lib, "vkGetInstanceProcAddr") : NULL;
         if (!gipa) {
-            nc_log("hakuX-native-hle", "no Vulkan loader: %s", dlerror());
+            nc_log("hakuX-lr-native-hle", "no Vulkan loader: %s", dlerror());
         }
     }
     return (void *)gipa;

@@ -175,11 +175,11 @@ static bool batch_wanted(void)
 void hle_batch_init(void)
 {
     if (g_b.buf || !batch_wanted()) {
-        hle_log("hakuX-hle-back", "strip batching %s", g_b.buf ? "on" : "off");
+        hle_log("hakuX-lr-hle-back", "strip batching %s", g_b.buf ? "on" : "off");
         return;
     }
     if (!g_hvk.caps.eds2) {             /* restart is the pipelines' then, off (vk/draw.c) */
-        hle_log("hakuX-hle-back", "strip batching off: no dynamic primitive restart");
+        hle_log("hakuX-lr-hle-back", "strip batching off: no dynamic primitive restart");
         return;
     }
     const VkDeviceSize size = (VkDeviceSize)SLOTS * SLOT_INDICES * 4;
@@ -204,13 +204,13 @@ void hle_batch_init(void)
         R.vkDestroyBuffer(g_hvk.dev, g_b.buf, NULL);
         g_b.buf = VK_NULL_HANDLE;
         g_b.mem = VK_NULL_HANDLE;
-        hle_log("hakuX-hle-back", "strip batching off: no index memory");
+        hle_log("hakuX-lr-hle-back", "strip batching off: no index memory");
         return;
     }
     R.vkBindBufferMemory(g_hvk.dev, g_b.buf, g_b.mem, 0);
     R.vkMapMemory(g_hvk.dev, g_b.mem, 0, size, 0, (void **)&g_b.map);
     g_b.on = g_b.map != NULL;
-    hle_log("hakuX-hle-back", "strip batching %s (%u KiB of indices per frame slot)", g_b.on ? "on" : "off",
+    hle_log("hakuX-lr-hle-back", "strip batching %s (%u KiB of indices per frame slot)", g_b.on ? "on" : "off",
             SLOT_INDICES * 4 / 1024);
 }
 

@@ -23,29 +23,31 @@ import tarfile
 version = sys.argv[1] if len(sys.argv) == 2 else sys.exit(__doc__)
 root = Path(__file__).resolve().parents[2]
 package = root / 'build/package'
-name = f'hakux-{version}'
+name = f'hakux-lr-{version}'
 arch = platform.machine()
 machines = {'aarch64': 183, 'x86_64': 62}
 assert arch in machines, f'unsupported architecture: {arch}'
 archive = package / f'{name}-{arch}.tar.gz'
-core = package / name / 'lib/libretro/hakux_libretro.so'
+core = package / name / 'lib/libretro/hakux-lr_libretro.so'
 revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
 assert not subprocess.check_output(['git', 'status', '--porcelain', '--untracked-files=no'], cwd=root)
 assert struct.unpack_from('<H', core.read_bytes(), 18)[0] == machines[arch], f'not {arch}'
 with tarfile.open(archive) as tar:
     names = tar.getnames()
-    assert f'{name}/lib/libretro/hakux_libretro.so' in names
-    assert f'{name}/lib/libretro/hakux_libretro.info' in names
+    assert f'{name}/lib/libretro/hakux-lr_libretro.so' in names
+    assert f'{name}/lib/libretro/hakux-lr_libretro.info' in names
     assert all(m.uid == 0 and m.gid == 0 for m in tar.getmembers())
-    info = tar.extractfile(f'{name}/lib/libretro/hakux_libretro.info').read().decode()
+    info = tar.extractfile(f'{name}/lib/libretro/hakux-lr_libretro.info').read().decode()
     assert f'display_version = "{version}"' in info
+    assert 'display_name = "Microsoft - Xbox (hakuX-lr)"' in info
+    assert 'corename = "hakuX-lr"' in info
     assert 'supported_extensions = "iso|chd"' in info
     build_info = tar.extractfile(f'{name}/BUILD-INFO').read().decode()
     assert 'source ' + revision in build_info
     assert 'architecture ' + arch in build_info
     assert 'DSP JIT on' in build_info, 'the core has no DSP JIT'
     assert 'libchdr' in build_info
-    assert tar.extractfile(f'{name}/lib/libretro/hakux_libretro.so').read() == core.read_bytes()
+    assert tar.extractfile(f'{name}/lib/libretro/hakux-lr_libretro.so').read() == core.read_bytes()
 
 
 class SystemInfo(ctypes.Structure):
@@ -57,6 +59,7 @@ class SystemInfo(ctypes.Structure):
 library = ctypes.CDLL(str(core))
 system_info = SystemInfo()
 library.retro_get_system_info(ctypes.byref(system_info))
+assert system_info.name == b'hakuX-lr', system_info.name
 assert system_info.version == version.encode(), system_info.version
 assert system_info.extensions == b'iso|chd'
 spec = importlib.util.spec_from_file_location('release_checks', root / 'tests/native/libretro/check.py')

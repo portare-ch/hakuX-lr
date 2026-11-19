@@ -1,5 +1,5 @@
 /*
- * hakuX HLE — debug probes on title code (probe.h).
+ * hakuX-lr HLE — debug probes on title code (probe.h).
  */
 #include "hw/xbox/hle/base.h"
 #include "hw/xbox/hle/hle.h"
@@ -52,7 +52,7 @@ static void backtrace(uint32_t esp, uint32_t va)
             n++;
         }
     }
-    hle_log("hakuX-hle-probe", "%08x stack:%s", va, line);
+    hle_log("hakuX-lr-hle-probe", "%08x stack:%s", va, line);
 }
 
 unsigned hle_probe_list(uint32_t *vas, unsigned max)
@@ -96,7 +96,7 @@ void hle_probe_hit(const HleCpu *c)
         for (unsigned i = 0; i < MAX_PROBES; i++) {
             g_probe[i].hits = 0;
         }
-        hle_log("hakuX-hle-probe", "re-armed (%s)", v);
+        hle_log("hakuX-lr-hle-probe", "re-armed (%s)", v);
     }
 #endif
     for (unsigned i = 0; i < MAX_PROBES; i++) {
@@ -107,7 +107,7 @@ void hle_probe_hit(const HleCpu *c)
         if (n <= g_probe[i].first || n % 1000 == 0) {
             uint32_t st[8] = { 0 };
             hle_va_rw(c->regs[R_ESP], st, sizeof(st), false);
-            hle_log("hakuX-hle-probe", "%08x #%llu eax %08x ecx %08x edx %08x ebx %08x esi %08x "
+            hle_log("hakuX-lr-hle-probe", "%08x #%llu eax %08x ecx %08x edx %08x ebx %08x esi %08x "
                     "edi %08x ebp %08x | esp %08x: %08x %08x %08x %08x %08x %08x %08x %08x",
                     va, (unsigned long long)n, c->regs[R_EAX], c->regs[R_ECX],
                     c->regs[R_EDX], c->regs[R_EBX], c->regs[R_ESI], c->regs[R_EDI],
@@ -118,7 +118,7 @@ void hle_probe_hit(const HleCpu *c)
             }
             uint32_t w = 0;
             if (word_va && !hle_va_rw(word_va, &w, 4, false)) {
-                hle_log("hakuX-hle-probe", "%08x #%llu word %08x = %08x", va, (unsigned long long)n,
+                hle_log("hakuX-lr-hle-probe", "%08x #%llu word %08x = %08x", va, (unsigned long long)n,
                         word_va, w);
             }
         }
@@ -142,7 +142,7 @@ unsigned hle_probe_register(void)
             g_probe[n].va = va;
             g_probe[n].first = first;
             n++;
-            hle_log("hakuX-hle-probe", "probe at %08x (first %u logged)", va, first);
+            hle_log("hakuX-lr-hle-probe", "probe at %08x (first %u logged)", va, first);
         }
         p = *end == ',' ? end + 1 : end + strlen(end);
     }

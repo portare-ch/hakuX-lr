@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — the display images (display.h): device-local RGBA8 images
+ * hakuX-lr HLE GPU — the display images (display.h): device-local RGBA8 images
  * the render thread writes at its swaps (top row first) and the window's
  * presenter (vk/swapchain.c) samples.
  */
@@ -119,7 +119,7 @@ int hle_disp_init(uint32_t w, uint32_t h)
     int ok = 0;
     for (int i = 0; i < HLE_DISP_SLOTS; i++) {
         if (!slot_create(&g_disp.s[i], w, h)) {
-            hle_log("hakuX-hle-back", "display slot %d %ux%u failed", i, w, h);
+            hle_log("hakuX-lr-hle-back", "display slot %d %ux%u failed", i, w, h);
             ok = -1;
         }
     }
@@ -129,11 +129,11 @@ int hle_disp_init(uint32_t w, uint32_t h)
         for (int i = 0; i < HLE_DISP_SLOTS; i++) {
             slot_free_vk(&g_disp.s[i]);
         }
-        hle_log("hakuX-hle-back", "display disabled: slot creation failed");
+        hle_log("hakuX-lr-hle-back", "display disabled: slot creation failed");
     }
     hle_mutex_unlock(&g_disp.lock);
     hle_mutex_unlock(&g_disp.use);
-    hle_log("hakuX-hle-back", "display %ux%u gen %u (%d slots)", w, h, g_disp.gen, HLE_DISP_SLOTS);
+    hle_log("hakuX-lr-hle-back", "display %ux%u gen %u (%d slots)", w, h, g_disp.gen, HLE_DISP_SLOTS);
     return ok;
 }
 
@@ -248,7 +248,7 @@ int hle_disp_begin_write(uint32_t swap_id, uint64_t value)
             to_front(pick, swap_id);      /* presented already */
         }
     } else if (g_disp.no_slot_logs++ < 8) {
-        hle_log("hakuX-hle-back", "display: no free slot for swap %u (frame skipped)",
+        hle_log("hakuX-lr-hle-back", "display: no free slot for swap %u (frame skipped)",
                 swap_id);
     }
     hle_mutex_unlock(&g_disp.lock);
@@ -334,7 +334,7 @@ static void disp_stat(int64_t front_ns)
     g_dst.late += gap > 25000000;
     if (now - g_dst.t0 >= 10000000000ll) {
         const double n = (double)g_dst.n, span = (double)(now - g_dst.t0);
-        hle_log("hakuX-hle-disp", "stats: %.1f new frames/s, age front to taken %.2f ms (max %.2f), "
+        hle_log("hakuX-lr-hle-disp", "stats: %.1f new frames/s, age front to taken %.2f ms (max %.2f), "
                 "gap %.2f ms (max %.2f, %llu over 25 ms)", n * 1e9 / span,
                 (double)g_dst.age_sum / n / 1e6, (double)g_dst.age_max / 1e6, span / n / 1e6,
                 (double)g_dst.gap_max / 1e6, (unsigned long long)g_dst.late);

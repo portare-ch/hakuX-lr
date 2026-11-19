@@ -1,5 +1,5 @@
 /*
- * hakuX native core, app front end — the panel's vsync, for the emulated
+ * hakuX-lr native core, app front end — the panel's vsync, for the emulated
  * display. A Choreographer thread hands each vsync's time to the NV2A's
  * vblank clock (native/dev/nv2a.c), which locks to the panel: a frame then
  * becomes the front image just before the presenter picks one up, instead of
@@ -29,7 +29,7 @@ static void *vsync_thread(void *arg)
     ALooper_prepare(0);
     AChoreographer *c = AChoreographer_getInstance();
     if (!c) {
-        nc_log("hakuX-app", "vsync: no Choreographer; the vblank runs free");
+        nc_log("hakuX-lr-app", "vsync: no Choreographer; the vblank runs free");
         return NULL;
     }
     AChoreographer_postFrameCallback(c, on_frame, NULL);

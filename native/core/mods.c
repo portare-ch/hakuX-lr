@@ -1,5 +1,5 @@
 /*
- * hakuX native core — mods and cheats (mods.h).
+ * hakuX-lr native core — mods and cheats (mods.h).
  */
 #include "native/core/mods.h"
 #include "native/core/online.h"
@@ -233,15 +233,15 @@ static void patch_update(NcDisc *disc, const char *xbe, const char *mod, uint32_
     uint32_t off;
     uint8_t cur[256];
     if (!update_host(disc, xbe, host, sizeof(host))) {
-        nc_log("hakuX-native-mods", "%s: [%s] %08x: no title update installed", mod, xbe, va);
+        nc_log("hakuX-lr-native-mods", "%s: [%s] %08x: no title update installed", mod, xbe, va);
     } else if (!host_xbe_info(host, &x)) {
-        nc_log("hakuX-native-mods", "%s: [%s] isn't an XBE", mod, xbe);
+        nc_log("hakuX-lr-native-mods", "%s: [%s] isn't an XBE", mod, xbe);
     } else if (!xbe_offset(&x, va, nnew, &off) || !host_read(host, off, cur, nnew)) {
-        nc_log("hakuX-native-mods", "%s: [%s] %08x: not in the XBE's file", mod, xbe, va);
+        nc_log("hakuX-lr-native-mods", "%s: [%s] %08x: not in the XBE's file", mod, xbe, va);
     } else if (!on) {
         remember(&g_mp, &g_nmp, xbe, va, cur, neu, nnew, false);
     } else if (nold && memcmp(cur, old, nold)) {
-        nc_log("hakuX-native-mods", "%s: [%s] %08x: other bytes there, skipped", mod, xbe, va);
+        nc_log("hakuX-lr-native-mods", "%s: [%s] %08x: other bytes there, skipped", mod, xbe, va);
     } else if (g_nhp < MAX_HOST_PATCHES && (g_hp[g_nhp].bytes = malloc(nnew))) {
         HostPatch *p = &g_hp[g_nhp++];
         snprintf(p->host, sizeof(p->host), "%s", host);
@@ -249,7 +249,7 @@ static void patch_update(NcDisc *disc, const char *xbe, const char *mod, uint32_
         p->len = nnew;
         memcpy(p->bytes, neu, nnew);
         remember(&g_mp, &g_nmp, xbe, va, cur, neu, nnew, true);
-        nc_log("hakuX-native-mods", "%s: [%s] %08x: %u bytes", mod, xbe, va, nnew);
+        nc_log("hakuX-lr-native-mods", "%s: [%s] %08x: %u bytes", mod, xbe, va, nnew);
         nc_online_modified(NC_ONLINE_CHEATS, "a mod's XBE patch");
     }
 }
@@ -283,13 +283,13 @@ static void patch(NcDisc *disc, const char *xbe, const char *mod, const char *li
     HleXbeInfo x;
     uint32_t off;
     if (*colon != ':' || !nnew || (nold && nold != nnew) || (*p && *p != '#')) {
-        nc_log("hakuX-native-mods", "%s: [%s] \"%s\": not a patch", mod, xbe, line);
+        nc_log("hakuX-lr-native-mods", "%s: [%s] \"%s\": not a patch", mod, xbe, line);
     } else if (is_update(xbe)) {
         patch_update(disc, xbe, mod, va, old, nold, neu, nnew, on);
     } else if (!xbe_info(disc, xbe, &x)) {
-        nc_log("hakuX-native-mods", "%s: [%s] isn't an XBE on the disc", mod, xbe);
+        nc_log("hakuX-lr-native-mods", "%s: [%s] isn't an XBE on the disc", mod, xbe);
     } else if (!xbe_offset(&x, va, nnew, &off)) {
-        nc_log("hakuX-native-mods", "%s: [%s] %08x: not in the XBE's file", mod, xbe, va);
+        nc_log("hakuX-lr-native-mods", "%s: [%s] %08x: not in the XBE's file", mod, xbe, va);
     } else if (!on) {
         NcDiscFile f;
         uint8_t orig[256];
@@ -301,10 +301,10 @@ static void patch(NcDisc *disc, const char *xbe, const char *mod, const char *li
         uint8_t cur[256];
         if (!nc_disc_find(disc, xbe, &f) || !nc_disc_read(disc, &f, off, cur, nnew) ||
             (nold && memcmp(cur, old, nold))) {
-            nc_log("hakuX-native-mods", "%s: [%s] %08x: other bytes there, skipped", mod, xbe, va);
+            nc_log("hakuX-lr-native-mods", "%s: [%s] %08x: other bytes there, skipped", mod, xbe, va);
         } else if (nc_disc_overlay_patch(disc, xbe, off, neu, nnew)) {
             remember(&g_mp, &g_nmp, xbe, va, cur, neu, nnew, true);
-            nc_log("hakuX-native-mods", "%s: [%s] %08x: %u bytes", mod, xbe, va, nnew);
+            nc_log("hakuX-lr-native-mods", "%s: [%s] %08x: %u bytes", mod, xbe, va, nnew);
             nc_online_modified(NC_ONLINE_CHEATS, "a mod's XBE patch");
         }
     }
@@ -351,7 +351,7 @@ static bool xbe_patches(NcDisc *disc, const char *xbe_path)
     }
     if (!nc_online_cheats()) {
         __atomic_store_n(&g_xbe_patch_booted, nc_xbe_patch_front_hash(), __ATOMIC_RELEASE);
-        nc_log("hakuX-native-mods", "XBE patches (%s): Cheats are off: none applied", on);
+        nc_log("hakuX-lr-native-mods", "XBE patches (%s): Cheats are off: none applied", on);
         return false;
     }
     const char *rel = !strncasecmp(xbe_path, cd, sizeof(cd) - 1)                     ? xbe_path + sizeof(cd) - 1
@@ -360,7 +360,7 @@ static bool xbe_patches(NcDisc *disc, const char *xbe_path)
     NcDiscFile f;
     if (!disc || !rel || !nc_disc_find(disc, rel, &f) || (f.attr & 0x10)) {
         __atomic_store_n(&g_xbe_patch_booted, nc_xbe_patch_front_hash(), __ATOMIC_RELEASE);
-        nc_log("hakuX-native-mods", "XBE patches (%s): %s isn't on the disc; they patch disc XBEs", on, xbe_path);
+        nc_log("hakuX-lr-native-mods", "XBE patches (%s): %s isn't on the disc; they patch disc XBEs", on, xbe_path);
         return false;
     }
     /* Identify the original XBE by CRC-32. */
@@ -370,7 +370,7 @@ static bool xbe_patches(NcDisc *disc, const char *xbe_path)
         const uint32_t k = f.size - at < sizeof(buf) ? f.size - at : (uint32_t)sizeof(buf);
         if (!nc_disc_read(disc, &f, at, buf, k)) {
             __atomic_store_n(&g_xbe_patch_booted, nc_xbe_patch_front_hash(), __ATOMIC_RELEASE);
-            nc_log("hakuX-native-mods", "XBE patches: %s can't be read: none applied", rel);
+            nc_log("hakuX-lr-native-mods", "XBE patches: %s can't be read: none applied", rel);
             return false;
         }
         crc = crc32(crc, buf, k);
@@ -383,7 +383,7 @@ static bool xbe_patches(NcDisc *disc, const char *xbe_path)
     const int found = nc_xbe_patch_front_match((uint32_t)crc, f.size, &p, &index, &other, &where, &hash);
     __atomic_store_n(&g_xbe_patch_booted, hash, __ATOMIC_RELEASE);
     if (found == 0) {
-        nc_log("hakuX-native-mods", "XBE patches (%s): none for %s (%08X:%08X), booting it unpatched", on, rel,
+        nc_log("hakuX-lr-native-mods", "XBE patches (%s): none for %s (%08X:%08X), booting it unpatched", on, rel,
                (unsigned)crc, f.size);
         return false;
     }
@@ -391,12 +391,12 @@ static bool xbe_patches(NcDisc *disc, const char *xbe_path)
      * 60 fps one, each its own cheat), unless two of them write different
      * bytes to the same place: then none is applied. */
     if (found == NC_XBE_PATCH_CONFLICT) {
-        nc_log("hakuX-native-mods", "XBE patches: cheats %u and %u write different bytes at %08X of %s (%08X:%08X): "
+        nc_log("hakuX-lr-native-mods", "XBE patches: cheats %u and %u write different bytes at %08X of %s (%08X:%08X): "
                "none applied", index, other, where, rel, (unsigned)crc, f.size);
         return false;
     }
     if (found < 0) {
-        nc_log("hakuX-native-mods", "XBE patches: the cheats for %s (%08X:%08X) are more than %d runs together: "
+        nc_log("hakuX-lr-native-mods", "XBE patches: the cheats for %s (%08X:%08X) are more than %d runs together: "
                "none applied", rel, (unsigned)crc, f.size, NC_XBE_PATCH_RUNS_MAX);
         return false;
     }
@@ -413,10 +413,10 @@ static bool xbe_patches(NcDisc *disc, const char *xbe_path)
         snprintf(which, sizeof(which), "XBE patches (%d cheats, the first %u)", found, index);
     }
     if (!nc_disc_overlay_patch_all(disc, rel, runs, p.nruns)) {
-        nc_log("hakuX-native-mods", "%s: can't be applied to %s: booting it unpatched", which, rel);
+        nc_log("hakuX-lr-native-mods", "%s: can't be applied to %s: booting it unpatched", which, rel);
         return false;
     }
-    nc_log("hakuX-native-mods", "%s: %u runs, %u bytes over %s (%08X:%08X)", which, p.nruns, bytes, rel,
+    nc_log("hakuX-lr-native-mods", "%s: %u runs, %u bytes over %s (%08X:%08X)", which, p.nruns, bytes, rel,
            (unsigned)crc, f.size);
     nc_online_modified(NC_ONLINE_CHEATS, "an XBE patch");
     return p.widescreen;
@@ -600,7 +600,7 @@ void nc_mods_after_load(NcKernel *k, const char *image_path)
         nc_online_modified(NC_ONLINE_CHEATS, "a mod's XBE patch");
     }
     if (done || undone || kept || cleared || freed) {
-        nc_log("hakuX-native-mods", "savestate %s: %u XBE patches applied to its memory, %u of %s taken back, "
+        nc_log("hakuX-lr-native-mods", "savestate %s: %u XBE patches applied to its memory, %u of %s taken back, "
                "%u left as they were; header page: %u bytes cleared, %u KiB its code allocated freed",
                g_have_saved ? "made with other mods" : "from before its mods were saved", done, undone,
                g_have_saved ? "its mods" : "mods off", kept, cleared, freed >> 10);
@@ -629,12 +629,12 @@ void nc_mods_install(NcDisc *disc)
     /* Keep patch records for restoring stock bytes in pre-MODS states. */
     const bool rollback = !nc_online_cheats();
     if (rollback) {
-        nc_log("hakuX-native-mods", "Cheats are off: the game's mods and cheats (%s) are not applied; their patches "
+        nc_log("hakuX-lr-native-mods", "Cheats are off: the game's mods and cheats (%s) are not applied; their patches "
                "only roll a savestate back", g_manifest);
     }
     FILE *fp = fopen(g_manifest, "r");
     if (!fp) {
-        nc_log("hakuX-native-mods", "no manifest at %s", g_manifest);
+        nc_log("hakuX-lr-native-mods", "no manifest at %s", g_manifest);
         return;
     }
     char line[1024];
@@ -650,7 +650,7 @@ void nc_mods_install(NcDisc *disc)
         if (!strcmp(kind, "refresh")) {
             const unsigned hz = (unsigned)atoi(s);
             nc_dev_nv2a_vblank_multiply((hz + 30) / 60);
-            nc_log("hakuX-native-mods", "vblank at %u Hz for a 60 Hz mode", (hz + 30) / 60 * 60);
+            nc_log("hakuX-lr-native-mods", "vblank at %u Hz for a 60 Hz mode", (hz + 30) / 60 * 60);
             if ((hz + 30) / 60 != 1) {
                 nc_online_modified(NC_ONLINE_CHEATS, "a faster vblank");
             }
@@ -662,7 +662,7 @@ void nc_mods_install(NcDisc *disc)
                 files++;
                 nc_online_modified(NC_ONLINE_CHEATS, "a mod's files");
             } else {
-                nc_log("hakuX-native-mods", "file %s from %s: can't be used", path, s);
+                nc_log("hakuX-lr-native-mods", "file %s from %s: can't be used", path, s);
             }
             continue;
         }
@@ -681,7 +681,7 @@ void nc_mods_install(NcDisc *disc)
             lines++;
             if (!nc_cheat_line(s, err, sizeof(err))) {
                 bad++;
-                nc_log("hakuX-native-mods", "cheat %s: \"%s\": %s", nc_cheat_name((int)nc_cheat_count() - 1), s,
+                nc_log("hakuX-lr-native-mods", "cheat %s: \"%s\": %s", nc_cheat_name((int)nc_cheat_count() - 1), s,
                        err);
             }
         }
@@ -694,7 +694,7 @@ void nc_mods_install(NcDisc *disc)
     for (unsigned i = 0; i < nc_cheat_count(); i++) {
         on += nc_cheat_on((int)i);
     }
-    nc_log("hakuX-native-mods", "%u files over the disc; %u cheats (%u on), %u code lines (%u bad)", files,
+    nc_log("hakuX-lr-native-mods", "%u files over the disc; %u cheats (%u on), %u code lines (%u bad)", files,
            nc_cheat_count(), on, lines, bad);
 }
 
@@ -770,12 +770,12 @@ void nc_mods_poll(void)
     for (unsigned i = 0; i < nc_cheat_count(); i++) {
         if (!g_logged[i] && nc_cheat_misses((int)i)) {
             g_logged[i] = true;
-            nc_log("hakuX-native-mods", "cheat %s: an address isn't mapped (yet): its line skipped",
+            nc_log("hakuX-lr-native-mods", "cheat %s: an address isn't mapped (yet): its line skipped",
                    nc_cheat_name((int)i));
         }
     }
     for (int i; (i = nc_cheat_front_missed()) >= 0;) {
-        nc_log("hakuX-native-mods", "the frontend's cheat %d: an address isn't mapped (yet): its code skipped", i);
+        nc_log("hakuX-lr-native-mods", "the frontend's cheat %d: an address isn't mapped (yet): its code skipped", i);
     }
 }
 

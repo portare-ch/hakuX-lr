@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — XDK resource model: formats, header encoding, sizes and
+ * hakuX-lr HLE GPU — XDK resource model: formats, header encoding, sizes and
  * subresource offsets (spec §4.9 "compute size and alignment as the XDK
  * does ... write bit-exact XDK headers").
  */

@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — push-buffer mode's drawing (pbdraw.h).
+ * hakuX-lr HLE GPU — push-buffer mode's drawing (pbdraw.h).
  */
 #include "hw/xbox/hle/base.h"
 #include "hw/xbox/hle/hle.h"
@@ -338,7 +338,7 @@ static uint32_t dma_base(unsigned c)
         const uint32_t base = hle_pb_dma_base(R(method[c]));
         if (base && base != g_pd.dma[c] && logged < 16) {
             logged++;
-            hle_log("hakuX-hle-pb", "context DMA %s (object %08x) starts at %08x", name[c], R(method[c]), base);
+            hle_log("hakuX-lr-hle-pb", "context DMA %s (object %08x) starts at %08x", name[c], R(method[c]), base);
         }
         g_pd.dma[c] = base;
         g_pd.dma_known |= (uint8_t)(1u << c);
@@ -508,7 +508,7 @@ bool hle_pbd_start(void)
         g_pd.cur[a][3] = 1.0f;
     }
     if (!hle_back_running() && hle_back_start() != 0) {
-        hle_log("hakuX-hle-pb", "no back end: push-buffer mode draws nothing");
+        hle_log("hakuX-lr-hle-pb", "no back end: push-buffer mode draws nothing");
         return false;
     }
     hle_disp_present_late(true);
@@ -666,7 +666,7 @@ static void device(uint32_t w, uint32_t h)
     g_pd.device = true;
     g_pd.disp_w = w;
     g_pd.disp_h = h;
-    hle_log("hakuX-hle-pb", "device %ux%u", w, h);
+    hle_log("hakuX-lr-hle-pb", "device %ux%u", w, h);
 }
 
 /* A linear target's size (w x h in, physical): the surface clip bounds only
@@ -710,7 +710,7 @@ static uint32_t rows_in_block(uint32_t pa, uint32_t pitch, uint32_t h)
     static unsigned s_logged;
     if (s_logged < 8) {
         s_logged++;
-        hle_log("hakuX-hle-pb", "target %08x: %u rows of %u bytes, %u in its block (first 8 logged)", pa,
+        hle_log("hakuX-lr-hle-pb", "target %08x: %u rows of %u bytes, %u in its block (first 8 logged)", pa,
                 h, pitch, rows);
     }
     return MAX(rows, 1u);
@@ -887,7 +887,7 @@ static uint32_t object(uint32_t pa, uint32_t xfmt, uint32_t pitch, uint32_t w, u
         if (pitch && past_block(d)) {
             if (!obj_busy(s)) {
                 if (g_lg.past_blocks++ < 8) {
-                    hle_log("hakuX-hle-pb", "surface %u (%08x %ux%u): past its block now, gone "
+                    hle_log("hakuX-lr-hle-pb", "surface %u (%08x %ux%u): past its block now, gone "
                             "(first 8 logged)", s->id, d->pa, d->w, d->h);
                 }
                 HleCmdObjDestroy *x = begin(HLE_OP_OBJ_DESTROY, sizeof(*x));
@@ -916,7 +916,7 @@ static uint32_t object(uint32_t pa, uint32_t xfmt, uint32_t pitch, uint32_t w, u
         o = evict_slot();
         if (!o) {
             if (g_lg.objs_full++ < 8) {
-                hle_log("hakuX-hle-pb", "surface %08x: all %u objects in use (first 8 logged)", pa, MAX_OBJS);
+                hle_log("hakuX-lr-hle-pb", "surface %08x: all %u objects in use (first 8 logged)", pa, MAX_OBJS);
             }
             return 0;
         }
@@ -955,7 +955,7 @@ static uint32_t object(uint32_t pa, uint32_t xfmt, uint32_t pitch, uint32_t w, u
         restored_pixels(o);
     }
     if (g_lg.surfaces++ < 32) {
-        hle_log("hakuX-hle-pb", "surface %u: %08x format %02x %ux%u pitch %u", o->id, pa, xfmt, w, h,
+        hle_log("hakuX-lr-hle-pb", "surface %u: %08x format %02x %ux%u pitch %u", o->id, pa, xfmt, w, h,
                 pitch);
     }
     return o->id;
@@ -1098,7 +1098,7 @@ static void rt_upload(PbObj *o, uint32_t id, bool used)
     o->cpu_used |= used;
     g_pd.rt_uploads++;
     if (rtlog_on()) {
-        hle_log("hakuX-hle-pb", "rt upload %u: %08x %ux%u pitch %u fmt %02x swap %llu", id,
+        hle_log("hakuX-lr-hle-pb", "rt upload %u: %08x %ux%u pitch %u fmt %02x swap %llu", id,
                 o->d.pa, o->d.w, o->d.h, o->d.pitch, o->d.xfmt, (unsigned long long)g_pd.swaps);
     }
 }
@@ -1279,7 +1279,7 @@ static void mode_sync(void)
     c->disp_w = w;
     c->disp_h = h;
     hle_fe_commit();
-    hle_log("hakuX-hle-pb", "display %ux%u: the video mode's (was %ux%u, the first target bound)", w, h,
+    hle_log("hakuX-lr-hle-pb", "display %ux%u: the video mode's (was %ux%u, the first target bound)", w, h,
             g_pd.disp_w, g_pd.disp_h);
     g_pd.disp_w = w;
     g_pd.disp_h = h;
@@ -1684,7 +1684,7 @@ static void clear(uint32_t flags)
         c->rect[0] = r;
     }
     if (g_dlog_left > 0) {
-        hle_log("hakuX-hle-pb", "clear %02x rt %u ds %u colour %08x z %g s %u rect %d,%d-%d,%d of %ux%u",
+        hle_log("hakuX-lr-hle-pb", "clear %02x rt %u ds %u colour %08x z %g s %u rect %d,%d-%d,%d of %ux%u",
                 c->flags, g_pd.rt, g_pd.ds, c->color, c->z, c->stencil, r.x1, r.y1, r.x2, r.y2,
                 g_pd.rt_w, g_pd.rt_h);
     }
@@ -1738,7 +1738,7 @@ static void restored_display(void)
     c->disp_w = w;
     c->disp_h = h;
     hle_fe_commit();
-    hle_log("hakuX-hle-pb", "savestate: display %ux%u from the first frame swapped (was %ux%u, the first "
+    hle_log("hakuX-lr-hle-pb", "savestate: display %ux%u from the first frame swapped (was %ux%u, the first "
             "target bound)", w, h, g_pd.disp_w, g_pd.disp_h);
     g_pd.disp_w = w;
     g_pd.disp_h = h;
@@ -1913,7 +1913,7 @@ static void swap(void)
             const uint32_t frame = scanned_frame(fo->d.pa);
             if (frame) {
                 if (g_lg.scanned_frames++ < 4) {
-                    hle_log("hakuX-hle-pb", "swap: nothing drawn and a %ux%u target bound over frame buffer %08x: "
+                    hle_log("hakuX-lr-hle-pb", "swap: nothing drawn and a %ux%u target bound over frame buffer %08x: "
                             "shown as the video mode lays it out (first 4 logged)", fo->d.w, fo->d.h, fo->d.pa);
                 }
                 id = frame;
@@ -1927,7 +1927,7 @@ static void swap(void)
     front_stale(rt_cpu_sync(id) ? NULL : fo);
     g_pd.rt_fresh = true;
     if (rtlog_on()) {
-        hle_log("hakuX-hle-pb", "swap %llu: shows %u, %u bound (clears %llu draws %llu)",
+        hle_log("hakuX-lr-hle-pb", "swap %llu: shows %u, %u bound (clears %llu draws %llu)",
                 (unsigned long long)g_pd.swaps + 1, id, g_pd.rt, (unsigned long long)g_pd.clears,
                 (unsigned long long)g_pd.draws);
     }
@@ -1972,7 +1972,7 @@ void hle_pbd_trap(void)
 static uint32_t object_at(uint32_t pa);
 
 /* A frame presented: the frame rate in the log every 5 s (perf A/B from
- * logcat: hakuX-hle-fps). */
+ * logcat: hakuX-lr-hle-fps). */
 static struct {
     int64_t t0;
     unsigned n, n0;
@@ -1986,7 +1986,7 @@ static void fps_log(void)
         g_fps.t0 = now;
         g_fps.n0 = g_fps.n;
     } else if (now - g_fps.t0 >= 5000000) {
-        hle_log("hakuX-hle-fps", "%.1f fps (%u frames in %.2f s)",
+        hle_log("hakuX-lr-hle-fps", "%.1f fps (%u frames in %.2f s)",
                 (g_fps.n - g_fps.n0) * 1e6 / (double)(now - g_fps.t0), g_fps.n - g_fps.n0,
                 (now - g_fps.t0) / 1e6);
         g_fps.t0 = now;
@@ -2063,7 +2063,7 @@ void hle_pbd_display(uint32_t pa, bool flip)
     uint32_t id = object_at(pa & 0x0FFFFFFFu);
     if (!id) {
         if (g_lg.no_target++ < 4) {
-            hle_log("hakuX-hle-pb", "display start %08x: no render target there (not shown)", pa);
+            hle_log("hakuX-lr-hle-pb", "display start %08x: no render target there (not shown)", pa);
         }
         return;
     }
@@ -2078,7 +2078,7 @@ void hle_pbd_display(uint32_t pa, bool flip)
         return;
     }
     if (rtlog_on()) {
-        hle_log("hakuX-hle-pb", "display %08x: shows %u after swap %llu (was %u)", pa, id,
+        hle_log("hakuX-lr-hle-pb", "display %08x: shows %u after swap %llu (was %u)", pa, id,
                 (unsigned long long)g_pd.swaps, g_pd.shown_id);
     }
     present_now(id);
@@ -2112,7 +2112,7 @@ static bool present_flipped(void)
     hle_disp_present(id);
     fps_log();
     if (g_pd.flipped_presents++ < 4) {
-        hle_log("hakuX-hle-pb", "scanout: swap %u, flipped before it came, had no flip since: shown "
+        hle_log("hakuX-lr-hle-pb", "scanout: swap %u, flipped before it came, had no flip since: shown "
                 "(first 4 logged)", id);
     }
     return true;
@@ -2130,7 +2130,7 @@ void hle_pbd_scanout(void)
         const PbObj *o = obj_of(g_pd.shown_id);
         if (g_lg.scan_for != g_pd.shown_ns) {   /* once an idle period */
             g_lg.scan_for = g_pd.shown_ns;
-            hle_log("hakuX-hle-pb", "scanout check: shown %u (%08x %ux%u) idle %lld ms, flips pending %u",
+            hle_log("hakuX-lr-hle-pb", "scanout check: shown %u (%08x %ux%u) idle %lld ms, flips pending %u",
                     g_pd.shown_id, o ? o->d.pa : 0, o ? o->d.w : 0, o ? o->d.h : 0,
                     (long long)((hle_now_ns() - g_pd.shown_ns) / 1000000),
                     __atomic_load_n(&g_pd.pend_head, __ATOMIC_ACQUIRE) -
@@ -2164,7 +2164,7 @@ void hle_pbd_scanout(void)
            !__atomic_compare_exchange_n(&g_pd.pend_tail, &tail, head, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
     }
     if (g_pd.scan_presents++ < 4) {
-        hle_log("hakuX-hle-pb", "scanout: the %s wrote the frame on screen (%u) and the title doesn't "
+        hle_log("hakuX-lr-hle-pb", "scanout: the %s wrote the frame on screen (%u) and the title doesn't "
                 "flip: shown again (first 4 logged)", cpu ? "CPU" : "GPU", g_pd.shown_id);
     }
     present_now(g_pd.shown_id);
@@ -2179,7 +2179,7 @@ void hle_pbd_cpu_display(uint32_t pa)
     }
     hle_pb_display_mode_get(&pitch, &xfmt, &hz);
     if (!mode_size(0, &w, &h, &seq)) {
-        hle_log("hakuX-hle-pb", "frame buffer %08x: no video mode it fits (pitch %u format %02x): not shown", pa,
+        hle_log("hakuX-lr-hle-pb", "frame buffer %08x: no video mode it fits (pitch %u format %02x): not shown", pa,
                 pitch, xfmt);
         return;
     }
@@ -2196,7 +2196,7 @@ void hle_pbd_cpu_display(uint32_t pa)
     coh_shown(o);
     rt_upload(o, id, false);
     present_now(id);
-    hle_log("hakuX-hle-pb", "frame buffer %08x %ux%u format %02x: the title draws it with the CPU (no GPU device), "
+    hle_log("hakuX-lr-hle-pb", "frame buffer %08x %ux%u format %02x: the title draws it with the CPU (no GPU device), "
             "shown as written", pa, w, h, xfmt);
 }
 
@@ -2210,7 +2210,7 @@ void hle_pbd_gamma(const uint8_t rgb[3][256])
     memcpy(c->rgb, rgb, sizeof(c->rgb));
     hle_fe_commit();
     if (g_lg.gamma++ < 4) {
-        hle_log("hakuX-hle-pb", "gamma ramp r=%u,%u,%u,%u g=%u,%u b=%u,%u", rgb[0][0], rgb[0][64],
+        hle_log("hakuX-lr-hle-pb", "gamma ramp r=%u,%u,%u,%u g=%u,%u b=%u,%u", rgb[0][0], rgb[0][64],
                 rgb[0][128], rgb[0][255], rgb[1][128], rgb[1][255], rgb[2][128], rgb[2][255]);
     }
 }
@@ -2291,7 +2291,7 @@ void hle_pbd_overlay(bool show)
         g_pd.epoch++;
     }
     if (g_lg.overlay++ < 4 || g_dlog_left > 0) {
-        hle_log("hakuX-hle-pb", "overlay %s: %ux%u from %.1f,%.1f scale %.3fx%.3f -> %d,%d-%d,%d, "
+        hle_log("hakuX-lr-hle-pb", "overlay %s: %ux%u from %.1f,%.1f scale %.3fx%.3f -> %d,%d-%d,%d, "
                 "colour key %s %06x, contrast %x brightness %d saturation %d,%d %s",
                 on ? "on" : "off", w, h, c->in_x, c->in_y, c->scale_x, c->scale_y, c->dst[0],
                 c->dst[1], c->dst[2], c->dst[3], c->color_key_on ? "on" : "off", c->color_key,
@@ -2660,7 +2660,7 @@ static uint32_t cube_of_targets(uint32_t pa, uint32_t code, uint32_t w, uint32_t
             hle_fe_commit();
         }
     }
-    hle_log("hakuX-hle-pb", "cube %u: %ux%u at %08x (face stride %x) from its face targets", c->id,
+    hle_log("hakuX-lr-hle-pb", "cube %u: %ux%u at %08x (face stride %x) from its face targets", c->id,
             w, w, pa, stride);
     return c->id;
 }
@@ -2694,7 +2694,7 @@ bool hle_pbd_blit_images(uint32_t sbase, uint32_t sp, uint32_t dbase, uint32_t d
     uint32_t src = object_at(sbase), dst = object_at(dbase);
     PbObj *so = obj_of(src), *dd = obj_of(dst);
     if (g_dlog_left > 0) {
-        hle_log("hakuX-hle-pb", "blit %08x/%u -> %08x/%u bpp %u %ux%u from %u,%u to %u,%u objects %u -> %u",
+        hle_log("hakuX-lr-hle-pb", "blit %08x/%u -> %08x/%u bpp %u %ux%u from %u,%u to %u,%u objects %u -> %u",
                 sbase, sp, dbase, dp, bpp, w, h, ix, iy, ox, oy, src, dst);
     }
     if (so && so->d.pitch && !dd && dp) {
@@ -2852,7 +2852,7 @@ static uint64_t tex_budget(void)
 #endif
         mb = ram && ram <= TEX_BUDGET_SMALL_RAM ? TEX_BUDGET_SMALL_MB : 0;
     }
-    hle_log("hakuX-hle-pb", "textures: image budget %llu MiB%s", (unsigned long long)mb,
+    hle_log("hakuX-lr-hle-pb", "textures: image budget %llu MiB%s", (unsigned long long)mb,
             mb ? "" : " (none)");
     return mb << 20;
 }
@@ -2945,7 +2945,7 @@ static bool tex_evict(bool full)
         g_pd.tex_bytes += keep[i].host_bytes;
     }
     g_pd.ntex = nkeep;
-    hle_log("hakuX-hle-pb", "textures: %s, the %u checked longest ago dropped (%u kept, %llu of %llu MiB)",
+    hle_log("hakuX-lr-hle-pb", "textures: %s, the %u checked longest ago dropped (%u kept, %llu of %llu MiB)",
             full ? "table full" : "past the budget", n - nkeep, nkeep,
             (unsigned long long)(g_pd.tex_bytes >> 20), (unsigned long long)(had >> 20));
     return true;
@@ -2983,7 +2983,7 @@ static unsigned zread_view(uint32_t pa, uint32_t w, uint32_t h, uint32_t xfmt, u
         c->s = (HleSurfDesc){ .id = g_pd.zr[i].id, .xfmt = bpp == 2 ? xfmt : HLE_XFMT_LIN_A8R8G8B8,
                               .w = w, .h = h, .pa = pa, .pitch = pitch, .levels = 1, .faces = 1 };
         hle_fe_commit();
-        hle_log("hakuX-hle-pb", "depth view %08x (%ux%u)", pa, w, h);
+        hle_log("hakuX-lr-hle-pb", "depth view %08x (%ux%u)", pa, w, h);
     }
     return i;
 }
@@ -3086,7 +3086,7 @@ static uint32_t zread(uint32_t pa, uint32_t w, uint32_t h, const uint8_t map[4],
             const int32_t pt[1][2] = { { 0, 0 } };
             hle_res_upload(g_pd.zr[i].id, pa, pitch, 1, &r, pt);
             if (g_pd.zr_uploads++ < 8) {
-                hle_log("hakuX-hle-pb", "texture %08x over depth target %u: the CPU's writes (%ux%u, "
+                hle_log("hakuX-lr-hle-pb", "texture %08x over depth target %u: the CPU's writes (%ux%u, "
                         "first 8 logged)", pa, src->id, w, h);
             }
         }
@@ -3816,7 +3816,7 @@ static void drawlog(const HleCmdDraw *d, bool ff)
                       R(NV097_SET_TEXTURE_CONTROL1 + b), R(NV097_SET_TEXTURE_IMAGE_RECT + b),
                       R(0x1B08 + b), R(0x1B24 + b));
     }
-    hle_log("hakuX-hle-pb", "draw %llu: %s prim %u count %u rt %u ds %u nbind %u stride %u surf "
+    hle_log("hakuX-lr-hle-pb", "draw %llu: %s prim %u count %u rt %u ds %u nbind %u stride %u surf "
             "[f%08x c%08x z%08x p%08x clip %08x %08x mask %08x] f0 %08x %08x %08x %08x n %08x at %x/%x/%x bl %x/%08x "
             "z %x/%x/%x po %x %08x %08x skin %x va01 %08x %08x zclip %08x %08x zmm %x%s",
             (unsigned long long)g_pd.draws, ff ? "ff" : "prog", d->prim, d->count, g_pd.rt, g_pd.ds,
@@ -3952,7 +3952,7 @@ static unsigned writeback_range(uint32_t pa, uint32_t end, bool gpu_newer, const
             /* the title's data is there now (a texture defined from it), over
              * a target the coherence keeps too: its image would be landed */
             if (gpu_newer) {
-                hle_log("hakuX-hle-pb", "%s: surface %u (%08x %ux%u) kept: textures took its memory since "
+                hle_log("hakuX-lr-hle-pb", "%s: surface %u (%08x %ux%u) kept: textures took its memory since "
                         "its last draw", what, next->id, next->d.pa, next->d.w, next->d.h);
             }
             kept++;
@@ -3988,13 +3988,13 @@ static unsigned writeback_range(uint32_t pa, uint32_t end, bool gpu_newer, const
         wb_note(next->d.pa, len, v);
         *lv = MAX(*lv, v);
         if (!gpu_newer) {
-            hle_log("hakuX-hle-pb", "%s %08x+%u: surface %u (%08x %ux%u) written back", what, pa, end - pa,
+            hle_log("hakuX-lr-hle-pb", "%s %08x+%u: surface %u (%08x %ux%u) written back", what, pa, end - pa,
                     next->id, next->d.pa, next->d.w, next->d.h);
         }
         n++;
     }
     if (gpu_newer) {
-        hle_log("hakuX-hle-pb", "%s: %u surfaces written back, %u whose memory is newer kept", what, n, kept);
+        hle_log("hakuX-lr-hle-pb", "%s: %u surfaces written back, %u whose memory is newer kept", what, n, kept);
     }
     return n;
 }
@@ -4024,7 +4024,7 @@ bool hle_pbd_keep_wait(uint64_t timeout_ns)
     const int64_t t0 = hle_now_ns();
     while (__atomic_load_n(&g_keep.done, __ATOMIC_ACQUIRE) != r) {
         if ((uint64_t)(hle_now_ns() - t0) > timeout_ns) {
-            hle_log("hakuX-hle-pb", "kept memory: the decoder did not get to it in %llu ms",
+            hle_log("hakuX-lr-hle-pb", "kept memory: the decoder did not get to it in %llu ms",
                     (unsigned long long)(timeout_ns / 1000000));
             return false;
         }
@@ -4058,7 +4058,7 @@ static void front_fill(uint32_t pa, uint32_t len)
     const int64_t t0 = hle_now_ns();
     while (__atomic_load_n(&g_front.done, __ATOMIC_ACQUIRE) != r) {
         if (hle_now_ns() - t0 > 100000000) {
-            hle_log("hakuX-hle-pb", "front buffer %08x: the decoder did not copy the frame in 100 ms "
+            hle_log("hakuX-lr-hle-pb", "front buffer %08x: the decoder did not copy the frame in 100 ms "
                     "(the CPU writes over older memory)", pa);
             return;
         }
@@ -4078,7 +4078,7 @@ void hle_pbd_front_serve(void)
         return;
     }
     if (rtlog_on()) {
-        hle_log("hakuX-hle-pb", "front buffer %08x+%u: the CPU's first write, shown %u", g_front.pa,
+        hle_log("hakuX-lr-hle-pb", "front buffer %08x+%u: the CPU's first write, shown %u", g_front.pa,
                 g_front.len, g_pd.shown_id);
     }
     if (g_pd.on && g_pd.device) {
@@ -4409,7 +4409,7 @@ void hle_pbd_boundary(uint64_t value)
 
 /* debug: HAKUX_HLE_PB_VBRACE=1 (via debug.hakux.env), a vertex range copied
  * again in the same frame with other bytes than its last copy is logged
- * (hakuX-hle-pb vbrace): the CPU rewrote vertices between two draws. posoff
+ * (hakuX-lr-hle-pb vbrace): the CPU rewrote vertices between two draws. posoff
  * is the position's offset in a vertex (-1: none), hashed apart: a changed
  * position moves the draw's depth. */
 static struct {
@@ -4443,7 +4443,7 @@ static void vbrace(uint32_t from, uint32_t len, uint32_t stride, int posoff, con
     unsigned i = (from ^ (from >> 12) ^ len * 31u) & 255u;
     if (t[i].from == from && t[i].len == len && t[i].swap == g_pd.swaps && t[i].h != h &&
         (++g_vbrace.logged <= 16 || (g_vbrace.logged & 255) == 0)) {
-        hle_log("hakuX-hle-pb", "vbrace: %08x+%u stride %u copied for draw %llu with other %s "
+        hle_log("hakuX-lr-hle-pb", "vbrace: %08x+%u stride %u copied for draw %llu with other %s "
                 "than for draw %llu, %.3f ms before (swap %llu; GET/PUT then %08x/%08x, now %08x/%08x)",
                 from, len, stride,
                 (unsigned long long)g_pd.draws, t[i].hp != hp ? "positions" : "bytes (positions same)",
@@ -4556,7 +4556,7 @@ static bool vb_realign(HleCmdDraw *d, unsigned b, const uint8_t *src, uint32_t f
     static bool said;
     if (!said) {
         said = true;
-        hle_log("hakuX-hle-pb", "vb_align: a binding of stride %u at %08x copied with its attributes aligned "
+        hle_log("hakuX-lr-hle-pb", "vb_align: a binding of stride %u at %08x copied with its attributes aligned "
                 "(stride %u)", st, from, ns);
     }
     for (unsigned i = 0; i < na; i++) {
@@ -4868,7 +4868,7 @@ static void draw(void)
     if (!g_pd.rt && !g_pd.ds) {
         skip(SK_DRAW_NO_TARGET);
         if (g_dlog_left > 0) {
-            hle_log("hakuX-hle-pb", "skipped draw: no target (surface format %08x colour %08x zeta "
+            hle_log("hakuX-lr-hle-pb", "skipped draw: no target (surface format %08x colour %08x zeta "
                     "%08x pitch %08x clip %08x %08x)", R(NV097_SET_SURFACE_FORMAT),
                     R(NV097_SET_SURFACE_COLOR_OFFSET), R(NV097_SET_SURFACE_ZETA_OFFSET),
                     R(NV097_SET_SURFACE_PITCH), R(NV097_SET_SURFACE_CLIP_HORIZONTAL),
@@ -4885,7 +4885,7 @@ static void draw(void)
                 o += snprintf(t + o, sizeof(t) - (size_t)o, " %04x:%04x", g_pd.dm[i] >> 16,
                               g_pd.dm[i] & 0xFFFF);
             }
-            hle_log("hakuX-hle-pb", "skipped draw: no vertices (prim %u, methods%s)", g_pd.prim, t);
+            hle_log("hakuX-lr-hle-pb", "skipped draw: no vertices (prim %u, methods%s)", g_pd.prim, t);
         }
         return;
     }
@@ -5189,7 +5189,7 @@ static void launch_state_program(uint32_t start)
         c->hash = h;
         if (!c->ok) {
             if (g_lg.sprog++ < 4) {
-                hle_log("hakuX-hle-pb", "state program at %u: not a program it can run", start);
+                hle_log("hakuX-lr-hle-pb", "state program at %u: not a program it can run", start);
             }
             return;
         }
@@ -5674,7 +5674,7 @@ static uint64_t coh_land(PbObj *o)
     if (k < 0 || (!fb && (!o->d.pitch || !hle_res_ram_direct()))) {
         static unsigned s_logged;
         if (s_logged++ < 8) {
-            hle_log("hakuX-hle-pb", "target %u (%08x): no room to land its image (%s)", o->id, o->d.pa,
+            hle_log("hakuX-lr-hle-pb", "target %u (%08x): no room to land its image (%s)", o->id, o->d.pa,
                     k < 0 ? "landings" : "landing buffer");
         }
         return 0;
@@ -6093,7 +6093,7 @@ static uint64_t coh_fill(uint32_t pa, uint32_t len, bool read)
         if (s == FILL_ASKED && hle_now_ns() - t0 > 250000000 &&
             __atomic_compare_exchange_n(&g_fill.state, &s, FILL_GONE, false, __ATOMIC_ACQ_REL,
                                         __ATOMIC_ACQUIRE)) {
-            hle_log("hakuX-hle-pb", "target %08x: the decoder did not take its landing in 250 ms "
+            hle_log("hakuX-lr-hle-pb", "target %08x: the decoder did not take its landing in 250 ms "
                     "(the guest reads older memory)", pa);
             break;
         }
@@ -6500,7 +6500,7 @@ bool hle_pbd_state_set(const HlePbdState *s, const float *imm, const uint32_t *i
     g_pd.draws = s->draws;
     if (s->vis_open) {
         /* the test's draws so far were counted by the run that saved */
-        hle_log("hakuX-hle-pb", "savestate: a visibility test was open; it counts from here");
+        hle_log("hakuX-lr-hle-pb", "savestate: a visibility test was open; it counts from here");
         vis_begin();
     }
     g_pd.rt_dirty = true;                   /* the targets bound again from the methods */

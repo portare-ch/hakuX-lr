@@ -1,7 +1,7 @@
 /* Copyright (C) 2026-present PortareOS */
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * hakuX libretro Vulkan output (LIBRETRO_SPEC.md section 7).
+ * Vulkan output for hakuX-lr (LIBRETRO_SPEC.md section 7).
  *
  * create_device2 initializes the renderer on RetroArch's instance and GPU.
  * RetroArch's wrapper adds its device requirements. Submissions share a
@@ -45,8 +45,8 @@ static const VkApplicationInfo *application_info(void)
 {
     static VkApplicationInfo app = {
         .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-        .pApplicationName = "hakuX",
-        .pEngineName = "hakuX",
+        .pApplicationName = "hakuX-lr",
+        .pEngineName = "hakuX-lr",
     };
     /* Match the Vulkan loader's supported API version. */
     app.apiVersion = hle_vk_instance_version();
@@ -69,13 +69,13 @@ static bool create_device2(struct retro_vulkan_context *context, VkInstance inst
                            retro_vulkan_create_device_wrapper_t wrap, void *opaque)
 {
     if (g_hvk.dev && g_hvk.inst != instance) {
-        nc_log("hakuX-libretro", "vulkan: a second device for RetroArch: not before the core can stop");
+        nc_log("hakuX-lr", "vulkan: a second device for RetroArch: not before the core can stop");
         return false;
     }
     struct maker m = {wrap, opaque};
     const int r = hle_vk_init_shared(gipa, instance, gpu, surface, make_device, &m);
     if (r != 0) {
-        nc_log("hakuX-libretro", "vulkan: no device for the renderer (%d)%s%s", r, r == -2 ? ": missing " : "",
+        nc_log("hakuX-lr", "vulkan: no device for the renderer (%d)%s%s", r, r == -2 ? ": missing " : "",
                r == -2 ? g_hvk.caps.missing : "");
         return false;
     }
@@ -85,7 +85,7 @@ static bool create_device2(struct retro_vulkan_context *context, VkInstance inst
     context->queue_family_index = g_hvk.qfam;
     context->presentation_queue = g_hvk.queue;
     context->presentation_queue_family_index = g_hvk.qfam;
-    nc_log("hakuX-libretro", "vulkan: the renderer's device on RetroArch's instance, queue family %u", g_hvk.qfam);
+    nc_log("hakuX-lr", "vulkan: the renderer's device on RetroArch's instance, queue family %u", g_hvk.qfam);
     return true;
 }
 
@@ -95,7 +95,7 @@ static bool create_device(struct retro_vulkan_context *context, VkInstance insta
                           VkSurfaceKHR surface, PFN_vkGetInstanceProcAddr gipa, const char **exts, unsigned nexts,
                           const char **layers, unsigned nlayers, const VkPhysicalDeviceFeatures *features)
 {
-    nc_log("hakuX-libretro", "vulkan: the frontend asked for a v1 device: not enough for the renderer");
+    nc_log("hakuX-lr", "vulkan: the frontend asked for a v1 device: not enough for the renderer");
     return false;
 }
 
@@ -232,11 +232,11 @@ bool nc_lr_vk_negotiate(void)
         .interface_type = RETRO_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE_VULKAN};
     if (!nc_lr_env(RETRO_ENVIRONMENT_GET_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE_SUPPORT, &support) ||
         support.interface_version < 2) {
-        nc_log("hakuX-libretro", "vulkan: the frontend has no device negotiation (v2): frames read back");
+        nc_log("hakuX-lr", "vulkan: the frontend has no device negotiation (v2): frames read back");
         return false;
     }
     if (!nc_lr_env(RETRO_ENVIRONMENT_SET_HW_RENDER, &hw)) {
-        nc_log("hakuX-libretro", "vulkan: the frontend has no Vulkan render: frames read back");
+        nc_log("hakuX-lr", "vulkan: the frontend has no Vulkan render: frames read back");
         return false;
     }
     if (!nc_lr_env(RETRO_ENVIRONMENT_SET_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE, (void *)&iface)) {

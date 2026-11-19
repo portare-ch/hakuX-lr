@@ -8,7 +8,7 @@
 
 int main(void)
 {
-    puts("hakuX Vulkan capability probe: no surface, rendering or RAM import is tested");
+    puts("hakuX-lr Vulkan capability probe: no surface, rendering or RAM import is tested");
     int result = hle_vk_init();
     if (result) {
         fprintf(stderr, "FAIL: renderer initialization (%d); missing: %s\n", result, g_hvk.caps.missing);

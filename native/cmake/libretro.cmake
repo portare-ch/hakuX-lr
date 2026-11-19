@@ -1,6 +1,6 @@
 # Copyright (C) 2026-present PortareOS
 # SPDX-License-Identifier: GPL-2.0-or-later
-# The libretro core (native/libretro, LIBRETRO_SPEC.md): hakux_libretro.so,
+# The libretro core (native/libretro, LIBRETRO_SPEC.md): hakux-lr_libretro.so,
 # for RetroArch. Everything linked in stays hidden: it exports the libretro
 # ABI (retro_*) only, and needs no SDL. Every static library in it is PIC
 # (HAKUX_BUILD_LIBRETRO sets CMAKE_POSITION_INDEPENDENT_CODE; FEX does its own).
@@ -20,10 +20,11 @@ target_include_directories(hakux_libretro PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/l
 target_compile_definitions(hakux_libretro PRIVATE "HAKUX_VERSION=\"${HAKUX_VERSION}\""
   "HAKUX_LR_END_PROCESS=$<BOOL:${HAKUX_LR_END_PROCESS}>")
 target_compile_options(hakux_libretro PRIVATE -Wall -Wno-unused-parameter)
-set_target_properties(hakux_libretro PROPERTIES PREFIX "" C_VISIBILITY_PRESET hidden)
+set_target_properties(hakux_libretro PROPERTIES
+  PREFIX "" OUTPUT_NAME hakux-lr_libretro C_VISIBILITY_PRESET hidden)
 if(ANDROID)
-  # RetroArch for Android lists cores by this name (and its info file without "_android")
-  set_target_properties(hakux_libretro PROPERTIES OUTPUT_NAME hakux_libretro_android)
+  # RetroArch strips the Android suffix when matching the core to its info file.
+  set_target_properties(hakux_libretro PROPERTIES OUTPUT_NAME hakux-lr_libretro_android)
 endif()
 set(NC_LR_EXPORTS "${CMAKE_CURRENT_SOURCE_DIR}/libretro/exports.map")
 target_link_options(hakux_libretro PRIVATE -Wl,--exclude-libs,ALL -Wl,--gc-sections -Wl,-z,defs

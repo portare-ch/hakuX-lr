@@ -1,5 +1,5 @@
 /*
- * hakuX native core — guest-managed page tables.
+ * hakuX-lr native core — guest-managed page tables.
  *
  * Seed CR3 with the contiguous window's 4 MiB PDEs. Guest PTEs map
  * individual pages; large PDEs create RAM aliases. Apply changed entries
@@ -25,7 +25,7 @@ uint32_t nc_paging_cr3(NcKernel *k)
     if (g_pd_pa == UINT32_MAX) {
         const uint32_t pa = nc_vm_alloc_phys(k->vm, NC_PAGE, 0, k->vm->ram_size);
         if (pa == UINT32_MAX) {
-            nc_log("hakuX-native", "paging: no page for the page directory");
+            nc_log("hakuX-lr-native", "paging: no page for the page directory");
             return 0;
         }
         memset(k->vm->ram + pa, 0, NC_PAGE);
@@ -35,7 +35,7 @@ uint32_t nc_paging_cr3(NcKernel *k)
             g_pd_applied[(NC_CONTIG_WINDOW >> 22) + i] = pde;
         }
         g_pd_pa = pa;
-        nc_log("hakuX-native", "paging: the title reads CR3; page directory at pa %08x", pa);
+        nc_log("hakuX-lr-native", "paging: the title reads CR3; page directory at pa %08x", pa);
     }
     return g_pd_pa;
 }
@@ -52,7 +52,7 @@ static void map_page(NcKernel *k, uint32_t va, uint32_t pa, uint32_t len)
     if ((uint64_t)pa + len > k->vm->ram_size) {
         static unsigned s_warned;
         if (s_warned++ < 8) {
-            nc_log("hakuX-native", "paging: %08x -> pa %08x is outside RAM: left unmapped", va, pa);
+            nc_log("hakuX-lr-native", "paging: %08x -> pa %08x is outside RAM: left unmapped", va, pa);
         }
         return;
     }
@@ -68,7 +68,7 @@ static void map_large(NcKernel *k, uint32_t va, uint32_t pa)
     if ((uint64_t)pa + LARGE_PAGE > k->vm->ram_size) {
         static unsigned s_warned;
         if (s_warned++ < 8) {
-            nc_log("hakuX-native", "paging: %08x -> pa %08x (4 MiB) is outside RAM: left unmapped", va, pa);
+            nc_log("hakuX-lr-native", "paging: %08x -> pa %08x (4 MiB) is outside RAM: left unmapped", va, pa);
         }
         return;
     }
@@ -110,7 +110,7 @@ static void sync_pde(NcKernel *k, unsigned i)
             if (pde != old) {
                 static unsigned s_warned;
                 if (s_warned++ < 8) {
-                    nc_log("hakuX-native", "paging: PDE %03x of a window of RAM changed to %08x: not applied", i, pde);
+                    nc_log("hakuX-lr-native", "paging: PDE %03x of a window of RAM changed to %08x: not applied", i, pde);
                 }
                 g_pd_applied[i] = pde;
             }

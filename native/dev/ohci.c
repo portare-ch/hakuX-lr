@@ -419,7 +419,7 @@ static bool service_td(Ohci *o, uint32_t ed_pa, uint32_t ed[4])
         for (int i = 0; i < show; i++) {
             snprintf(hex + 3 * i, 4, " %02x", buf[i]);
         }
-        nc_log("hakuX-native-usb", "td %08x addr %u ep %d %s len %u -> %d%s (mps %u%s)", td_pa,
+        nc_log("hakuX-lr-native-usb", "td %08x addr %u ep %d %s len %u -> %d%s (mps %u%s)", td_pa,
                (unsigned)ED_FA(ed[0]), ep, k_pid[pid & 3], len, r, hex, (ed[0] >> 16) & 0x7ff,
                td[0] & TD_R ? ", rounding" : "");
     }
@@ -570,7 +570,7 @@ static bool service_list(Ohci *o, uint32_t head, bool periodic)
                 static bool logged;
                 if (!logged) {
                     logged = true;
-                    nc_log("hakuX-native-usb", "ohci: isochronous EDs skipped: HcControl.IE is clear");
+                    nc_log("hakuX-lr-native-usb", "ohci: isochronous EDs skipped: HcControl.IE is clear");
                 }
                 break;
             }
@@ -603,7 +603,7 @@ static void frame(Ohci *o)
         /* the stack's health every 10 s: a title whose USB stops polling
          * (a dead controller, a stalled endpoint) reads no input */
         static uint64_t s_tds;
-        nc_log("hakuX-native-usb", "ohci: %llu TDs in 10 s, ctl %08x (lists %s%s%s), hcca %08x, intr %08x/%08x",
+        nc_log("hakuX-lr-native-usb", "ohci: %llu TDs in 10 s, ctl %08x (lists %s%s%s), hcca %08x, intr %08x/%08x",
                (unsigned long long)(o->tds - s_tds), o->ctl, o->ctl & CTL_PLE ? "P" : "-",
                o->ctl & CTL_CLE ? "C" : "-", o->ctl & CTL_BLE ? "B" : "-", o->hcca, o->intr_status, o->intr);
         s_tds = o->tds;
@@ -743,7 +743,7 @@ static void ohci_write(void *opaque, uint32_t off, uint64_t value, unsigned size
         const uint32_t old = o->ctl & CTL_HCFS;
         o->ctl = v;
         if ((v & CTL_HCFS) != old) {
-            nc_log("hakuX-native-usb", "ohci: state %u -> %u", old >> 6, (v & CTL_HCFS) >> 6);
+            nc_log("hakuX-lr-native-usb", "ohci: state %u -> %u", old >> 6, (v & CTL_HCFS) >> 6);
             if ((v & CTL_HCFS) == HCFS_OPERATIONAL) {
                 o->frame_t0_ns = now_ns();
                 pthread_cond_signal(&o->run);
@@ -857,7 +857,7 @@ void nc_dev_ohci_init(struct NcVm *vm)
                 nc_usb_hub_attach(pad_hub, 1, nc_xid_gamepad_new(p));
                 if ((voice >> p) & 1) {
                     nc_usb_hub_attach(pad_hub, 2, nc_xblc_new(p));
-                    nc_log("hakuX-native-usb", "ohci: player %u's controller has a Communicator", p + 1);
+                    nc_log("hakuX-lr-native-usb", "ohci: player %u's controller has a Communicator", p + 1);
                 }
                 nc_usb_hub_attach(front, k_port_map[p], pad_hub);
             }
@@ -870,7 +870,7 @@ void nc_dev_ohci_init(struct NcVm *vm)
             nc_usb_hub_attach(g_pads.pad[p], 1, nc_xid_gamepad_new(p));
             if ((voice >> p) & 1) {
                 nc_usb_hub_attach(g_pads.pad[p], 2, nc_xblc_new(p));
-                nc_log("hakuX-native-usb", "ohci: player %u's controller has a Communicator", p + 1);
+                nc_log("hakuX-lr-native-usb", "ohci: player %u's controller has a Communicator", p + 1);
             }
             if ((mask >> p) & 1) {
                 o->dev[k_port_map[p] - 1] = g_pads.pad[p];
@@ -895,7 +895,7 @@ void nc_dev_ohci_init(struct NcVm *vm)
 
     g_ohci_thr.quit = false;
     g_ohci_thr.started = pthread_create(&g_ohci_thr.th, NULL, frame_thread, o) == 0;
-    nc_log("hakuX-native-usb", "ohci: %u controller(s) (players %s%s%s%s)%s", players, mask & 1 ? "1" : "",
+    nc_log("hakuX-lr-native-usb", "ohci: %u controller(s) (players %s%s%s%s)%s", players, mask & 1 ? "1" : "",
            mask & 2 ? "2" : "", mask & 4 ? "3" : "", mask & 8 ? "4" : "",
            front_hub ? " behind the front panel hub" : "");
 }
@@ -946,7 +946,7 @@ static void set_pads(unsigned mask)
         for (unsigned p = 0; p < 4; p++) {
             if ((mask ^ old) & (1u << p)) {
                 port_plug(o, k_port_map[p] - 1, (mask & (1u << p)) ? g_pads.pad[p] : NULL);
-                nc_log("hakuX-native-usb", "player %u's controller %s", p + 1,
+                nc_log("hakuX-lr-native-usb", "player %u's controller %s", p + 1,
                        (mask & (1u << p)) ? "plugged in" : "pulled out");
             }
         }
@@ -1063,7 +1063,7 @@ bool nc_usb_state_load(NcRd *r, unsigned v)
     }
     if (changes) {
         set_interrupt(o, INT_RHSC);
-        nc_log("hakuX-native-state", "usb: %u port(s) changed since the state (controllers plugged in or out)",
+        nc_log("hakuX-lr-native-state", "usb: %u port(s) changed since the state (controllers plugged in or out)",
                changes);
     }
     o->irq = !((o->intr & INT_MIE) && (o->intr_status & o->intr & ~INT_MIE));

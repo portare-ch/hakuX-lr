@@ -1,5 +1,5 @@
 /*
- * hakuX native core, app front end — presenting the HLE GPU's front image.
+ * hakuX-lr native core, app front end — presenting the HLE GPU's front image.
  *
  * Once per display refresh the window's thread hands its window (Android's,
  * or an SDL window on Linux) to the HLE GPU's presenter (hw/xbox/hle/vk/swapchain.h), which draws the
@@ -37,7 +37,7 @@ static struct {
 bool nc_present_init(void)
 {
     hle_disp_gamma_by_consumer(true); /* before the core starts: frames come without it */
-    nc_log("hakuX-app", "present: Vulkan; FXAA %s, upscaling %s", g_fxaa ? "on" : "off",
+    nc_log("hakuX-lr-app", "present: Vulkan; FXAA %s, upscaling %s", g_fxaa ? "on" : "off",
            g_upscale == NC_UPSCALE_SGSR ? "SGSR" : "bilinear");
     return true;
 }

@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — push-buffer mode's resources (pbres.c): texels into the
+ * hakuX-lr HLE GPU — push-buffer mode's resources (pbres.c): texels into the
  * upload arena for the back end, render targets' rows the CPU wrote,
  * readbacks landing in guest memory, and the primitive conversions.
  */

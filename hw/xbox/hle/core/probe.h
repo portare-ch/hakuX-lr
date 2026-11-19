@@ -1,9 +1,9 @@
 /*
- * hakuX HLE — debug probes on title code.
+ * hakuX-lr HLE — debug probes on title code.
  *
  * HAKUX_HLE_PROBE="va[:n],va[:n]..." (hex VAs, at most 8; n default 16):
  * each time execution reaches va, the registers and the top eight stack
- * words are logged (hakuX-hle-probe) for the first n times and every
+ * words are logged (hakuX-lr-hle-probe) for the first n times and every
  * 1000th after, and the title's code runs on (set it through
  * debug.hakux.env).
  */

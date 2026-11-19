@@ -1,5 +1,5 @@
 /*
- * hakuX native core — guest memory.
+ * hakuX-lr native core — guest memory.
  */
 #include "native/core/vm.h"
 #include "hw/xbox/hle/uma/uma.h"
@@ -72,7 +72,7 @@ bool nc_vm_init(NcVm *vm, uint32_t ram_size)
 #ifndef __ANDROID__
     const long host_page = sysconf(_SC_PAGESIZE);
     if (host_page != NC_PAGE) {
-        nc_log("hakuX-native", "vm: Linux requires %u-byte host pages (got %ld)", NC_PAGE, host_page);
+        nc_log("hakuX-lr-native", "vm: Linux requires %u-byte host pages (got %ld)", NC_PAGE, host_page);
         return false;
     }
 #endif
@@ -84,7 +84,7 @@ bool nc_vm_init(NcVm *vm, uint32_t ram_size)
     void *r = mmap(NULL, vm->reservation_len, PROT_NONE,
                    MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
     if (r == MAP_FAILED) {
-        nc_log("hakuX-native", "vm: reserve failed: %s", strerror(errno));
+        nc_log("hakuX-lr-native", "vm: reserve failed: %s", strerror(errno));
         return false;
     }
     vm->reservation = r;
@@ -98,7 +98,7 @@ bool nc_vm_init(NcVm *vm, uint32_t ram_size)
     if (vm->ram_fd < 0) {
         vm->ram_fd = memfd("hakux-ram");
         if (vm->ram_fd < 0 || ftruncate(vm->ram_fd, ram_size) != 0) {
-            nc_log("hakuX-native", "vm: guest RAM memfd failed: %s", strerror(errno));
+            nc_log("hakuX-lr-native", "vm: guest RAM memfd failed: %s", strerror(errno));
             return false;
         }
     }
@@ -118,7 +118,7 @@ bool nc_vm_init(NcVm *vm, uint32_t ram_size)
      * write-protected (dirty tracking applies to guest accesses). */
     void *phys = mmap(NULL, ram_size, PROT_READ | PROT_WRITE, MAP_SHARED, vm->ram_fd, 0);
     if (phys == MAP_FAILED) {
-        nc_log("hakuX-native", "vm: RAM view failed: %s", strerror(errno));
+        nc_log("hakuX-lr-native", "vm: RAM view failed: %s", strerror(errno));
         return false;
     }
     vm->phys = phys;
@@ -134,7 +134,7 @@ bool nc_vm_init(NcVm *vm, uint32_t ram_size)
      * as on the Xbox: devices whose DMA pointers the title hasn't set yet
      * (the APU's notifiers and FE writes, for one) write near address 0. */
     nc_vm_claim_phys(vm, 0, 0x10000);
-    nc_log("hakuX-native", "vm: guest base %p, RAM %u MiB", (void *)vm->base, ram_size >> 20);
+    nc_log("hakuX-lr-native", "vm: guest base %p, RAM %u MiB", (void *)vm->base, ram_size >> 20);
     return true;
 }
 
@@ -231,7 +231,7 @@ bool nc_vm_map_alias(NcVm *vm, uint32_t va, uint32_t pa, uint32_t len)
     pthread_mutex_unlock(&g_prot_lock);
     if (!room) {
         /* A normal mapping would overwrite the physical page owner in rmap. */
-        nc_log("hakuX-native", "vm: no room for another view of RAM: %08x -> pa %08x left unmapped", va, pa);
+        nc_log("hakuX-lr-native", "vm: no room for another view of RAM: %08x -> pa %08x left unmapped", va, pa);
         return false;
     }
     if (!map_range(vm, va, pa, len, true)) {
@@ -248,7 +248,7 @@ static bool map_range(NcVm *vm, uint32_t va, uint32_t pa, uint32_t len, bool vie
 {
     if ((va | pa | len) & (NC_PAGE - 1) || (uint64_t)pa + len > vm->ram_size ||
         (uint64_t)va + len > (1ull << 32)) {
-        nc_log("hakuX-native", "vm: bad map va=%08x pa=%08x len=%x", va, pa, len);
+        nc_log("hakuX-lr-native", "vm: bad map va=%08x pa=%08x len=%x", va, pa, len);
         return false;
     }
     void *want = vm->base + va;
@@ -256,7 +256,7 @@ static bool map_range(NcVm *vm, uint32_t va, uint32_t pa, uint32_t len, bool vie
     void *m = mmap(want, len, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, vm->ram_fd, pa);
     if (m != want) {
         pthread_mutex_unlock(&g_prot_lock);
-        nc_log("hakuX-native", "vm: map va=%08x pa=%08x len=%x failed: %s", va, pa, len,
+        nc_log("hakuX-lr-native", "vm: map va=%08x pa=%08x len=%x failed: %s", va, pa, len,
                strerror(errno));
         return false;
     }
@@ -269,7 +269,7 @@ static bool map_range(NcVm *vm, uint32_t va, uint32_t pa, uint32_t len, bool vie
             if (prev && prev != va + off && vm->pte[prev / NC_PAGE] == ((pa + off) | NC_PTE_VALID)) {
                 static unsigned s_warned;
                 if (s_warned++ < 16) {
-                    nc_log("hakuX-native", "vm: pa %08x mapped at %08x is mapped again at %08x", pa + off, prev,
+                    nc_log("hakuX-lr-native", "vm: pa %08x mapped at %08x is mapped again at %08x", pa + off, prev,
                            va + off);
                 }
             }
@@ -473,7 +473,7 @@ static void check_unmapped(const NcVm *vm, uint32_t p, uint32_t pages, void *ra)
             warned++;
             Dl_info di;
             const uintptr_t base = dladdr((void *)check_unmapped, &di) ? (uintptr_t)di.dli_fbase : 0;
-            nc_log("hakuX-native", "vm: allocated pa %08x (of %u pages) while %08x still maps it, from +%lx",
+            nc_log("hakuX-lr-native", "vm: allocated pa %08x (of %u pages) while %08x still maps it, from +%lx",
                    (p + i) * NC_PAGE, pages, va, (unsigned long)((uintptr_t)ra - base));
         }
     }
@@ -538,7 +538,7 @@ void nc_vm_free_phys(NcVm *vm, uint32_t pa, uint32_t len)
             if (va && vm->pte[va / NC_PAGE] == ((p * NC_PAGE) | NC_PTE_VALID)) {
                 static unsigned s_warned;
                 if (s_warned++ < 16) {
-                    nc_log("hakuX-native", "vm: pa %08x freed while %08x still maps it", p * NC_PAGE, va);
+                    nc_log("hakuX-lr-native", "vm: pa %08x freed while %08x still maps it", p * NC_PAGE, va);
                 }
             }
         }
@@ -893,7 +893,7 @@ bool nc_vm_alloc_at(NcVm *vm, uint32_t va, uint32_t len, uint32_t *pa_out)
             }
         }
         if (pa == UINT32_MAX) {
-            nc_log("hakuX-native", "vm: out of physical memory for %u KiB at %08x (%u KiB free)", len >> 10, va,
+            nc_log("hakuX-lr-native", "vm: out of physical memory for %u KiB at %08x (%u KiB free)", len >> 10, va,
                    free_pages(vm) * (NC_PAGE >> 10));
             for (uint32_t p = va; p < va + done; p += NC_PAGE) {
                 const uint32_t got = nc_vm_phys(vm, p);

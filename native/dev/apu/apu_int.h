@@ -18,7 +18,7 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, see <http://www.gnu.org/licenses/>.
  */
-/* hakuX native core: the device's state, on the core's own services
+/* hakuX-lr native core: the device's state, on the core's own services
  * (apu_base.h) in place of QOM/PCI and the QEMU memory API. */
 #ifndef NATIVE_DEV_APU_INT_H
 #define NATIVE_DEV_APU_INT_H

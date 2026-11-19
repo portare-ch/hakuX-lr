@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — timeline semaphore = GPU time; watcher thread publishes
+ * hakuX-lr HLE GPU — timeline semaphore = GPU time; watcher thread publishes
  * completions and drives the GPU-progress interrupt (spec §4.7, §5.12).
  */
 #include "hw/xbox/hle/base.h"
@@ -237,7 +237,7 @@ static void publish(uint64_t v)
  * where the timeline stood (the loss's message names the call alone) */
 static void wait_failed(VkResult r, const char *what, uint64_t value)
 {
-    hle_log("hakuX-hle-back", "%s failed for %llu: submitted %llu, completed %llu", what,
+    hle_log("hakuX-lr-hle-back", "%s failed for %llu: submitted %llu, completed %llu", what,
             (unsigned long long)value, (unsigned long long)hle_atomic_read(&g_tl.submitted),
             (unsigned long long)hle_atomic_read(&g_tl.completed));
     hle_vk_lose(r, what);
@@ -258,7 +258,7 @@ static void *watch_thread(void *opaque)
         VkResult r = hle_tl_sem_wait(g_tl.sem, want, 100 * 1000 * 1000ull);
         if (r == VK_TIMEOUT) {
             if (++g_tl.timeouts % 10 == 0) {
-                hle_log("hakuX-hle-back", "GPU has not reached %llu for %llu s",
+                hle_log("hakuX-lr-hle-back", "GPU has not reached %llu for %llu s",
                         (unsigned long long)want,
                         (unsigned long long)(g_tl.timeouts / 10));
             }
@@ -411,7 +411,7 @@ void hle_tl_gap_serve(void)
     g_tl.gaps++;
     const int64_t now = hle_now_ns();
     if (now - g_tl.gaps_log >= 10000000000ll) {
-        hle_log("hakuX-hle-back", "gpu gaps for the app's window: %u since the last (%lld us each)",
+        hle_log("hakuX-lr-hle-back", "gpu gaps for the app's window: %u since the last (%lld us each)",
                 g_tl.gaps, (long long)(g_tl.gap_hold_ns / 1000));
         g_tl.gaps = 0;
         g_tl.gaps_log = now;

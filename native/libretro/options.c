@@ -318,7 +318,7 @@ static void screen_auto(bool widescreen)
     }
     nc_kernel_set_video(NC_VIDEO_480P | NC_VIDEO_PAL60 | (widescreen ? NC_VIDEO_WIDESCREEN : 0), NC_AV_PACK_HDTV);
     nc_lr_video_set_widescreen(widescreen);
-    nc_log("hakuX-libretro", "screen format auto: %s", widescreen ? "widescreen (a widescreen patch is applied)"
+    nc_log("hakuX-lr", "screen format auto: %s", widescreen ? "widescreen (a widescreen patch is applied)"
                                                                     : "normal");
 }
 
@@ -393,7 +393,7 @@ void nc_lr_options_apply(void)
     hle_accuracy_set(level, &acc);
     const bool precise = acc.precise_combiners;
     display_update();
-    nc_log("hakuX-libretro", "options: render scale %dx, overscan %s, screen %s, language %d (%s), video region %s, "
+    nc_log("hakuX-lr", "options: render scale %dx, overscan %s, screen %s, language %d (%s), video region %s, "
            "rumble %s, network %s, resampler %s, audio processing %s, frame pacing %s, communicator %s%s%s, "
            "accuracy %s (combiners %s, signed blending %s, post-blend dithering %s)",
            scale, crop ? "cropped" : "shown", format, language,
@@ -427,7 +427,7 @@ void nc_lr_options_run(void)
     if (pace != g_applied[OPT_PACE]) {
         g_applied[OPT_PACE] = pace;
         nc_hle_set_frame_pace(pace_depth(pace));
-        nc_log("hakuX-libretro", "options: frame pacing %s", pace_text(pace));
+        nc_log("hakuX-lr", "options: frame pacing %s", pace_text(pace));
     }
     const int repeat = value_of(OPT_REPEAT);
     if (repeat != g_applied[OPT_REPEAT]) {
@@ -449,5 +449,5 @@ void nc_lr_options_run(void)
     snprintf(text, sizeof(text), "%s: restart the game to apply", names);
     const struct retro_message msg = {text, 240};
     nc_lr_env(RETRO_ENVIRONMENT_SET_MESSAGE, (void *)&msg);
-    nc_log("hakuX-libretro", "options: %s", text);
+    nc_log("hakuX-lr", "options: %s", text);
 }

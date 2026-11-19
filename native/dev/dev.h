@@ -1,5 +1,5 @@
 /*
- * hakuX native core — devices behind MMIO windows.
+ * hakuX-lr native core — devices behind MMIO windows.
  */
 #ifndef NATIVE_DEV_DEV_H
 #define NATIVE_DEV_DEV_H

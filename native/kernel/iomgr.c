@@ -1,7 +1,7 @@
 /* Copyright (C) 2026-present PortareOS */
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * hakuX native core — IRPs, drivers, device queues and I/O completion ports.
+ * hakuX-lr native core — IRPs, drivers, device queues and I/O completion ports.
  *
  * Xbox layouts (nxdk xboxkrnl.h; the stack location's parameters as title
  * drivers read them):

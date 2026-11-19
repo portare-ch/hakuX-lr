@@ -1,5 +1,5 @@
 /*
- * hakuX native core — structured exception handling: RtlRaiseException and
+ * hakuX-lr native core — structured exception handling: RtlRaiseException and
  * RtlUnwind, as the Xbox kernel runs x86 SEH.
  *
  * Handlers are title code, so the kernel's loops over the registration
@@ -181,7 +181,7 @@ static void log_thrown(NcKernel *k, uint32_t obj)
             n += snprintf(line + n, sizeof(line) - (size_t)n, " [%u]\"%.*s\"", i, (int)len, s);
         }
     }
-    nc_log("hakuX-native", "%s", line);
+    nc_log("hakuX-lr-native", "%s", line);
 }
 
 /* A new level below esp; levels a jump out of a handler left behind go. */
@@ -216,20 +216,20 @@ static void hex_at(NcKernel *k, uint32_t va, unsigned len, char *out, size_t cap
 static void log_context(NcKernel *k, uint32_t ctx)
 {
     const uint32_t eip = rd(k, ctx + CX_EIP), esp = rd(k, ctx + CX_ESP);
-    nc_log("hakuX-native", "seh:   eax=%08x ebx=%08x ecx=%08x edx=%08x esi=%08x edi=%08x ebp=%08x esp=%08x",
+    nc_log("hakuX-lr-native", "seh:   eax=%08x ebx=%08x ecx=%08x edx=%08x esi=%08x edi=%08x ebp=%08x esp=%08x",
            rd(k, ctx + CX_EAX), rd(k, ctx + CX_EBX), rd(k, ctx + CX_ECX), rd(k, ctx + CX_EDX),
            rd(k, ctx + CX_ESI), rd(k, ctx + CX_EDI), rd(k, ctx + CX_EBP), esp);
     char before[100], after[100];
     hex_at(k, eip - 32, 32, before, sizeof(before));
     hex_at(k, eip, 16, after, sizeof(after));
-    nc_log("hakuX-native", "seh:   code %08x: %s | %s", eip - 32, before, after);
+    nc_log("hakuX-lr-native", "seh:   code %08x: %s | %s", eip - 32, before, after);
     char line[200];
     int n = 0;
     for (unsigned i = 0; i < 12 && nc_vm_phys(k->vm, esp + 4 * i + 3) != UINT32_MAX; i++) {
         n += snprintf(line + n, sizeof(line) - (size_t)n, " %08x", rd(k, esp + 4 * i));
     }
     line[n] = 0;
-    nc_log("hakuX-native", "seh:   stack:%s", line);
+    nc_log("hakuX-lr-native", "seh:   stack:%s", line);
 }
 
 static void unhandled(NcKernel *k, NcFrame *f, NcSeh *l, const char *why)
@@ -307,7 +307,7 @@ static void raise_from_caller(NcKernel *k, NcFrame *f, NcThread *t, NcSeh *l)
         char type[96];
         char calls[96];
         nc_kernel_frame_chain(k, f, calls, sizeof(calls));
-        nc_log("hakuX-native", "seh: t%u raises %08x at %08x%s%s | frames%s", t->id, rd(k, l->rec + ER_CODE), ret,
+        nc_log("hakuX-lr-native", "seh: t%u raises %08x at %08x%s%s | frames%s", t->id, rd(k, l->rec + ER_CODE), ret,
                rd(k, l->rec + ER_CODE) == CXX_EXCEPTION ? ", C++ " : "",
                rd(k, l->rec + ER_CODE) == CXX_EXCEPTION ? cxx_type(k, l->rec, type, sizeof(type)) : "", calls);
         if (rd(k, l->rec + ER_CODE) == CXX_EXCEPTION) {
@@ -390,7 +390,7 @@ bool nc_seh_access_violation(NcKernel *k, NcFrame *f, uint32_t va, bool write)
     l->reg = chain_head(k);
     static unsigned s_logged;
     if (s_logged++ < 32) {
-        nc_log("hakuX-native", "seh: t%u access violation at %08x, %s %08x: to the title's handlers", t->id, eip,
+        nc_log("hakuX-lr-native", "seh: t%u access violation at %08x, %s %08x: to the title's handlers", t->id, eip,
                write ? "writing" : "reading", va);
     }
     /* a chain step() refuses at once (a registration outside the stack):

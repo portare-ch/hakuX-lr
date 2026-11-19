@@ -1,5 +1,5 @@
 /*
- * hakuX native core — the GLib subset (native/compat/glib/glib.h).
+ * hakuX-lr native core — the GLib subset (native/compat/glib/glib.h).
  */
 #include "glib.h"
 

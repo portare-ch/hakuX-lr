@@ -1103,7 +1103,7 @@ class NativeCoreActivity : SDLActivity(), InputManager.InputDeviceListener {
   }
 
   companion object {
-    private const val TAG = "hakuX-native"
+    private const val TAG = "hakuX-lr-native"
     const val EXTRA_DVD_URI = "dvdUri"
     /** Boot the XBE of the saved launch data page (a title's XLaunchNewImage). */
     const val EXTRA_RELAUNCH = "relaunch"

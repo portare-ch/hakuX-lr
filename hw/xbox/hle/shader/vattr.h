@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — NV2A vertex attribute formats (pure).
+ * hakuX-lr HLE GPU — NV2A vertex attribute formats (pure).
  *
  * An attribute format byte is the low byte of NV097_SET_VERTEX_DATA_ARRAY_FORMAT
  * (and the Xbox D3DVSDT_* value): bits 0-3 type, bits 4-7 component count

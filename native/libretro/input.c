@@ -89,7 +89,7 @@ void nc_lr_input_set_device(unsigned port, unsigned device)
     }
     const bool in = (device & RETRO_DEVICE_MASK) != RETRO_DEVICE_NONE;
     g_ports = in ? g_ports | 1u << port : g_ports & ~(1u << port);
-    nc_log("hakuX-libretro", "port %u: %s", port + 1, in ? "an Xbox controller" : "none");
+    nc_log("hakuX-lr", "port %u: %s", port + 1, in ? "an Xbox controller" : "none");
     nc_pad_plug(port, in);
 }
 
@@ -121,7 +121,7 @@ static void rumble_run(void)
         if (nc_lr_env(RETRO_ENVIRONMENT_GET_RUMBLE_INTERFACE, &ri) && ri.set_rumble_state) {
             g_rumble.set = ri.set_rumble_state;
         }
-        nc_log("hakuX-libretro", "rumble: %s", g_rumble.set ? "on" : "the frontend has none");
+        nc_log("hakuX-lr", "rumble: %s", g_rumble.set ? "on" : "the frontend has none");
     }
     if (!g_rumble.set) {
         return;

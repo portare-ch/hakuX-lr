@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — push-buffer mode's Kelvin (class 0x97) register shadow.
+ * hakuX-lr HLE GPU — push-buffer mode's Kelvin (class 0x97) register shadow.
  *
  * The decoder hands every Kelvin method here, and the registers are kept as
  * the NV2A holds them, with a bit per register written. A draw takes its
@@ -138,7 +138,7 @@ void hle_kelvin_method(uint32_t m, uint32_t v)
     if ((m == 0x17C0 && (v < 0x1500 || v > 0x150F)) || (m == 0x17BC && v > 1)) {
         static unsigned s_logged;
         if (s_logged++ < 4) {
-            hle_log("hakuX-hle-pb", "%s 0x%x refused", m == 0x17C0 ? "SET_LOGIC_OP" : "SET_LOGIC_OP_ENABLE", v);
+            hle_log("hakuX-lr-hle-pb", "%s 0x%x refused", m == 0x17C0 ? "SET_LOGIC_OP" : "SET_LOGIC_OP_ENABLE", v);
         }
         return;
     }
@@ -147,7 +147,7 @@ void hle_kelvin_method(uint32_t m, uint32_t v)
          * warning, envytools' hwtest) and keeps the width it had */
         static unsigned s_logged;
         if (s_logged++ < 4) {
-            hle_log("hakuX-hle-pb", "SET_LINE_WIDTH 0x%x refused (>= 0x200)", v);
+            hle_log("hakuX-lr-hle-pb", "SET_LINE_WIDTH 0x%x refused (>= 0x200)", v);
         }
         return;
     }

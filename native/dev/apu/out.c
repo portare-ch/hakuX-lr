@@ -1,5 +1,5 @@
 /*
- * hakuX native core — the APU's output: 48 kHz 16-bit stereo on AAudio.
+ * hakuX-lr native core — the APU's output: 48 kHz 16-bit stereo on AAudio.
  *
  * The frame thread pushes each EP frame (256 samples, 1024 bytes) into a
  * ring; AAudio's data callback drains it. One producer and one consumer, so
@@ -121,7 +121,7 @@ static bool start_locked(void)
 {
     const aaudio_result_t r = AAudioStream_requestStart(g_out.stream);
     if (r != AAUDIO_OK) {
-        nc_log("hakuX-apu", "output stream: start failed (%s)", AAudio_convertResultToText(r));
+        nc_log("hakuX-lr-apu", "output stream: start failed (%s)", AAudio_convertResultToText(r));
     }
     return r == AAUDIO_OK;
 }
@@ -165,13 +165,13 @@ static void *reopen_thread(void *arg)
                 }
                 pthread_mutex_unlock(&g_out.mu);
                 if (ok) {
-                    nc_log("hakuX-apu", "output stream open again");
+                    nc_log("hakuX-lr-apu", "output stream open again");
                     return NULL;
                 }
                 AAudioStream_close(s);
             } else if (!said) {
                 said = true;
-                nc_log("hakuX-apu", "no output stream (AAudio: %s); draining without sound, "
+                nc_log("hakuX-lr-apu", "no output stream (AAudio: %s); draining without sound, "
                        "trying again each second", AAudio_convertResultToText(r));
             }
         }
@@ -207,7 +207,7 @@ static void on_error(AAudioStream *s, void *user, aaudio_result_t error)
     const bool current = s == g_out.stream;
     pthread_mutex_unlock(&g_out.mu);
     if (current && reopen()) {
-        nc_log("hakuX-apu", "output stream lost (%s); opening it again",
+        nc_log("hakuX-lr-apu", "output stream lost (%s); opening it again",
                AAudio_convertResultToText(error));
     }
 }

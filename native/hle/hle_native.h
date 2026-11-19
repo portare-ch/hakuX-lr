@@ -1,5 +1,5 @@
 /*
- * hakuX native core — the HLE GPU layer (hw/xbox/hle) on the native core:
+ * hakuX-lr native core — the HLE GPU layer (hw/xbox/hle) on the native core:
  * its host services (host.h), guest-write tracking and the debug probes.
  */
 #ifndef NATIVE_HLE_HLE_NATIVE_H
@@ -95,7 +95,7 @@ void nc_hle_after_sysop(NcKernel *k);
 bool nc_hle_dirty_guest_fault(uint32_t va, bool store, const siginfo_t *info, void *ucontext);
 
 /* debug: NC_WATCHPA="pa:len[:seconds]" (hex, then decimal), stores to that
- * guest RAM logged (hakuX-native-watch), armed after the seconds: a guest
+ * guest RAM logged (hakuX-lr-native-watch), armed after the seconds: a guest
  * store with its exact EIP and the stack's return addresses, from the fault
  * (nc_hle_watch_store), a host one (a kernel call or the HLE writing guest
  * memory) with its length. The range is write-protected again after each

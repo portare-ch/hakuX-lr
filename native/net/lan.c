@@ -92,7 +92,7 @@ static bool lan_init(void)
     const NcNetConfig *c = nc_net_config();
     g_lan.fd = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
     if (g_lan.fd < 0) {
-        nc_log("hakuX-native-net", "lan: socket: %s", strerror(errno));
+        nc_log("hakuX-lr-native-net", "lan: socket: %s", strerror(errno));
         return false;
     }
     const int one = 1;
@@ -102,7 +102,7 @@ static bool lan_init(void)
     setsockopt(g_lan.fd, SOL_SOCKET, SO_RCVBUF, &buf, sizeof(buf));
     struct sockaddr_in me = { .sin_family = AF_INET, .sin_port = htons(c->lan_port), .sin_addr.s_addr = INADDR_ANY };
     if (bind(g_lan.fd, (struct sockaddr *)&me, sizeof(me)) != 0) {
-        nc_log("hakuX-native-net", "lan: port %u: %s", c->lan_port, strerror(errno));
+        nc_log("hakuX-lr-native-net", "lan: port %u: %s", c->lan_port, strerror(errno));
         close(g_lan.fd);
         g_lan.fd = -1;
         return false;
@@ -117,7 +117,7 @@ static bool lan_init(void)
         snprintf(list + strlen(list), sizeof(list) - strlen(list), "%s%s (/%d)", i ? ", " : "", b,
                  __builtin_popcount(ntohl(c->lan_mask[i])));
     }
-    nc_log("hakuX-native-net", "lan: UDP port %u, broadcast to %s, %u peers named", c->lan_port, list, c->npeers);
+    nc_log("hakuX-lr-native-net", "lan: UDP port %u, broadcast to %s, %u peers named", c->lan_port, list, c->npeers);
     return true;
 }
 
@@ -126,7 +126,7 @@ static void send_to(const struct sockaddr_in *to, const uint8_t *frame, size_t l
     if (sendto(g_lan.fd, frame, len, 0, (const struct sockaddr *)to, sizeof(*to)) < 0 && errno != EAGAIN) {
         static unsigned s_logged;
         if (s_logged++ < 8) {
-            nc_log("hakuX-native-net", "lan: send: %s", strerror(errno));
+            nc_log("hakuX-lr-native-net", "lan: send: %s", strerror(errno));
         }
     }
 }
@@ -218,7 +218,7 @@ static bool own_mac(const uint8_t *mac)
         memcpy(g_lan.own, mac, 6);
     }
     g_lan.own_known = true;
-    nc_log("hakuX-native-net", "lan: this console is %02x:%02x:%02x:%02x:%02x:%02x", g_lan.own[0], g_lan.own[1],
+    nc_log("hakuX-lr-native-net", "lan: this console is %02x:%02x:%02x:%02x:%02x:%02x", g_lan.own[0], g_lan.own[1],
            g_lan.own[2], g_lan.own[3], g_lan.own[4], g_lan.own[5]);
     return true;
 }
@@ -273,7 +273,7 @@ static void learn(const uint8_t *mac, const struct sockaddr_in *from)
             } else if (now - s->at_seen >= MOVE_S) {
                 char a[INET_ADDRSTRLEN];
                 inet_ntop(AF_INET, &from->sin_addr, a, sizeof(a));
-                nc_log("hakuX-native-net", "lan: %02x:%02x:%02x:%02x:%02x:%02x now at %s:%u", mac[0], mac[1], mac[2],
+                nc_log("hakuX-lr-native-net", "lan: %02x:%02x:%02x:%02x:%02x:%02x now at %s:%u", mac[0], mac[1], mac[2],
                        mac[3], mac[4], mac[5], a, ntohs(from->sin_port));
                 s->at = *from;
                 s->at_seen = now;
@@ -293,7 +293,7 @@ static void learn(const uint8_t *mac, const struct sockaddr_in *from)
     memcpy(s->mac, mac, 6);
     char a[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &from->sin_addr, a, sizeof(a));
-    nc_log("hakuX-native-net", "lan: console %02x:%02x:%02x:%02x:%02x:%02x at %s:%u%s", mac[0], mac[1], mac[2], mac[3],
+    nc_log("hakuX-lr-native-net", "lan: console %02x:%02x:%02x:%02x:%02x:%02x at %s:%u%s", mac[0], mac[1], mac[2], mac[3],
            mac[4], mac[5], a, ntohs(from->sin_port), remote ? " (outside the local network)" : "");
 }
 
@@ -321,7 +321,7 @@ static void learn_ip(const uint8_t *mac, uint32_t ip, bool claims, bool uses)
     }
     char a[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &ip, a, sizeof(a));
-    nc_log("hakuX-native-net", "lan: %02x:%02x:%02x:%02x:%02x:%02x uses this console's address %s too: they can't "
+    nc_log("hakuX-lr-native-net", "lan: %02x:%02x:%02x:%02x:%02x:%02x uses this console's address %s too: they can't "
            "see each other until one of them starts again", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], a);
     nc_net_conflict(ip);
 }
@@ -422,7 +422,7 @@ static void twin(const struct sockaddr_in *from)
     s_told = from->sin_addr.s_addr;
     char a[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &from->sin_addr, a, sizeof(a));
-    nc_log("hakuX-native-net", "lan: the console at %s has this one's MAC (its EEPROM a copy of this one's): "
+    nc_log("hakuX-lr-native-net", "lan: the console at %s has this one's MAC (its EEPROM a copy of this one's): "
            "they can't see each other", a);
     nc_net_twin(from->sin_addr.s_addr);     /* the app says so */
 }

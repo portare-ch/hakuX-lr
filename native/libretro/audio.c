@@ -71,7 +71,7 @@ int apu_out_open(int capacity_bytes, int samples, pthread_cond_t *wake)
     g_out.cap = (uint32_t)capacity_bytes;
     g_out.wake = wake;
     const int frames = (int)((uint64_t)OUT_RATE * NC_LR_FPS_DEN / NC_LR_FPS_NUM);
-    nc_log("hakuX-apu", "output: libretro, one period (%d.%d frames) a retro_run", frames,
+    nc_log("hakuX-lr-apu", "output: libretro, one period (%d.%d frames) a retro_run", frames,
            (int)((uint64_t)OUT_RATE * NC_LR_FPS_DEN * 10 / NC_LR_FPS_NUM % 10));
     return frames * OUT_FRAME_BYTES;
 }

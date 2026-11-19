@@ -1,7 +1,7 @@
 /* Copyright (C) 2026-present PortareOS */
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * hakuX native core — the runtime library's strings, numbers and formatted
+ * hakuX-lr native core — the runtime library's strings, numbers and formatted
  * output (the pure parts are in rtl_text.c).
  *
  * STRING / UNICODE_STRING: { USHORT Length, USHORT MaximumLength, Buffer },
@@ -264,7 +264,7 @@ static uint64_t RtlExtendedLargeIntegerDivide(NcKernel *k, NcFrame *f, const uin
         static bool logged;
         if (!logged) {
             logged = true;
-            nc_log("hakuX-native", "rtl: RtlExtendedLargeIntegerDivide by 0 from %08x gives 0",
+            nc_log("hakuX-lr-native", "rtl: RtlExtendedLargeIntegerDivide by 0 from %08x gives 0",
                    nc_vm_rd32(k->vm, nc_frame_gpr(f, NC_ESP)));
         }
     }

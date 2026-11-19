@@ -13,7 +13,7 @@ Recording one (a title's own DSP image runs only with the full DSP): in
 RetroArch, with the core started with NC_APU_DSP=1 NC_APU_GP_PROBE=<dir>
 and NC_APU_GP_PROBE_AT=<seconds> in its environment (PortareOS: runemu.sh
 passes its environment on; a test build of the core can be bound over
-/tmp/cores/hakux_libretro.so). xboxrun --headless doesn't get Halo past its
+/tmp/cores/hakux-lr_libretro.so). xboxrun --headless doesn't get Halo past its
 start on Linux. The title's own sounds are replaced by the tones while the
 probe runs, about 17 s from its start; it logs "gp probe: done".
 

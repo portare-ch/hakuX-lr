@@ -1,7 +1,7 @@
 /* Copyright (C) 2026-present PortareOS */
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * hakuX native core — the VP's vector paths on x86-64 (AArch64 has NEON, at
+ * hakuX-lr native core — the VP's vector paths on x86-64 (AArch64 has NEON, at
  * build time). SSE2 is x86-64's baseline, always there; AVX2 with FMA
  * (x86-64-v3: Haswell, Zen and later) is taken where the CPU has both,
  * checked at run time, so the core runs on any x86-64 CPU. The FMA paths

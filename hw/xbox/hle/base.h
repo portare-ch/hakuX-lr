@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — the C library and the few macros the HLE code uses
+ * hakuX-lr HLE GPU — the C library and the few macros the HLE code uses
  * everywhere. Every HLE source includes this first (pure modules include
  * hle_pure.h, which includes it outside the host tests). GLib's subset comes
  * from the host build's glib.h; the host core's services from host.h.

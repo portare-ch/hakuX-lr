@@ -1,5 +1,5 @@
 /*
- * hakuX native core — the Xbox gamepad (Duke): an XID device (class 0x58)
+ * hakuX-lr native core — the Xbox gamepad (Duke): an XID device (class 0x58)
  * with a 20-byte input report on interrupt IN 2 and the rumble report on
  * interrupt OUT 2.
  *
@@ -138,7 +138,7 @@ static void script_load(void)
         while (*s && *s != ':' && *s != ',') {
             size_t n = strcspn(s, "+:,");
             if (!script_button(s, n, &st)) {
-                nc_log("hakuX-native-usb", "pad script: unknown input '%.*s'", (int)n, s);
+                nc_log("hakuX-lr-native-usb", "pad script: unknown input '%.*s'", (int)n, s);
             }
             s += n;
             if (*s == '+') {
@@ -155,7 +155,7 @@ static void script_load(void)
             s++;
         }
     }
-    nc_log("hakuX-native-usb", "pad script: %u steps", g_nscript);
+    nc_log("hakuX-lr-native-usb", "pad script: %u steps", g_nscript);
 }
 
 static void make_report(unsigned player, uint8_t r[20])
@@ -258,7 +258,7 @@ static int xid_control(NcUsbDev *d, const uint8_t *s, uint8_t *data, int len)
         }
         return NC_USB_STALL;
     default:
-        nc_log("hakuX-native-usb", "xid: unhandled request %02x %02x value %04x", type, req, value);
+        nc_log("hakuX-lr-native-usb", "xid: unhandled request %02x %02x value %04x", type, req, value);
         return NC_USB_STALL;
     }
 }
@@ -291,7 +291,7 @@ static int xid_data(NcUsbDev *d, bool in, int ep, uint8_t *buf, int len)
     if (in) {
         if (!x->polled) {
             x->polled = true;
-            nc_log("hakuX-native-usb", "gamepad %u: polled", x->player);
+            nc_log("hakuX-lr-native-usb", "gamepad %u: polled", x->player);
         }
         uint8_t r[20];
         make_report(x->player, r);
@@ -301,7 +301,7 @@ static int xid_data(NcUsbDev *d, bool in, int ep, uint8_t *buf, int len)
             const uint16_t b = (uint16_t)(r[2] | r[3] << 8);
             if (b != s_last[x->player] && s_logged < 200) {
                 s_logged++;
-                nc_log("hakuX-native-usb", "gamepad %u: buttons %04x -> %04x (A %02x)", x->player,
+                nc_log("hakuX-lr-native-usb", "gamepad %u: buttons %04x -> %04x (A %02x)", x->player,
                        s_last[x->player], b, r[4]);
             }
             s_last[x->player] = b;

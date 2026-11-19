@@ -7,7 +7,7 @@ Written: 2026-10-24.
 Scope updated: 2026-10-24; Android regression validation waived by the owner.
 Time budget: one developer, one working day (approximately eight hours).
 Target: Retroid Pocket Nova (SM8550), native AArch64 Linux on PortareOS.
-Repository: [portare-ch/hakuX](https://github.com/portare-ch/hakuX-lr).
+Repository: [portare-ch/hakuX-lr](https://github.com/portare-ch/hakuX-lr).
 
 ## Objective
 
