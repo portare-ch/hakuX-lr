@@ -137,7 +137,7 @@ Crop Overscan, Rumble and Frame Pacing take effect immediately.
 | Option | Behavior |
 | --- | --- |
 | Render Scale | Defaults to 2×. Use 1× for native resolution or up to 4× for a sharper picture. |
-| Screen Format | **Auto** selects 16:9 for games known to support widescreen when the frontend reports a display of 16:10 or wider, and while a widescreen patch is active; 4:3 otherwise. A frontend that does not report the display's size (RetroArch 1.22.2 and older) counts as 4:3: select **Widescreen** there for games with native 16:9 support. Set RetroArch’s aspect ratio to **Core provided**. |
+| Screen Format | **Auto** selects 16:9 for games known to support widescreen, unless the frontend reports a display narrower than 16:10, and while a widescreen patch is active; 4:3 otherwise. A frontend that does not report the display's size (RetroArch 1.22.2 and older) counts as wide: select **Normal** on a 4:3 display there. Select **Widescreen** for a game with native 16:9 support that Auto does not know. Set RetroArch’s aspect ratio to **Core provided**. |
 | Crop Overscan | Enabled by default to hide borders. Disable it to show the whole frame. |
 | Accuracy Level | **Custom** uses the selected Combiner Precision. **Potato**, **Medium** and **High** apply the graphics settings below. Render scale is independent. |
 | Combiner Precision | Used with **Custom**. Defaults to **Accurate** on AMD64 and **Fast** on ARM64. Fast skips 9-bit combiner rounding. |
