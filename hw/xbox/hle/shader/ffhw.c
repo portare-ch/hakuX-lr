@@ -1,19 +1,16 @@
 /*
- * hakuX HLE GPU — the NV2A fixed-function vertex stage as GLSL (pure). See
- * ffhw.h. The transform engine's fixed function, as NV_vertex_program's
- * documentation and the hardware tests describe it (LLE's generator read as
- * reference only):
- * - skinning blends the position and normal over model-view matrices 0..n-1
- *   (and their inverses), the last weight generated (1 - the others) in the
- *   "G" modes; without skinning the composite matrix includes model-view;
- * - lighting in eye space, the registers D3D's products: light colours
- *   premultiplied by the material where its source is the material, the
- *   scene ambient (with the emission) and material emission registers
- *   reused for the vertex-colour sources;
- * - the composite matrix includes the viewport scale: x, y, z / w plus the
- *   viewport offset is the screen-space position a program leaves;
- * - the specular and spot terms are the lighting unit's curve, not powers
- *   (NVC below).
+ * Generate GLSL for the NV2A's fixed-function vertex stage (ffhw.h). The implementation
+ * follows NV_vertex_program documentation and hardware tests, with the LLE generator as a
+ * reference.
+ *
+ * Skinning blends positions and normals across model-view matrices and their inverse
+ * transforms. The G modes derive the last weight as one minus the others. Without skinning,
+ * model-view is part of the composite matrix.
+ *
+ * Lighting runs in eye space. D3D folds material terms into light colours and scene ambient
+ * where applicable. Vertex-colour sources reuse the scene ambient and emission registers. The
+ * composite matrix includes the viewport scale. Divide x, y and z by w, then add the viewport
+ * offset. Specular and spot lighting use the NV2A curve (NVC below).
  */
 #include <stdarg.h>
 #include <stdbool.h>
@@ -115,18 +112,15 @@ static void texgen(Buf *b, const HleFfhwKey *k)
     }
 }
 
-/* The colour lighting starts from, before the lights: src[0] the emission
- * source, src[1] the ambient one (SET_COLOR_MATERIAL), amb the scene ambient
- * register (SET_SCENE_AMBIENT_COLOR or the back's), emi the material
- * emission one (SET_MATERIAL_EMISSION or the back's), diffuse's source the
- * alpha (the material's in amb's w). Where either source is the material,
- * the scene ambient register already holds what D3D folds into it (ambient
- * times material ambient, plus emission) and is used as it is, plus the
- * vertex colour the other source names scaled by the emission register; the
- * Xbox draws FromMaterial and FromMaterial_me0_5 (material emission 0 and
- * 0.5) alike (nxdk_pgraph_tests). With both from vertex colours, the
- * emission colour plus the ambient one scaled by the emission register (as
- * xemu). */
+/* Compute the lighting base before evaluating individual lights. SET_COLOR_MATERIAL selects
+ * emission in src[0] and ambient in src[1]. Use the matching front or back scene-ambient and
+ * emission registers. Alpha comes from the diffuse source, with material alpha in amb.w.
+ *
+ * When either source is material, D3D has folded material ambient and emission into the
+ * scene-ambient register. Add the vertex colour, if selected, scaled by the emission
+ * register. When both sources are vertex colours, add vertex emission to vertex ambient
+ * scaled by that register. This matches the FromMaterial hardware tests and xemu's
+ * vertex-colour path. */
 static void base_colour(Buf *b, const char *out, const uint8_t src[4], unsigned amb, unsigned emi)
 {
     char alpha[32];

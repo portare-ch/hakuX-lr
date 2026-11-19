@@ -679,42 +679,28 @@ static void complete(NcKernel *k, const uint32_t *a)
 
 /* ------------------------------------------------------- the disc reader */
 
-/* An overlapped disc read (NcFile.async) runs on the reader thread and the
- * call reports STATUS_PENDING at once, as the Xbox's DVD transfers do. Read
- * in place, one from the image on the SD card held the guest's CPU for
- * 10-70 ms, interrupts included: Dead or Alive 2 Ultimate streams during its
- * fights, and each read was a dropped frame. The kernel completes a read on
- * the guest's CPU (nc_io_poll): its IoStatusBlock, then its event (the file
- * object's without one of its own, cleared as the read starts, as NT does)
- * and its APC, queued to the thread that issued it. A full queue reads in
- * place. Overlapped reads of hard disk files go the same way (a duplicate
- * of the descriptor, closed when done): Forza streams its track from the Z:
- * cache during a race, 8-28 ms a read in place, a frame a vblank late now
- * and then. Long synchronous reads go there too, only their thread waiting
- * (NtReadFile, SYNC_LATER_MIN).
+/* Queue overlapped DVD and HDD reads on the reader thread and return STATUS_PENDING. If the
+ * queue is full, read synchronously. Long synchronous reads also use the reader, blocking
+ * only their caller. This keeps slow disc and cache reads from stalling guest interrupts and
+ * dropping frames.
  *
- * The reader writes the buffer's physical pages through the RAM view, as a
- * device does: a page the GPU may still read (the HLE GPU's first-write
- * barrier) is waited for there, not on the guest's CPU (Forza's buffers
- * held it 10-19 ms that way, the read itself queued), and the write is
- * reported dirty when the read completes (nc_vm_dma). */
+ * nc_io_poll completes a read on the guest CPU. Update its IoStatusBlock, signal the event
+ * (or the file event if none was supplied) and queue the APC on the issuing thread. Clear the
+ * file event when starting the read. HDD requests own a duplicate descriptor until
+ * completion.
+ *
+ * The reader writes through the physical RAM view. Wait there for GPU reads of the
+ * destination, then report the written pages dirty via nc_vm_dma. */
 #define DISC_JOBS 64
 
-/* Console timing (the app's setting, nc_io_set_device_time): a read takes at
- * least a quarter of the time the console's drives take at their best (the
- * whole of it made loads too slow), and the thread that asked waits it
- * out. At the phone's speed a load ran without its
- * thread ever waiting, so the game's lower-priority threads didn't run
- * until it was done: Morrowind starts its loading screen's thread as a cell
- * load begins, and on the Xbox the thread sets up its first picture while
- * the load still reads. A load done first (a cell it held) found that
- * setup half done, asked the thread to end and waited for it, while the
- * thread waited for that request to clear: a freeze leaving a building.
- * So every synchronous read the file system's cache doesn't hold goes to
- * the reader, its caller waiting (NtReadFile), and the reader spends a
- * request's time plus the transfer at the drive's rate on each, one at a
- * time. NC_DEVTIME="disc_us,disc_kBps,hdd_us,hdd_kBps" (or the property
- * debug.hakux.devtime, read at boot) tunes the drives. */
+/* Console timing makes uncached synchronous reads wait for a request delay plus transfer
+ * time. The reader handles them serially, using about a quarter of the best console drive
+ * time by default. Blocking only the calling thread lets lower-priority guest threads run.
+ * Morrowind can deadlock after a fast cell load if its loading-screen thread never gets to
+ * finish setup.
+ *
+ * Set NC_DEVTIME="disc_us,disc_kBps,hdd_us,hdd_kBps" or debug.hakux.devtime before boot to
+ * tune the delays and rates. */
 static bool g_devtime;
 static struct DevRate {
     uint32_t req_us, kbps;
@@ -1411,14 +1397,10 @@ static uint64_t io_offset(NcKernel *k, const NcFile *nf, uint32_t byte_offset)
     return nf->pos;
 }
 
-/* A read or write through nf ended at end: the file's position goes there
- * through a handle opened for synchronous I/O, as the Xbox's file systems
- * keep it (NT's, FO_SYNCHRONOUS_IO only); an overlapped request names its
- * offset and leaves the position to the title. Burnout 2 reads its 4.6 MiB
- * traffic data in 128 KiB overlapped reads, moving the position itself
- * (SetFilePointer) after each: moved here too, each read came from twice
- * its offset, and the data's pointer walk faulted as the game started. One
- * without an offset of its own (the position's) moves it still. */
+/* Advance the handle's file position for synchronous I/O and when a request uses the current
+ * position. Overlapped requests with an explicit offset leave it alone. Burnout 2 updates its
+ * own position between 128 KiB reads, so advancing both here and in the title skipped parts
+ * of its traffic data. */
 static void io_moved(NcKernel *k, NcFile *nf, uint32_t byte_offset, uint64_t end)
 {
     const bool named = byte_offset && !(nc_vm_rd32(k->vm, byte_offset) == 0xFFFFFFFEu &&

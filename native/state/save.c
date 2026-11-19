@@ -1,17 +1,14 @@
 /*
- * hakuX native core — taking and restoring savestates (push-buffer mode).
+ * Save and restore push-buffer mode state.
  *
- * Save (nc_state_save, any thread but the guest CPU's): the decoder parks
- * at the next flip stall (the frame before it complete, its targets written
- * back), the emulation pauses, and the guest CPU takes the state at its
- * pause point (nc_state_cpu_work) once the device threads are parked and
- * the disc reads in flight completed. Then the decoder and the emulation go
- * on as they were.
+ * Save from a thread other than the vCPU. Park the decoder at the next flip stall after the
+ * preceding frame finishes and its targets are written back. Pause devices, finish pending
+ * disc reads and capture the state on the guest CPU at its pause point (nc_state_cpu_work).
+ * Then resume.
  *
- * Load (nc_state_load): the core booted the state's XBE as for a fresh run,
- * up to its first instruction; with the devices paused, every section
- * replaces what the boot made, and the guest CPU starts from the state's
- * context (nc_kstate_start_context).
+ * To load, boot the saved XBE to its first instruction and pause the devices. Restore each
+ * section over the freshly booted state, then resume the vCPU from the saved context
+ * (nc_kstate_start_context).
  */
 #include "native/state/save.h"
 #include "native/state/sections.h"

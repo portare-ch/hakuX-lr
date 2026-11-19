@@ -1,16 +1,16 @@
 package com.rfandango.haku_x.data.hdd
 
 /**
- * The keys a console signs saves with, read from the user's own dumps when a console's or xemu's data
- * comes in (re-signed to the native kernel's: SaveResigner). Never kept: read again each time.
+ * Read source console keys from the user's dumps when importing a console or xemu disk.
+ * SaveResigner uses them to verify and re-sign saves. Read the keys again on each import.
  *
- * - The certificate key, from which each title's save key comes (SaveResigner.authKey): the BIOS's 2BL
- *   holds the EEPROM, certificate and kernel keys in a row; the MCPX 1.0 boot ROM decrypts it (RC4, the
- *   key at 0x1A5; the 2BL is the 24 KiB below the flash's last 512 bytes). The EEPROM key is told by its
- *   HMAC-SHA1 midstates, the certificate key is the 16 bytes after it.
- * - The HD key, for saves locked to the console and its downloaded content: the EEPROM's encrypted
- *   section (hash, confounder, HD key, region) is RC4 with HMAC(EEPROM key, hash) and checks by its hash.
- *   The midstates are enough: no BIOS needed.
+ * The MCPX 1.0 boot ROM holds the RC4 key at 0x1A5. Use it to decrypt the BIOS 2BL, the 24
+ * KiB before the last 512 bytes. Identify the EEPROM key by its HMAC-SHA1 midstates. The 16
+ * bytes after it are the certificate key used to derive per-title save keys.
+ *
+ * The HD key is in the EEPROM's encrypted section with the hash, confounder and region.
+ * Decrypt with RC4 using HMAC(EEPROM key, hash) and verify the hash. The known midstates let
+ * this work without the BIOS.
  */
 object ConsoleKeys {
   /** An EEPROM key's HMAC-SHA1 midstates (inner, outer). */

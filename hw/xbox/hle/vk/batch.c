@@ -1,18 +1,11 @@
 /*
- * hakuX HLE GPU — strip batching.
+ * Batch consecutive triangle strips or fans into one indexed draw. A per-frame buffer holds
+ * 32-bit indices separated by primitive restart. Use the first vertex as vertexOffset to
+ * preserve gl_VertexIndex. In Blinx this reduces draw overhead for runs of short strips with
+ * identical state.
  *
- * A title draws its meshes as many short triangle strips with nothing
- * changing between them (Blinx: ~500k strip draws a second, state every ~20
- * draws), and the GPU pays ~1.7 us per draw whatever it renders. A run of
- * strip (or fan) draws that records nothing in between becomes one indexed
- * draw: each strip's vertices as 32-bit indices in a per-frame-slot buffer,
- * the strips separated by primitive restart, so the GPU draws exactly the
- * same triangles. vertexOffset is the run's first vertex, so gl_VertexIndex
- * keeps the value each draw gave it.
- *
- * The held draws are recorded before anything else: every recording command
- * in the device table goes through a wrapper (batch_wrap.h) that records them
- * first. A run of one is recorded as the plain draw it was.
+ * The device table wrappers in batch_wrap.h flush pending draws before any other recording
+ * command. A batch of one stays a plain draw.
  */
 #include "hw/xbox/hle/base.h"
 #include "hw/xbox/hle/vk/batch.h"

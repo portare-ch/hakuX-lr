@@ -1,11 +1,8 @@
 /* Copyright (C) 2026-present PortareOS */
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/* Every command the back end records through its device table (T.vkCmd*)
- * goes through the strip batch's wrapper (vk/batch_wrap.h), which records
- * a held run of strips first: a command without one reaches the command
- * buffer before the draws queued ahead of it, and those draws take its
- * state. vkCmdSetLineWidth had none, and two line strips of different
- * widths merged into one draw at the second width. */
+/* Verify that device-table commands flush the pending strip batch before changing
+ * command-buffer state. vkCmdSetLineWidth once bypassed the wrapper, letting a later width
+ * affect an earlier strip. */
 #include "hle_test.h"
 #include <stdio.h>
 #include <stdlib.h>

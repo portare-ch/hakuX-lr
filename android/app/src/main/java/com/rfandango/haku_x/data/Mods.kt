@@ -170,12 +170,9 @@ object ModCatalog {
 }
 
 /**
- * One disc's choices: its mods on or off, its cheats on or off, by name. In
- * one JSON file ("<game>/mod/<id>" or "<game>/cheat/<name>" -> true) both
- * processes read afresh and write whole, renamed into place, as Controllers:
- * the game's menu toggles cheats in its own process, and shared preferences
- * served the Mods screen its cached copy, whose next toggle wrote the
- * game's changes away.
+ * Store per-disc mod and cheat toggles in shared JSON. Keys are <game>/mod/<id> and
+ * <game>/cheat/<name>. Both processes re-read the file and replace it atomically. This keeps
+ * a toggle in the game menu visible in the Mods screen before either writes again.
  */
 class ModChoices(context: Context, private val game: String) {
   private val file = File(context.filesDir, FILE)

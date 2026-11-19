@@ -294,9 +294,8 @@ static void nat_probe(const uint8_t *frame, size_t len)
     }
 }
 
-/* A round is up: another console keeps the candidate, so a round for the
- * next free one (PROBES at most); else lease it and give the stack the
- * frames held. */
+/* After each probe round, retry with another address if a peer has priority, for at most
+ * PROBES rounds. Otherwise lease the candidate and release queued frames to the stack. */
 static void nat_probed(void)
 {
     uint32_t ip = g_nat.candidate;

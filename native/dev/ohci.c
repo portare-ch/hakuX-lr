@@ -1,17 +1,13 @@
 /*
- * hakuX native core — the MCPX's first OHCI USB controller (OpenHCI 1.0a):
- * registers at 0xFED00000, IRQ 1, four root ports.
+ * MCPX's first OHCI controller (OpenHCI 1.0a) at 0xFED00000, IRQ 1, with four root ports.
  *
- * The title's own USB stack (XAPI) drives it. A frame thread does each
- * 1 ms frame's work: the periodic list from the HCCA interrupt table, then
- * the control and bulk lists, then the done queue. Transfers complete at
- * once (the devices are in-process); a NAK leaves the TD for a later frame.
+ * The XAPI USB stack drives it. Every 1 ms, process periodic transfers from the HCCA table,
+ * then control and bulk transfers, then the done queue. Transfers complete in process. A NAK
+ * leaves the descriptor pending.
  *
- * Topology (the 1.0 console's): the front panel hub on root port 1, and on
- * its ports 3, 4, 1, 2 one controller per player — a 3-port hub with the
- * gamepad on port 1. By default the controllers go straight on root ports
- * 3, 4, 1, 2, where they can be plugged in and pulled out while the console
- * runs (nc_pad_plug).
+ * The 1.0 topology has a front-panel hub on root port 1. Players 1–4 use hub ports 3, 4, 1,
+ * 2. Each controller is a three-port hub with its gamepad on port 1. By default nc_pad_plug
+ * uses the corresponding root ports directly for hotplug.
  */
 #include "native/dev/usb.h"
 #include <stdio.h>

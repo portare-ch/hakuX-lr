@@ -589,16 +589,11 @@ static bool takes_move(const NcVm *vm, uint32_t p)
     return !vm->page_used[p] && !(g_na && g_na[p]);
 }
 
-/* Movable page q's contents, and the VA mapping it, to free page `to`.
- * Write tracking follows physical pages, freed ones too, and the HLE knows
- * them by physical address: GPU work may still read either page in place,
- * and what the HLE saw in them is neither page's contents from here on (q
- * goes to the new block, `to` holds the VA's page). A tracked one waits for
- * that GPU work, and both are reported written: dirty, untracked. Copied
- * unreported, a page took over the tracking of what `to` held, faulted as
- * the guest wrote it and never moved again: Project Gotham Racing 2's
- * image pages, moved out of earlier blocks' way onto freed textures,
- * left no window for its attract replay's 20 MiB. */
+/* Move physical page q and its virtual mapping to free page to. GPU work can still read
+ * either physical page, including freed pages. Wait for tracked GPU reads and report both
+ * pages dirty so neither inherits stale write tracking. In PGR2, a relocated page that
+ * inherited its destination's tracking could keep faulting and block a 20 MiB contiguous
+ * allocation. */
 static bool relocate(NcVm *vm, uint32_t q, uint32_t to)
 {
     const bool tracked = vm->wp[q] || vm->wp[to];
@@ -675,16 +670,11 @@ uint32_t nc_vm_alloc_phys_compact(NcVm *vm, uint32_t len, uint32_t lo, uint32_t 
     return best * NC_PAGE;
 }
 
-/* As the Xbox kernel's MmAllocateContiguousMemory: the highest window in
- * [lo, hi) whose pages are free or can move, the ones that can moved to the
- * highest free pages outside it (below the top reserve while there are
- * any). What never moves (contiguous blocks, the kernel's own) packs at the
- * top of RAM, virtual memory below it, and what is free gathers in one run
- * at the bottom. Taking only free windows put such blocks under the virtual
- * pages (which take the highest free pages first), and once the memory
- * around them was freed they were stranded in the middle: Fable's new game
- * asks for 6.7 MiB with 15 MiB free, and a 56 KiB contiguous block and a
- * 24 KiB kernel block at 0x650000 left no window. */
+/* Find the highest window in [lo, hi) containing only free or movable pages, as in
+ * MmAllocateContiguousMemory. Move occupants to the highest free pages outside the window,
+ * below the GPU reserve when possible. Packing pinned allocations toward the top keeps large
+ * runs free below them. Fable could fail a 6.7 MiB allocation with 15 MiB free when small
+ * pinned blocks stranded in the middle. */
 uint32_t nc_vm_alloc_phys_top(NcVm *vm, uint32_t len, uint32_t lo, uint32_t hi, uint32_t align, uint32_t *moved)
 {
     *moved = 0;
@@ -865,15 +855,10 @@ void nc_vm_free_runs(const NcVm *vm, char *buf, size_t len)
     }
 }
 
-/* Zeroed pages at va. With pa_out the memory is one physical run; without,
- * any free pages back it: the highest free pages first, below the top
- * NC_TOP_RESERVE (the GPU's instance memory), so that virtual memory packs at
- * the top of RAM with the contiguous allocations (which also come from the
- * top) and what is free gathers in one run at the bottom (pages strewn over
- * RAM left Fable no 3.6 MiB run with 7 MiB free). Low RAM stays free for the
- * title, as on the Xbox: Halo asks for its game state at physical 0x61000,
- * just above the kernel, and 0x3A6000 (25 MiB in all) at start, after its
- * image, heap and stacks have their pages. */
+/* Map zeroed pages at va. With pa_out, allocate one contiguous run. Otherwise use the highest
+ * free pages below NC_TOP_RESERVE first. Packing allocations toward the top leaves large
+ * contiguous runs and low addresses for titles. Halo requests its game state at physical
+ * 0x61000 and 0x3A6000 after loading its image, heap and stacks. */
 bool nc_vm_alloc_at(NcVm *vm, uint32_t va, uint32_t len, uint32_t *pa_out)
 {
     len = nc_align_up(len, NC_PAGE);

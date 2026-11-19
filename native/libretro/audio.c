@@ -1,23 +1,15 @@
 /* Copyright (C) 2026-present PortareOS */
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * hakuX native core — the APU's output in the libretro core: 48 kHz 16-bit
- * stereo, handed to RetroArch from retro_run.
+ * Send 48 kHz, 16-bit stereo from the APU to RetroArch. The frame thread writes each EP frame
+ * to a ring. retro_run consumes one emulated period, with a fractional accumulator for rates
+ * such as 60000/1001 Hz (800.8 samples per channel on average). The APU paces itself using a
+ * one-to-three-period queue. Draining it to empty would make the producer repeatedly run
+ * ahead to refill it.
  *
- * The frame thread pushes each EP frame into a ring, and one consumer
- * drains it (two counters). The consumer is retro_run, which takes
- * one emulated period's samples each call (800.8 frames on average at
- * 60000/1001 Hz, through a fractional accumulator): the APU sees it as a device's
- * callback of one period and keeps the ring between one and three of them,
- * pacing itself in real time. Draining everything each call would not do:
- * every drain to empty sets the frame thread producing ahead of real time
- * to the low watermark again.
- *
- * Player 1's Xbox Live Communicator (the hakux_communicator option) has its
- * headphone here too, as the handheld has one sink: the title's samples at
- * 48 kHz (nc_xblc_phone_read), 3 dB down in each channel, added to the
- * frames as they go out. The APU's ring and its pacing don't see it; a frame
- * the frontend leaves for the next call keeps its headphone samples (g_voice).
+ * Mix player 1's Communicator headphone output into the outgoing samples at -3 dB per
+ * channel. Keep it outside the APU pacing ring. If the frontend takes only part of the batch,
+ * retain the matching headphone samples in g_voice for the next call.
  */
 #include "native/dev/apu/apu_int.h"
 #include "native/dev/usb.h"

@@ -1,52 +1,28 @@
 /* Copyright (C) 2026-present PortareOS */
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * hakuX native core — the VP's own stereo mix (MON_VP, the default without
- * the DSP) for 2D and 3D voices: a voice routed to the speakers is mixed
- * into the left and right speakers by its sends to the bins the guest's DSP
- * image puts on the speakers, each with its own gain, as that image does
- * for a stereo console: front left and right to their own speaker, the
- * centre to both at -3 dB, a back bin to its own side at -3 dB (the EP's
- * downmix), and the 3D bins (DirectSound's crosstalk bins, where the 3D
- * voices' HRTF submixes go) to the speaker bins of the same place, the
- * front pair at 0 dB, the back pair at -3 dB (the GP's crosstalk stage,
- * then the downmix). The LFE bin and the bins that aren't speakers (I3DL2
- * and the effect sends, the multipass bin) are the guest DSP program's,
- * whose effects this mix doesn't produce: they are left out of it.
+ * Stereo voice-processor output (MON_VP), used by default without the DSP.
  *
- * The route is a sound's, chosen once (vp.c): at its first frame with an
- * audible send, the speakers if one of them goes to a speaker bin, else
- * the monitor's existing mix (a voice sending only to the LFE or effect
- * bins, which would otherwise go silent), until its next VOICE_ON. Not
- * chosen again as its volumes change: a dry send fading to mute beside an
- * effect send fades the voice out, rather than switching it to the
- * monitor's mix with the effect send's level, and a dry send fading in
- * beside an effect send stays in the monitor's mix. Multipass groups keep
- * the monitor's mix.
+ * Route 2D speaker sends by DirectSound's bin conventions. Front left and right go to their
+ * speakers at full gain. Centre goes to both at -3 dB. Surround sends go to the matching side
+ * at -3 dB. Bins 6–9 feed the corresponding front and surround positions. LFE, I3DL2, effect
+ * and multipass sends are excluded from this speaker mix.
  *
- * Bins 0 to 5 are DirectSound's speaker conventions (DSMIXBIN_FRONT_LEFT to
- * DSMIXBIN_BACK_RIGHT; Cxbx-Reloaded's XbDSoundTypes.h), not a rule of the
- * hardware's. The weights are the ones DirectSound's own DSP image uses for
- * a stereo console, measured in Halo (2026-10-30, with the full DSP): its
- * EP downmixes the speaker bins for the analog output by a 5x2 table in
- * its Y memory (Y:0000-0009, in AC-3's order L, C, R, Ls, Rs: 1 and 0,
- * 0.7071 and 0.7071, 0 and 1, 0.7071 and 0, 0 and 0.7071; no LFE), and
- * tones through each bin came out at 0 and -3.01 dB alike at 100 Hz, 1 kHz
- * and 8 kHz. Bins 6 to 9 the same way: the GP put a tone in bin 6, 7, 8 or
- * 9 into bin 0, 1, 4 or 5 at -0.03 dB, with a crosstalk-cancelling term on
- * the other side at -24.4 dB (at 1 kHz) that this mix leaves out. What the
- * hardware's analog stage and level do isn't measured.
+ * Choose the route on the first frame with an audible send. A speaker send selects the
+ * speaker mix. If all audible sends go elsewhere, use the monitor mix so the voice remains
+ * audible. Keep the route until VOICE_ON, even when send gains change. This lets a dry send
+ * fade out beside an effect send. Multipass groups use the monitor mix.
  *
- * A 3D voice sends its left ear through slots 0–1 and its right ear through
- * slots 2–3 (xemu #3105). Those four go to the bins
- * the guest names with SET_HRTF_SUBMIXES, and DirectSound names them in the
- * order 6, 8, 7, 9: 3D front left, back left, front right, back right
- * (0x09070806 in both Dead or Alive 3 and The Thing), so each ear reaches
- * its own side's front and back bins. Taken as the even slots for the left
- * ear, the left ear went to front left and front right and the right ear
- * to both back bins: every 3D sound came out the same on both speakers.
- * Its destination is the bin it names; its headroom the shift the VP's
- * mix-bin path gives that send (vp.c).
+ * The gains follow DirectSound's DSP image measured in Halo (2026-10-30). EP's stereo matrix
+ * at Y:0000–0009 is in AC-3 order L, C, R, Ls, Rs. The measured speaker gains were 0 and
+ * -3.01 dB at 100 Hz, 1 kHz and 8 kHz. At 1 kHz the GP mapped bins 6–9 to 0, 1, 4, 5 at -0.03
+ * dB, with an opposite-channel term at -24.4 dB. This mix omits that crosstalk-cancelling
+ * term.
+ *
+ * For 3D voices, send slots 0–1 carry the left ear and slots 2–3 the right (xemu #3105).
+ * SET_HRTF_SUBMIXES names the destinations. In DOA3 and The Thing, 0x09070806 selects 6, 8,
+ * 7, 9, putting each ear in its own front and surround bins. Apply the headroom shift from
+ * the VP mix-bin path.
  */
 #ifndef NATIVE_DEV_APU_VP_STEREO_ROUTE_H
 #define NATIVE_DEV_APU_VP_STEREO_ROUTE_H
@@ -120,10 +96,9 @@ static inline bool vp_downmix_weights(int bin, float w[2])
     }
 }
 
-/* The route a voice's sends ask for now: the speakers with an audible send
- * to a speaker bin, the monitor's mix with audible sends to none, undecided
- * with every send muted. att[] is the sends' attenuate(volume), 0 for a
- * muted send (a muted send may go anywhere). */
+/* Choose the speaker mix if any audible send targets a speaker bin. Use the monitor mix for
+ * other audible sends, or leave the route undecided when all sends are muted. att[] contains
+ * attenuate(volume) for each send, with zero for mute. */
 static inline int vp_stereo_classify(const int bin[VP_SENDS], const float att[VP_SENDS])
 {
     int route = VP_ROUTE_UNDECIDED;

@@ -104,12 +104,9 @@ class PadRouter(
   private val motors = HashMap<Int, Boolean>()
 
   /**
-   * The titles' rumble to the controllers playing (polled): each change of
-   * level, and every 900 ms while it lasts (a vibration is asked for a second
-   * at a time, as SDL's rumble was). A controller without motors (a
-   * handheld's own controls, which Android reports as external USB, or a
-   * clip-on) rumbles the device instead: the first player's such controller,
-   * so that several don't share it.
+   * Refresh rumble on strength changes and every 900 ms while it continues. Each request
+   * lasts one second. If a controller has no motors, use the device vibrator for the first
+   * player with such a controller.
    */
   fun pollRumble() {
     val now = SystemClock.uptimeMillis()

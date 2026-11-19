@@ -1,6 +1,5 @@
 /*
- * hakuX native core — a run's options, the arguments a front end passes on
- * (the app's NativeCoreActivity.getArguments, xboxrun's command line):
+ * Core options supplied by NativeCoreActivity.getArguments and xboxrun.
  *
  *   uncap            every frame presented at once, without waiting for
  *                    vblank (the HLE GPU's HAKUX_HLE_UNCAP)

@@ -1,21 +1,14 @@
-; Halo (4D530004.9) 60 fps: objects and first-person arms drawn between ticks.
-; Lives in the header page, over the logo bitmap (only the dashboard shows it)
-; and past the headers (sizeof_headers 0xCC8 -> 0x1000).
+; Halo (4D530004.9) at 60 fps. Store the patch in the header page over the dashboard logo
+; bitmap, extending sizeof_headers from 0xCC8 to 0x1000.
 ;
-; Halo ticks 30 times a second; with the limiter at one vblank a frame, every
-; other frame runs no tick. t is how far between the last two ticks a frame
-; is shown: half a tick back, so 1/2 on one frame and 1 (the last tick) on the
-; next at 60 fps.
-; - Objects: before each tick their positions and node matrices are copied to
-;   PREV. After the frame's ticks (game_time_update), when t < 1, the current
-;   values go to CUR and the objects get PREV + (cur - PREV) * t for the
-;   director, the observer (camera) and the render; after the frame (before
-;   the vblank wait) CUR goes back.
-; - First person: the render rebuilds each local player's arms every frame
-;   (0xD77E0: the pose from the tick's animations, then the node matrices from
-;   the pose and the render camera, 0xA3600). At that call the pose of the
-;   last tick (LAST) blends into the current one: quaternions (sign-matched,
-;   normalized), translations and scales; the pose comes back after the call.
+; The game still ticks at 30 Hz. With one vblank per render, t alternates between 1/2 and 1.
+; Before a tick, save positions and node matrices in PREV. After game_time_update, when t <
+; 1, save current values in CUR and blend PREV toward CUR for the director, camera and
+; render. Restore CUR before the vblank wait.
+;
+; The first-person render rebuilds each player's arms at 0xD77E0 using the pose and render
+; camera (0xA3600). Blend LAST toward the current pose, including sign-matched, normalized
+; quaternions, translations and scales. Restore the pose after rendering.
 BITS 32
 ORG 0x10A14
 

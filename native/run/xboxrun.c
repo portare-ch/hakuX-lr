@@ -1,7 +1,7 @@
 /*
- * xboxrun — runs an Xbox title in the native core from the command line
- * (adb shell, /data/local/tmp), without the app: no window, no sound, on
- * the HLE GPU as the app runs it (HAKUX_HLE_MODE=replace unless set).
+ * Run an Xbox title on the HLE GPU without the app, a window or audio.
+ * HAKUX_HLE_MODE defaults to replace. On Android use adb shell in
+ * /data/local/tmp.
  *
  *   xboxrun <disc image> [option...]
  *

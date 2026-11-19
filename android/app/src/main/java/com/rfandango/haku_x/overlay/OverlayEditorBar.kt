@@ -19,13 +19,10 @@ import com.rfandango.haku_x.R
 import kotlin.math.roundToInt
 
 /**
- * The layout editor's bar over the controller: the selected control's size
- * and visibility, the controls' opacity, and reset / cancel / done. It folds
- * away into a small tab at the top edge, so controls can go up there too.
- * Its groups wrap onto more rows where the screen is too narrow for one (a
- * 4:3 screen in landscape).
- * Plain views, so it works over the game (the core's SDL activity) as in the
- * app. Place it at the top centre of the screen.
+ * Edit the selected control's size and visibility, set overall opacity, or reset, cancel and
+ * apply the layout. The bar folds into a top tab to free the edge for controls and wraps to
+ * multiple rows on narrow screens. Plain Views let it run over both the SDL activity and the
+ * app.
  */
 class OverlayEditorBar(
   context: Context,

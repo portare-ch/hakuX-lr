@@ -10,10 +10,8 @@
 #include <stdint.h>
 
 void hle_barrier_init(uint64_t ram_size);
-/* The core stops (M2; the guest's CPU, the decoder and the back end done):
- * the tables freed, the hooks and counts as before hle_barrier_init. The
- * stale ranges and report pages are forgotten, their access given back as
- * push-buffer mode stopped. */
+/* Free the tables and reset the hooks and counters after the vCPU, decoder and back end stop.
+ * Stopping push-buffer mode restores access to stale ranges and report pages. */
 void hle_barrier_free(void);
 /* GPU work up to `value` reads [pa, pa+len) in place: the first CPU write
  * waits, and the CPU cache lines of its pages written since they were last
@@ -25,42 +23,32 @@ void hle_barrier_arm(uint32_t pa, uint32_t len, uint64_t value);
  * cleaned and invalidated, so neither a dirty line written back later nor a
  * stale clean one hides what the GPU wrote. */
 void hle_barrier_arm_landing(uint32_t pa, uint32_t len, uint64_t value);
-/* GPU work up to `value` (a landing, a copy that reads the range) has the
- * pages wholly inside [pa, pa+len) wait for it: the first CPU write waits
- * (an overlapped read into them too), their dirty bits kept for the
- * trackers (host.h hle_host_mem_rearm); a page the range shares, never (a
- * neighbour's stores there). gpu: the GPU writes the range in place (its
- * lines cleaned and invalidated). hle_mem_cache_inval: the range's CPU
- * cache lines cleaned and invalidated (after the GPU wrote it). */
+/* Make CPU writes wait for GPU timeline value on pages fully covered by [pa, pa + len).
+ * Overlapped reads into those pages also wait. Keep their dirty bits and leave shared edge
+ * pages accessible. If gpu is true, clean and invalidate CPU cache lines before the GPU
+ * writes in place. Use hle_mem_cache_inval after the GPU write. */
 void hle_barrier_arm_keep(uint32_t pa, uint32_t len, uint64_t value, bool gpu);
 /* ... a copy queued to read [pa, pa+len) when it lands: every page of it
  * waits (no guard covers a copy's source) */
 void hle_barrier_arm_src(uint32_t pa, uint32_t len, uint64_t value);
 void hle_mem_cache_inval(uint32_t pa, uint32_t len);
-/* [pa, pa+len) is older than an image over it, until fill(pa, len) puts the
- * image there (push-buffer mode's frame on screen, which the GPU drew into
- * its own image): the guest's first access to a page of it, a read or a
- * write (the pages have no guest access meanwhile: host.h
- * hle_host_mem_noaccess), calls fill on the guest's thread, once, then waits
- * for what fill armed. One range at a time; len 0 drops it. */
+/* Protect a stale scanout range until the guest first reads or writes one of its pages. The
+ * guest thread calls fill(pa, len) once and waits for the readback it schedules. One range
+ * can be active at a time. A zero length clears it. */
 void hle_barrier_set_stale(uint32_t pa, uint32_t len, void (*fill)(uint32_t pa, uint32_t len));
-/* Guards: [pa, pa + len) is older than the image a render target's draws
- * made (push-buffer mode): its pages lose guest access (arming again a range
- * armed already: drawn into again). The guest's first access to its bytes,
- * a read or a write, waits for the image's landing, the one asked for with
- * hle_barrier_guard_landing or else one the fill (hle_barrier_set_guard_fill:
- * on the guest's thread, read: the guest reads; the landing's value, 0 if
- * there is nothing to land) asks for, then has the memory: the guard goes
- * (the pages protected for write tracking first: the guest's stores from
- * then on are seen). Armed again while the guest waited, the pages are
- * given back anyway till the next arming. The guest's own bytes on a page a
- * target only shares are reached for it by the host (native/hle/dirty.c,
- * hle_mem_stale_neighbour), the page kept closed.
- * hle_barrier_set_stale(.., NULL) drops these too; hle_barrier_unguard one
- * (the image is going); hle_barrier_unguard_range every guard over
- * [pa, pa + len): memory there written by the host or a device (newer than
- * any image) or freed. hle_barrier_guard_drops: a count of guards dropped or
- * given back, for a caller that keeps its own note of what it guarded. */
+/* Guard guest memory whose render-target image is newer. A read or write waits for an
+ * existing readback (hle_barrier_guard_landing) or calls the fill callback on the guest
+ * thread to schedule one. The callback receives the access type and returns a timeline value,
+ * or zero if no readback is needed. After waiting, restore access with first-write tracking.
+ * A range re-armed during the wait is also accessible until its next arm.
+ *
+ * The host can service accesses outside the guarded bytes of a shared page while keeping the
+ * page closed (hle_mem_stale_neighbour in native/hle/dirty.c).
+ *
+ * hle_barrier_set_stale(.., NULL) clears all guards. hle_barrier_unguard drops one before its
+ * image is destroyed. hle_barrier_unguard_range drops all overlapping guards when the host or
+ * a device writes the range, or when it is freed. hle_barrier_guard_drops counts guards
+ * dropped or reopened. */
 enum { HLE_GUARD_NONE, HLE_GUARD_ARMED, HLE_GUARD_LANDING, HLE_GUARD_OPEN };
 void hle_barrier_set_guard_fill(uint64_t (*fill)(uint32_t pa, uint32_t len, bool read));
 void hle_barrier_guard(uint32_t pa, uint32_t len);
@@ -69,12 +57,11 @@ int hle_barrier_guard_state(uint32_t pa, uint32_t len, uint64_t *v);
 void hle_barrier_unguard(uint32_t pa, uint32_t len);
 void hle_barrier_unguard_range(uint32_t pa, uint32_t len);
 uint32_t hle_barrier_guard_drops(void);
-/* Whether guest bytes [lo, hi) (on one page) are the guest's own beside a
- * guard's: a page a guard closed, none of its bytes a target's or a frame's.
- * 0: not; 1: they are (the host reaches them for the guest); 2: such
- * accesses come often there, and the page is given back (hot: no guard
- * closes it as its edge page from now on, the access runs again).
- * hle_barrier_guard_stats: the accesses served so, the pages made hot. */
+/* Classify a guest access to [lo, hi) within one protected page. Return 0 if it touches a
+ * guarded target or scanout or the page is unprotected, 1 if the host can handle it outside
+ * the guards, and 2 if repeated accesses made the page hot. In case 2 access is restored, the
+ * guest retries the access, and new guards skip the page when it is an edge page.
+ * hle_barrier_guard_stats counts handled accesses and hot pages. */
 int hle_mem_stale_neighbour(uint32_t lo, uint32_t hi);
 void hle_barrier_guard_stats(uint64_t *neighbours, uint64_t *hot);
 /* Guest memory freed (native/core/vm.c): the guards over it dropped, its
@@ -116,25 +103,21 @@ void hle_barrier_set_flush(void (*flush)(uint64_t value));
 /* Whether a first write to a page of [pa, pa + len) had to wait for the GPU
  * (the CPU rewrites memory while the GPU still reads it). */
 bool hle_barrier_contended(uint32_t pa, uint32_t len);
-/* Push-buffer mode: [pa, pa + len) was just copied for a draw, and a later
- * draw the decoder hasn't reached may read it again. The guest's first
- * store into those bytes calls catch_up (hle_barrier_set_catch_up) on the
- * guest's thread first: it returns once the decoder has read what the guest
- * pushed before the store. */
+/* After copying [pa, pa + len) for a draw, make the next guest write wait for the decoder. A
+ * later queued draw may still need the old data. The catch_up callback runs on the guest
+ * thread and returns after decoding the work submitted before the store. */
 void hle_barrier_arm_copied(uint32_t pa, uint32_t len);
 void hle_barrier_set_catch_up(void (*catch_up)(void));
-/* Push-buffer mode's visibility-test reports. The console's GPU writes one
- * soon after the guest pushes its GET_REPORT; ours once the GPU ran the
- * test, often after the title has read it. The scout (the guest's thread,
- * at each PUT it writes) passes each report it finds with the frame it is in
- * (the swaps pushed before it): its page goes without guest access. A guest
- * access to the page then waits until the page's reports of earlier frames
- * are written (the decoder caught up, the GPU done; 30 ms at most) and gives
- * the page back. The decoder passes each report it reaches, the back end
- * each it writes. scout: scans to the guest's PUT, returns the frame it is
- * in (NULL: no gate). held: whether the decoder waits on the guest itself (a
- * trap for its interrupt handler, the FIFO access it turned off, a flip
- * stall): a report it hasn't reached can't come while the guest waits. */
+/* Track visibility reports from GET_REPORT in push-buffer mode. The scout runs on the guest
+ * thread at each PUT write. It assigns each report to a frame by counting preceding swaps and
+ * protects the report's page. The guest waits up to 30 ms for pending reports from earlier
+ * frames before accessing the page. The decoder marks reports it reaches, and the back end
+ * marks results it writes.
+ *
+ * The scout callback scans to the guest's PUT and returns the current frame. A NULL scout
+ * disables the gate. The held callback reports whether the decoder depends on the guest, such
+ * as for an interrupt trap, disabled FIFO access or a flip stall. The guest skips waiting for
+ * reports the held decoder has yet to reach. */
 void hle_barrier_report_pushed(uint32_t pa, uint32_t frame);
 void hle_barrier_report_decoded(uint32_t pa);
 void hle_barrier_report_written(uint32_t pa);
@@ -145,11 +128,9 @@ void hle_barrier_report_stats(uint64_t *waits, uint64_t *ns, uint64_t *timeouts,
 /* The host, at the guest's first store to a page tracking made clean
  * (host.h hle_host_mem_test_and_clear). */
 void hle_mem_first_write(uint64_t ram_addr, unsigned size);
-/* A device write to [pa, pa + len) that another thread makes later (an
- * overlapped file read): the GPU value it must wait for, as a first write
- * would (0: none), the producer flushed meanwhile; hle_mem_wait_fence on
- * that thread before the write. Leaves the pages' tracking alone: the
- * writer reports the write (hle_host_mem_set_dirty) once done. */
+/* For an asynchronous write to [pa, pa + len), return the GPU timeline value the writer must
+ * wait for, or zero if ready. Flush the producer first. The writer calls hle_mem_wait_fence
+ * before writing and hle_host_mem_set_dirty afterward. */
 uint64_t hle_mem_write_fence(uint32_t pa, uint32_t len);
 void hle_mem_wait_fence(uint64_t value);
 

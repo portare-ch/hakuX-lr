@@ -1,27 +1,18 @@
 /* Copyright (C) 2026-present PortareOS */
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * RSQRT sites by recursive descent.
+ * Find RSQRT sites by following control flow from the entry point and TLS callbacks. Decode
+ * direct branches and calls and switch tables bounded by a preceding cmp. Indirect calls,
+ * including the XDK startup call to main, need additional seeds from code immediates,
+ * absolute operands and aligned dwords in data.
  *
- * Code is decoded only where control flow reaches it: from the entry point
- * and the TLS callbacks, through direct jumps and calls and through switch
- * tables (jmp [reg*4 + table], bounded by the cmp before it). Indirect calls
- * aren't followed, and an XDK title's startup only reaches main through
- * one, so the rest is found from pointer seeds: the immediates and absolute
- * operands of decoded code, and the aligned dwords of the data sections.
+ * Require seeds to start after padding, a return, an unconditional jump or a jump table.
+ * Reject starts after prefixes to avoid treating the 0F 52 part of F3 0F 52 as RSQRTPS.
  *
- * A seed is only a number that is a code address, so three things keep a
- * wrong one from producing a site:
- *  - It has to land where code can start (plausible_start): after padding,
- *    a ret, an unconditional jmp or a jump table, and never after a prefix
- *    byte (the 0F 52 of an F3 0F 52 is an RSQRTPS that isn't there).
- *  - Each seed starts a family (its region, and what that calls), ranked by
- *    how it was found: the entry 0, an immediate one more than the family
- *    whose code holds it, a data dword DATA_RANK. A decode that runs into a
- *    less trusted family's bytes evicts that family with the families
- *    seeded from its code, and what it had turned away is tried again.
- *  - A site counts only if a linear sweep of the section decodes the same
- *    instruction at the same address.
+ * Each seed and the code it reaches form a family. Rank entry-point families 0, code pointer
+ * seeds one below their originating family, and data seeds DATA_RANK. A higher-confidence
+ * decode can evict a family and its descendants, then retry candidates they blocked. Accept
+ * an RSQRT site only if a linear sweep decodes the same instruction at the same address.
  */
 #include "native/cpu/kvm_rsqrt_scan.h"
 #include "native/cpu/x86_decode.h"

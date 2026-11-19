@@ -781,18 +781,15 @@ void hle_pb_boundary_request(uint64_t value)
     boundary_request(value);
 }
 
-/* D3D 4928's RunPushBuffer, when the GPU may still be running the recorded
- * buffer's last use, puts a NOP trap of kind 3 (CALL) or 4 (JUMP) before the
- * branch into it: the argument >> 5 is the PA of the 4-word record after
- * the branch {fixups, buffer, end, return} (Crimson Sea 0x3ad930). D3D's
- * DPC then copies the fixups ({bytes, offset, data} entries until bytes is
- * -1) into the buffer, ends it with a JUMP to the return and, for a CALL,
- * writes DMA_SUBROUTINE (the return: not in a call) (0x3b2d50); its other
- * effects are a device counter nothing reads and a cache flush. The
- * decoder does the same in place: no interrupt, DPC and handler per run
- * (Crimson Sea ~217 a frame). False if the record doesn't look like one
- * (the guest's handler takes the trap). D3D 4928 only (where it was read);
- * HAKUX_HLE_PB_RUNS=0: always the guest's. */
+/* D3D 4928's RunPushBuffer uses a kind 3 (CALL) or 4 (JUMP) NOP trap when the GPU may still
+ * be using a recorded buffer. The argument shifted right by five points to {fixups, buffer,
+ * end, return} after the branch (Crimson Sea 0x3ad930).
+ *
+ * Apply the DPC's {bytes, offset, data} fixups through the -1 terminator and patch the final
+ * JUMP. For CALL, set DMA_SUBROUTINE to the return without marking a call active (0x3b2d50).
+ * Handling this in the decoder skips about 217 traps per frame in Crimson Sea. Return false
+ * for an unrecognized record so the guest handles it. HAKUX_HLE_PB_RUNS=0 uses the guest
+ * handler for all such traps. */
 #define RUN_FIXUPS_MAX 4096u
 
 static bool contig_pa(uint32_t va, uint32_t *pa)
@@ -1147,21 +1144,15 @@ static void consume_pass(void)
     publish_get();
 }
 
-/* ---- guest stores behind the decoder ----
- * The console's GPU runs close behind the pushes; the decoder can be most of
- * a frame behind the guest, whose CPU is faster than the console's. A title
- * that rewrites vertices in place for its next frame without waiting for
- * the GPU (Lock with NOOVERWRITE) then changes them under draws of this
- * frame the decoder hasn't reached. Dead or Alive 2's character select
- * draws its translucent parts twice, the second pass LESSEQUAL over the
- * first, and the next frame's skinning between the two moved whole
- * triangles of the second: the fishnet and the hair flickered. A store into
- * bytes copied for a draw a later one may read again (hle_barrier_arm_copied)
- * waits here, on the guest's thread, until the decoder has read what the
- * guest pushed before it: up to the PUT it wrote, which holds while the
- * guest runs nothing. The decoder waiting on the guest (a trap for its
- * interrupt handler, the FIFO access it turned off, a FLIP_STALL) or for the
- * GPU (arena room, the frame pace), or 50 ms, end the wait. */
+/* Order guest writes after pending draws that read the old bytes. The decoder can lag the
+ * guest more than the console GPU does. A title that skins vertices in place with NOOVERWRITE
+ * can otherwise change geometry between two draws of a frame, as in DOA2's flickering hair
+ * and fishnet.
+ *
+ * A store to a range marked by hle_barrier_arm_copied waits on the guest thread for the
+ * decoder to catch up to the current PUT. Stop waiting after 50 ms or when the decoder is
+ * itself stalled on the guest or GPU (trap, disabled FIFO, flip stall, arena space or frame
+ * pacing). */
 static struct {
     uint32_t target;                    /* the PUT the decoder must reach */
     int state;                          /* 1 a store waits, 2 released (atomic) */
@@ -1253,17 +1244,12 @@ static void catch_up(void)
     __atomic_fetch_add(&g_cu.waits, 1, __ATOMIC_RELAXED);
 }
 
-/* ---- the report scout (mem/barrier.h hle_barrier_report_pushed) ----
- * The guest's thread, at each PUT it writes and at its access to a report
- * page: a second pusher over what the guest pushed since, which reads only
- * the 3D object's GET_REPORTs (with the decoder's report DMA object) and its
- * FLIP_INCREMENT_WRITEs (the frames), a packet's data at once. Synced at the
- * PUT, the first time and after the push buffer changed, the guest set GET
- * or the stream lost it: what came before that isn't gated. At a software
- * trap it waits until the decoder is past it (scout_take). The small blits
- * D3D patches a recorded buffer's closing JUMP with, before it jumps there
- * (RunPushBuffer), it applies to the words it reads next (scout_blit). Debug:
- * HAKUX_HLE_PB_VISGATE=0, no gate (A/B). */
+/* The report scout uses a second DMA pusher on the guest thread at PUT writes and protected
+ * report-page accesses. It scans the new packets for GET_REPORT using the decoder's report
+ * DMA object and counts FLIP_INCREMENT_WRITEs for frame numbers. Start at the current PUT on
+ * initialization, a buffer change, a guest GET write or loss of synchronization. Reports
+ * before that point are ungated. Apply small RunPushBuffer fixup blits to the words the scout
+ * reads next. HAKUX_HLE_PB_VISGATE=0 disables the gate. */
 #define SC_PATCHES 16
 
 static struct {
@@ -1352,16 +1338,10 @@ static uint32_t scout_take(void *opaque, unsigned subch, uint32_t m, bool noninc
                            const uint32_t *w, uint32_t n, int *stall)
 {
     (void)opaque;
-    /* A software trap (a NOP with an argument) right before a branch: D3D
-     * runs a recorded buffer so, and its handler ends the buffer with a
-     * JUMP to the run's return. Read before that, the JUMP still went to
-     * the last run's return, behind, and the scout went round old commands
-     * up to its budget at every PUT (Sudeki: ~90% of the guest's thread):
-     * the scout waits there until the decoder is past the trap
-     * (scout_trap_past), as the console's GPU reads on after the handler.
-     * It reads on past other traps: stopped at Blinx's (~4 a frame), it saw
-     * the reports Blinx reads a frame later too late, and its decals
-     * flickered again. */
+    /* Wait for the decoder to handle a software trap just before a branch into a recorded D3D
+     * buffer. The handler patches its final JUMP to the current return. Reading the previous
+     * return early can trap the scout in old packets, using about 90% of Sudeki's guest
+     * thread. Continue through other traps so reports stay timely in titles such as Blinx. */
     const uint32_t nop = noninc ? (m == NV_NO_OPERATION ? 0 : n) :
                          m <= NV_NO_OPERATION && NV_NO_OPERATION < m + 4 * n ? (NV_NO_OPERATION - m) / 4 : n;
     for (uint32_t i = nop; i < n && (noninc || i == nop); i++) {

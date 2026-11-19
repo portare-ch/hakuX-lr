@@ -199,14 +199,10 @@ fun LibraryScreen(
 }
 
 /**
- * The games, as cards. A fast scroll brings several cards in a frame, and the
- * debug build's Compose code runs interpreted (a debuggable app is never
- * compiled ahead of time), so each card is kept cheap to compose: a bordered
- * box rather than an OutlinedCard's Surface, its icon a bitmap the view model
- * decoded, the ID and the region flags one text, painters and strings shared
- * by every card, and the long-press menu composed only while it is open.
- * With a controller the focused card is outlined in green; A starts its game,
- * Y or select (or holding A) opens its menu.
+ * Keep each game card cheap to compose during fast scrolling. Use a bordered Box, a bitmap
+ * decoded by the view model and shared painters and strings. Compose the long-press menu only
+ * while open. D-pad focus outlines the card. A starts the game, and Y, Select or holding A
+ * opens the menu.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -486,11 +482,8 @@ private fun TitleIcon(game: Game, icon: ImageBitmap?, shape: Shape, background: 
 }
 
 /**
- * The search field (query: its text to start with), slimmer than an OutlinedTextField's 56 dp
- * minimum. A controller's d-pad passes through it (sideways too while it's empty) and its A opens
- * the keyboard: the focus alone doesn't, which would cover the screen on the way to the buttons
- * beside it; a tap does. It is the state-based field: the value-based one opens the keyboard on any
- * focus.
+ * Use a compact, state-based search field. Controller focus can pass through without opening
+ * the keyboard, including sideways when empty. Press A or tap to open it.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

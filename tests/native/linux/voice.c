@@ -1,16 +1,10 @@
 /* Copyright (C) 2026-present PortareOS */
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/* The libretro core's Communicator (native/libretro/mic.c and audio.c) with
- * the real device (native/dev/xblc.c), the title's USB frames played here:
- * RetroArch's microphone opens only once the title reads the Communicator's
- * microphone (not for the headphone alone), at the title's rate; what it
- * hears reaches the title's microphone packets (resampled when RetroArch
- * gives another rate), silence without one or where its reads come up short;
- * it closes when the title stops and when the core stops. The
- * headphone's samples are mixed into the core's output 3 dB down in both
- * channels, none lost when the frontend takes part of a period, and without
- * a Communicator the output is the APU's as it was. No guest, renderer or
- * frontend: RetroArch's environment and microphone are stubbed. */
+/* Test the libretro Communicator with real USB endpoints and a stubbed RetroArch frontend.
+ * The mic opens when the title reads it, uses the title's rate and closes when requests or
+ * the core stop. Check resampling and silence for unavailable or short reads. Mix headphone
+ * samples into both channels at -3 dB, preserving them if the frontend consumes only part of
+ * a period. With no Communicator, check the original APU output. */
 #include "native/dev/apu/apu_int.h"
 #include "native/dev/usb.h"
 #include "native/libretro/libretro_int.h"

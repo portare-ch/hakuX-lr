@@ -1,28 +1,16 @@
 /* Copyright (C) 2026-present PortareOS */
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * hakuX native core — the RetroPad as the Duke, in the libretro core.
+ * Map RetroPad ports 1–4 to Xbox players 1–4. Changing a port to or from None after boot
+ * unplugs or plugs that controller in the guest.
  *
- * Ports 1-4 are players 1-4, each with a controller plugged in unless the
- * port's Device Type in RetroArch is None: as RetroArch assumes, a RetroPad
- * on every port. RetroArch sets the ports after the game started to boot
- * (retro_set_controller_port_device after context_reset), and when its menu
- * changes one: the title sees the controller come or go, as when one is
- * plugged into the console.
+ * Map face buttons by position. Xbox A/B/X/Y are RetroPad B/A/Y/X, and White/Black are L/R. A
+ * pressed pressure-sensitive button reports full pressure. Triggers use analog input when
+ * available or 0/255 otherwise. RetroArch handles remapping.
  *
- * The buttons keep their places: the Xbox's A, B, X, Y are the RetroPad's
- * south, east, west and north (B, A, Y, X), White and Black its L and R.
- * The face buttons, White and Black are pressure-sensitive on the Duke:
- * fully pressed here. The triggers are analog where RetroArch reports them
- * so, else 0 or 255. Remapping is RetroArch's.
- *
- * Rumble, when the core option turns it on (off by default): each port's
- * motors get the strengths the title last sent its controller
- * (nc_pad_rumble), the Duke's left motor, the heavy one, as RetroArch's
- * strong and its right as the weak, both 0..65535 as RetroArch's. A
- * strength is sent when it changes. Paused, the title's strengths read 0
- * (xid.c): the motors stop with the emulation, as RetroArch's menu stops
- * them, and start again with it.
+ * When enabled, rumble sends changed motor strengths to the frontend. The Duke's left motor
+ * is strong and its right is weak. Values are 0–65535. During a pause, xid.c reports zero to
+ * stop both motors.
  */
 #include "native/libretro/libretro_int.h"
 #include "native/dev/usb.h"

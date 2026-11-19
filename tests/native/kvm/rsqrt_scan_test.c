@@ -135,12 +135,10 @@ int main(void)
      * and a dword in the data happens to be that address (11092) */
     put(text, 0x11090, "B8C30F52C1" "C3");
     put(text, 0x110A0, "E8EBFFFFFF" "C3");           /* another callback, which calls 11090 */
-    /* mov eax, 90E8C390; add [eax], al; add bl, al; ret: a dword in the data
-     * is the address of its immediate's E8 (110C3, after a C3), a call of
-     * 11158 that isn't there. The callback at 11170 does call 11158, when
-     * that walk already has it. 11180, known only from the immediate at
-     * 11190 and so tried after both, calls 110C0: the walk from 110C3 is
-     * given up, 11158 with it, and 11170's call has it walked again. */
+    /* A data pointer to 0x110C3 lands on E8 inside the immediate of mov eax, 90E8C390 and
+     * produces a false call to 0x11158. The callback at 0x11170 has a real call there. A
+     * later seed at 0x11180 calls the true start, 0x110C0. Verify that evicting the false
+     * decode also revisits the callback's real target. */
     put(text, 0x110C0, "B890C3E890" "0000" "00C3" "C3");
     put(text, 0x11158, "F30F52C1" "C3");
     put(text, 0x11170, "E8E3FFFFFF" "C3");

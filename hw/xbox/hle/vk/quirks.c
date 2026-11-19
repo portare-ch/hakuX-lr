@@ -194,21 +194,13 @@ static const HleQuirk k_quirks[] = {
      * (W-buffering off) ran it at 60 fps, 4, 16 and 1|2|32 still hung, and
      * caps -bindless,-bda,-ahb,-vk13 and -cbc changed nothing. */
     { HLE_QUIRK_NO_WBUF, "no_wbuf", mali_g57 },
-    /* Mali-G52 MP2, Arm's r34p0 (an Anbernic RG Vita, Unisoc T618, Vulkan
-     * 1.1, 2026-10-30): the host wait on the timeline semaphore returned
-     * VK_ERROR_DEVICE_LOST mid-game ("vkWaitSemaphores", hle_tl_wait), across
-     * titles and at random moments, while the GPU had run everything up to
-     * the call. The counter query never failed, so the waits poll it
-     * (hle_tl_sem_wait): no loss in ~40 minutes of play after, where before
-     * a session lost the device several times. The watcher's wait, for a
-     * value already submitted (back.c counts it after vkQueueSubmit2), lost
-     * it too: not a wait before its signal. Mali-G57, the same r34p0 (a
-     * Galaxy A03 user's diag log, 2026-10-26): JSRF lost the device at its
-     * title screen in every run the same way, in the decoder's wait, every
-     * submitted command buffer done and the GPU idle for 251 ms. r40p0 (the
-     * RG556's, no_wbuf above) and r54p1 (the X6858's) ran without it and the
-     * releases between are untested, so on for Arm's driver before r40;
-     * HAKUX_HLE_QUIRKS=+no_sem_wait tries it elsewhere. */
+    /* On Mali-G52 MP2 and G57 with Arm r34p0, waiting on a timeline semaphore could return
+     * VK_ERROR_DEVICE_LOST even after all commands had completed. This happened on the RG
+     * Vita during play and on a Galaxy A03 at JSRF's title screen. Polling the semaphore
+     * counter instead ran for about 40 minutes on the RG Vita without a device loss.
+     *
+     * The issue was absent on tested r40p0 and r54p1 builds. Enable the workaround on Arm
+     * releases before r40 and use HAKUX_HLE_QUIRKS=+no_sem_wait to test it elsewhere. */
     { HLE_QUIRK_NO_SEM_WAIT, "no_sem_wait", arm_before_r40 },
 };
 

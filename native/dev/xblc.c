@@ -1,40 +1,22 @@
 /*
- * hakuX native core — the Xbox Live Communicator: the headset that plugs into
- * a controller's expansion slot, for voice chat (Xbox Live through Insignia,
- * and the games that talk over system link). A USB audio device of its own
- * class (0x78): 16-bit mono PCM on isochronous OUT 4 (the headphone) and IN 5
- * (the microphone), one packet a frame, at the rate the title picks with a
- * vendor SET_FEATURE (8 to 24 kHz; 16 kHz until then). Descriptors and
- * requests as xemu's (hw/xbox/xblc.c, Ryan Wendland and Fred Hallock), which
- * the titles' voice drivers run on there.
+ * Xbox Live Communicator headset for Insignia and system-link voice chat. This USB class 0x78
+ * device sends mono 16-bit PCM on isochronous headphone OUT 4 and microphone IN 5. Each
+ * endpoint transfers one packet per frame. Vendor SET_FEATURE selects 8–24 kHz, with 16 kHz
+ * as the default. Descriptors and requests follow xemu's hw/xbox/xblc.c (Ryan Wendland and
+ * Fred Hallock).
  *
- * The USB frame thread only moves samples through two rings; the host's
- * sound comes from a backend (XblcHost). On Android it is AAudio's: the
- * phone's microphone, or the headset's when one is plugged in (Android
- * routes it), under the voice communication preset (echo cancelling, noise
- * suppression); the headphone's sound plays with the game's. The streams
- * open on a thread of their own when the title first moves audio (the
- * microphone isn't held until a game uses it), and again at each rate it
- * sets. Elsewhere the front end moves the samples itself (the libretro
- * core, native/libretro/mic.c and audio.c): it asks whether the title reads
- * the microphone (nc_xblc_state), feeds it (nc_xblc_mic_put) and takes
- * the headphone's samples at its own rate (nc_xblc_phone_read).
+ * The USB frame thread moves samples through two rings. On Android, AAudio opens streams off
+ * that thread when the game starts moving audio and reopens them on rate changes. It uses the
+ * routed microphone and voice communication preset. Libretro monitors nc_xblc_state, supplies
+ * mic samples through nc_xblc_mic_put and reads headphone samples at its output rate with
+ * nc_xblc_phone_read.
  *
- * A noise gate sits on the microphone (NC_MIC_GATE, dBFS; "off" for none):
- * the titles show a player as talking for any sound at all, so the
- * microphone sends silence unless someone speaks. A 100 Hz low cut goes
- * first (hum and rumble). A 10 ms window counts as speech when it is above
- * the threshold, 10 dB above the background (the quietest window of the last
- * 2 s: speech pauses within that, while a hum, a fan or the game's own sound
- * from the speaker doesn't) and voiced: the last 30 ms repeat at a pitch of
- * 80-400 Hz (normalized autocorrelation of 0.6 or more). The device's sticks
- * rub and click right by its microphone as loud as a voice, but have no
- * pitch: on a recording from a Retroid Pocket Flip 2, stick and button noise
- * never opened the gate, and speech, with the stick moving or not, did. Two
- * such windows in a row open it, one keeps it open, and it stays open 400 ms
- * after the last (the ends of words), fading in and out over a few
- * milliseconds. It doesn't open within 150 ms of a button going down or up
- * on the player's controller either (the click).
+ * NC_MIC_GATE sets the microphone noise gate's dBFS threshold or disables it with off. Filter
+ * below 100 Hz. A 10 ms speech window must exceed the threshold and the quietest window of
+ * the last 2 s by 10 dB. Require periodicity from 80–400 Hz (autocorrelation at least 0.6
+ * over 30 ms) to reject stick and button noise. Two windows open the gate, one keeps it open,
+ * and it holds for 400 ms after speech. Fade transitions and block opening within 150 ms of a
+ * controller button edge.
  */
 #include "native/dev/usb.h"
 

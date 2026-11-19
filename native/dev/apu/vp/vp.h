@@ -63,16 +63,10 @@ typedef struct MCPXAPUVoiceFilter {
      * vp_resample_read; valid only for the duration of that synchronous
      * call. */
     uint8_t *cb_voice_cache;
-    /* HAKUX_AUDIO_SKIP_MUTED plumbing. Declared unconditionally to avoid ABI
-     * churn (2 bytes/voice); only read/written when the flag is enabled.
-     * cb_skip_decode: set by voice_resample before vp_resample_read, consumed
-     *   inside voice_resample_callback -> voice_get_samples to null the per-
-     *   sample decode for a muted voice. Same synchronous-call lifetime
-     *   contract as cb_voice_cache above (a refactor caching it across calls
-     *   would break it).
-     * muted_prev: this voice was muted (skipped) on the previous audible
-     *   evaluation; drives the SVF/HRTF state reset on the muted->audible
-     *   transition. */
+    /* State used by HAKUX_AUDIO_SKIP_MUTED. Keep it in the struct in all builds for a stable
+     * layout. cb_skip_decode is set before vp_resample_read and read by its synchronous
+     * callback to skip decoding a muted voice. Do not retain it across calls. muted_prev lets
+     * the next audible frame reset SVF and HRTF state. */
     bool cb_skip_decode;
     bool muted_prev;
     /* The ADPCM block decoded last (voice_get_samples): its bytes as read

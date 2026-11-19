@@ -19,16 +19,10 @@ import com.rfandango.haku_x.ui.theme.AppTheme
 import java.io.File
 
 /**
- * A title launched another of its XBEs (XLaunchNewImage: Splinter Cell into
- * each level, Morrowind's New Game): the core lives for one run, so it starts
- * again in a new process with "relaunch", once the old one has gone (else the
- * new activity would come up in the dying process, with its state). This
- * activity, in the app's main process, waits for that, showing the frame the
- * game left on screen (NativeCoreActivity saved it, heldFrame) in a black
- * full-screen window, and starts the core with no transition: the reboot
- * looks like the game's own loading, not like a window closing and another
- * opening. The same for a savestate's load, and for the game started again
- * from its start (EXTRA_RESTART: a new console identity).
+ * Wait in the main process for the previous game process to exit before starting a fresh
+ * core. This handles XLaunchNewImage, loading a save state and restarting from the beginning
+ * after a console identity change. Show the last game frame and suppress the activity
+ * transition so the reboot looks like in-game loading.
  */
 class RelaunchActivity : Activity() {
   private val handler = Handler(Looper.getMainLooper())

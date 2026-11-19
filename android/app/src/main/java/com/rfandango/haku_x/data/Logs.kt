@@ -20,18 +20,13 @@ import java.util.zip.ZipOutputStream
 import kotlin.concurrent.thread
 
 /**
- * The app's logs (Settings, Export logs). An app session is the main
- * process's life; its files are in logs/current: session.txt, app.log (the
- * main process) and one game-<n>-<name>.log per game process. Each process
- * writes its own log from logcat (its pid's lines, everything it logs), so a
- * game's log goes on when Android kills the launcher behind it, and lines
- * reach the file as they come: a crash leaves the file as it was.
+ * An app session lasts for the main process's lifetime. Under logs/current, keep session.txt,
+ * app.log and one game log per game process. Each process streams its own logcat lines, so a
+ * game can keep logging if Android kills the launcher.
  *
- * At the main process's start the previous session is zipped into
- * logs/sessions/<its start>.zip, with why its processes ended (exits.txt,
- * and Android's ANR traces and crash tombstones), and the newest SESSIONS
- * are kept. A game process still running then keeps its log, moved to the
- * new session. An export is one ZIP of those sessions and the one running.
+ * At startup, archive the prior session with exit reasons, ANR traces and tombstones. Move
+ * logs from games still running into the new session and retain the newest SESSIONS archives.
+ * Export collects those archives and the current session in one ZIP.
  */
 object Logs {
   private const val TAG = "hakuX-app"

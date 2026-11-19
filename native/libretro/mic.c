@@ -1,21 +1,12 @@
 /* Copyright (C) 2026-present PortareOS */
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * hakuX native core — the Xbox Live Communicator's microphone in the
- * libretro core (the hakux_communicator option): RetroArch's microphone
- * (RETRO_ENVIRONMENT_GET_MICROPHONE_INTERFACE) into player 1's Communicator
- * (native/dev/xblc.c), read each retro_run.
+ * Feed the RetroArch microphone to player 1's Xbox Live Communicator when hakux_communicator
+ * is enabled. Open at the title's sample rate when it requests microphone packets. Close
+ * after IDLE_RUNS without requests, on core shutdown or when the Communicator disconnects.
  *
- * The microphone is open only while the title reads the Communicator's
- * microphone (in a game's voice chat; not in its menus, nor in a game
- * without voice, nor for the headphone alone): opened as its packets start,
- * at the title's rate (RetroArch resamples to it, the device whatever still
- * differs), and closed once they stop for IDLE_RUNS, as the core stops
- * (nc_lr_mic_stop) and as the Communicator goes. Each retro_run feeds the
- * samples of the time since the last one, so the read doesn't wait on the
- * microphone; what it doesn't give (none, or not yet) is silence. With no
- * microphone (RetroArch has none, or none opens) the Communicator hears
- * silence.
+ * Each retro_run reads one interval of audio without blocking and fills missing samples with
+ * silence. An unavailable host microphone also yields silence.
  */
 #include "native/libretro/libretro_int.h"
 #include "native/dev/usb.h"

@@ -1,11 +1,9 @@
 /* Copyright (C) 2026-present PortareOS */
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/* The libretro core's audio output (native/libretro/audio.c) against a
- * frontend that takes all, part or none of what it is offered: the frames it
- * takes leave the ring, the rest are offered again first, in order, nothing
- * lost, repeated or overwritten. Stereo pairs are numbered (left n, right
- * -n - 1) so any loss, repeat or swap shows. Only the frontend, the core's
- * log and the Communicator (none) are stand-ins. */
+/* Exercise a frontend that accepts all, some or none of a batch. Consumed samples leave the
+ * ring and remaining samples are offered again in order. Number each stereo pair (n, -n - 1)
+ * to detect drops, repeats and channel swaps. Stub only the frontend, logging and the
+ * Communicator. */
 #include "hle_test.h"
 
 #include <stdarg.h>

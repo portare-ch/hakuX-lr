@@ -1,29 +1,16 @@
 /*
- * hakuX native core — the title's cache drives in a savestate (CACHE).
+ * Save the title's Xbox cache partitions (X/Y/Z, Partition3–5) along with the Partition0
+ * cache ownership table. The console reuses the least recently used cache partition, so a
+ * different title can replace it between save and load. Include the utility drive and any
+ * cache drive with an open file. Restore them before reopening files in FILE.
  *
- * The Xbox's three cache partitions (X/Y/Z: Partition3-5) are shared: a
- * title that needs one takes the least recently used and formats it, so a
- * state's title found its cache gone once another game had run (Halo's
- * cache000.map, open as it saved). The state carries the drives its title
- * uses (its utility drive, and any it has a file open on): each file's
- * content goes to the game's blob store next to its states (blobs/, one
- * copy per content: the slots share what didn't change, XXH3-128 names
- * it), and the state lists them; partition 0's head goes too (the cache
- * table that says which title owns which drive). On load the drives become
- * what they were, before the open files are reopened (FILE), whatever the
- * game wrote to them since.
+ * Store each file's content once per game under blobs/, named by its XXH3-128 hash. New blobs
+ * use level-1 gzip at <hash>.gz. Older raw blobs remain readable. The state lists the files
+ * and hashes.
  *
- * A blob is gzip (level 1), <hash>.gz: the stores of the RP5's 9 games went
- * from 4.5 GB to 2.4 GB (GTA San Andreas' 650 MB drive to 21 MB, Dead or
- * Alive 2's to 87 %). Blobs stored before, <hash> as the file was, still
- * load; the hash is always the content's.
- *
- * A file counts as unchanged since it was hashed or restored only if its
- * size, its modification time and its change time (ctime) all are as they
- * were then: a game sets modification times itself (copies keep the disc's,
- * FileBasicInformation), and could rewrite a cache file at its old size and
- * time; the ctime moves with every write and every time set, and no one
- * sets it.
+ * Treat a cached file as unchanged only when its size, mtime and ctime match the snapshot. A
+ * title can preserve mtime while rewriting the file at the same size. ctime catches those
+ * writes and time changes.
  */
 #include "native/kernel/kernel.h"
 #include "native/state/save.h"

@@ -1,8 +1,8 @@
 /*
- * hakuX native core — NV2A register space (0xFD000000, 16 MiB), first cut.
+ * NV2A register space at 0xFD000000 (16 MiB).
  *
- * A register file (reads return what was last written) plus the behavior the
- * XDK's D3D needs, added as the frontier shows it:
+ * Register reads return the last value written unless the device handles
+ * them specially. The XDK's D3D uses the following registers.
  *   PMC_BOOT_0      0x000000  chip identification
  *   PMC_INTR_0      0x000100  pending summary (bit 24 PCRTC, 20 PTIMER), read-only
  *   PMC_INTR_EN_0   0x000140  bit 0: interrupts to the CPU
@@ -103,17 +103,11 @@ static uint64_t g_frame_ns = FRAME_NS;
 static uint64_t g_frame_rem = 20000, g_frame_den = 60000;
 static uint64_t g_last_vblank_ns;     /* when the last vblank came (the raster counts from it) */
 
-/* The panel's vsync (the app's Choreographer, nc_dev_nv2a_display_vsync):
- * when the display's period is a whole multiple of a frame's (60 Hz, 120 Hz),
- * the vblank runs at it. Free running at 59.94 Hz beside a 60 Hz panel, two
- * frames now and then fell in one refresh and one was never shown (JSRF at
- * 60 fps: one a second). Its phase: half a period from where the presenter
- * picks frames up (nc_dev_nv2a_display_pickup), the most either may jitter
- * before a frame is shown twice and the next never. The presenter's loop is
- * paced by its window's buffer queue, not the vsync: on the RP5 it picked up
- * 1-3 ms before vblanks set VSYNC_LEAD before the vsync, and one ~3 ms late
- * pickup skipped a frame (NGB at 60 fps: one every ~20 s). VSYNC_LEAD is the
- * phase until pickups are seen. */
+/* Synchronize guest vblank to the display when its refresh is near a whole multiple of the
+ * guest rate. Free-running at 59.94 Hz on a 60 Hz panel periodically puts two guest frames in
+ * the same refresh. Once the presenter reports pickup timings, put vblank half a guest period
+ * from pickup to maximize jitter tolerance. Until then use VSYNC_LEAD. Pickup timing follows
+ * the window queue and can drift relative to hardware vsync. */
 static uint64_t g_disp_vsync_ns, g_disp_period_ns;
 static int64_t g_pick_off_ns = -1;    /* pickups after a vsync (smoothed, 0..period) */
 #define VSYNC_LEAD   3000000ll
@@ -301,16 +295,14 @@ static void update_irq(void)
 
 uint64_t nc_ke_host_ns(uint64_t guest_ns);  /* native/kernel/ke.c */
 
-/* The alarm interrupt comes when the time's low word reaches ALARM_0: D3D
- * times its vblank work with it in the modes whose vblank it doesn't take
- * from the encoder (Project Zero II's PAL disc, 60 Hz on SCART: its swaps
- * flip at the alarm's vblanks, and with no alarm the first one never did),
- * and its timer callbacks. The ptimer thread, started at the first alarm a
- * title sets, waits for it on the guest's clock, which stands still while
- * the emulation is paused and goes on from a savestate's. An alarm the time
- * passed less than ALARM_LATE_NS ago comes at once, not after the low word
- * wraps (4.3 s): the guest set it late, by its own slowness or ours, and
- * D3D's handler checks the 64-bit time itself. */
+/* PTIMER interrupts when the low word of guest time reaches ALARM_0. D3D uses the alarm for
+ * its callbacks and for vblank work in modes without an encoder-driven vblank, such as
+ * Project Zero II at 60 Hz over SCART.
+ *
+ * Start the PTIMER thread on the first alarm and use the guest clock so pauses and save-state
+ * restores preserve timing. Fire immediately if the deadline passed within ALARM_LATE_NS.
+ * Otherwise a slightly late write would wait for the low word to wrap after about 4.3
+ * seconds. D3D checks full 64-bit time in its handler. */
 #define ALARM_LATE_NS  1000000000u
 #define ALARM_POLL_NS  20000000ull  /* the pause looked at this often */
 static struct {
@@ -338,7 +330,7 @@ static void *ptimer_thread(void *arg)
             pthread_mutex_unlock(&g_alarm.mu);
             nc_pause_wait();
             pthread_mutex_lock(&g_alarm.mu);
-            g_alarm.rearm = true;           /* a savestate's clock and alarm, maybe */
+            g_alarm.rearm = true;           /* Recompute the deadline after a pause or state restore. */
             continue;                       /* recheck quit after nc_dev_nv2a_stop may have set it */
         }
         const uint64_t now = nc_ke_now_ns();

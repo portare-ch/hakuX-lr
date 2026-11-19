@@ -723,10 +723,8 @@ void dsp_run_interpreter(DSPState* dsp, int cycles)
         if (dsp->core.is_idle) break;
     }
 
-    /* FIXME: DMA timing be done cleaner. Xbox enables running
-     * then polls to make sure its running. But we complete DMA instantaneously,
-     * so when is it supposed to be signaled that it stopped? Maybe just wait at
-     * least one cycle? How long does hardware wait?
+    /* FIXME: Measure how long hardware reports DMA running. The interpreter completes the
+     * transfer synchronously but leaves the running bit set briefly so the guest can poll it.
      */
 }
 
@@ -995,7 +993,7 @@ uint32_t dsp56k_read_memory(dsp_core_t* dsp, int space, uint32_t address)
             if (APU_CHECK(address < DSP_XRAM_SIZE)) {
                 return dsp->xram[address];
             } else {
-                return 0x00FFFFFF; // FIXME: What does the DSP actually do in this case?
+                return 0x00FFFFFF; // FIXME: Verify the hardware result for an out-of-range DSP X RAM read.
             }
         }
     } else if (space == DSP_SPACE_Y) {

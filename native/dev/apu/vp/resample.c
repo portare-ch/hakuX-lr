@@ -15,20 +15,12 @@
 #include "resample_sinc.h"
 
 /*
- * Linear-interpolation resampler stub used in place of libsamplerate.
+ * Linear interpolation uses a fixed buffer and compacts whole consumed frames on refill. This
+ * avoids allocation in the refill path. The stereo path uses NEON or SSE2, with a scalar path
+ * for other builds and channel counts.
  *
- * Per-refill malloc/memcpy/free was the bulk of the cost in profiling
- * (PGR2 race, 2026-06-01 ~3.4% host CPU). Replace with a fixed inline
- * buffer + memmove-compact on refill. The lerp inner loop gets a NEON
- * (SSE2 on x86-64) 2-channel specialization; ch=2 is the only used case
- * (vp.c:1255 hardcodes channels=2). Scalar fallback preserved for other
- * channel counts and other builds.
- *
- * Buffer sizing: the only producer is voice_resample_callback which
- * returns at most NUM_SAMPLES_PER_FRAME=32 frames per call. Worst-case
- * residue carried across a refill is < 1 frame (we compact whole
- * frames), so 2 * 32 = 64 frames is a safe upper bound. We use 128 to
- * give comfortable headroom and absorb any future bumps.
+ * voice_resample_callback returns at most 32 frames. Compaction carries less than one
+ * preceding frame into the refill. The 128-frame buffer leaves room for both.
  */
 #define STUB_MAX_CHANNELS 2
 #define STUB_BUFFER_FRAMES 128

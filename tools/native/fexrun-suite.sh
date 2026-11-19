@@ -1,21 +1,15 @@
 #!/system/bin/sh
-# Runs fexrun test suites on the device, in FEX CI's three JIT configurations.
-# Pushed with fexrun to /data/local/tmp/fexrun (FEX suite in tests/, ours in
-# sysops/).
+# Run FEXCore tests on the device. Place this script beside fexrun in /data/local/tmp/fexrun,
+# with the upstream suite under tests/ and local cases under sysops/.
 #
-#   sh fexrun-suite.sh identity|auto|diff|sysops
+# sh fexrun-suite.sh identity|auto|diff|sysops
 #
-# identity: FEX suite, guest addresses are host addresses (baseline B0)
-# auto:     FEX suite, guest memory behind the memory-base register
-# diff:     FEX suite both ways, comparing the full CPU state and every
-#           mapped guest page
-# sysops:   tests/native/sysops in system mode, both ways with --diff, plus
-#           the FEX suite in system mode with --diff
+# identity uses host addresses for guest memory. auto uses the memory-base register. diff
+# compares CPU state and guest pages between them. sysops runs both suites with
+# system-instruction exits enabled.
 #
-# Runs on the small cores at low priority so it doesn't disturb other device
-# work, and never while the hakuX app is up (it shares the phone with the HLE
-# GPU work): checked before every run, exit status 4 if it is. Prints one
-# summary line per run, then the tests that need a look.
+# Run at low priority on the small cores. Exit 4 if the app is running. Print each run's
+# summary and non-passing cases.
 app_running() {
   pidof com.rfandango.haku_x.debug:native >/dev/null || pidof com.rfandango.haku_x >/dev/null ||
     dumpsys window | grep -m1 mCurrentFocus | grep -q haku_x

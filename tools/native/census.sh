@@ -1,12 +1,9 @@
 #!/system/bin/sh
-# Boots every disc image in a directory with xboxrun (to its first kernel
-# call) and prints the frontier and kernel-import lines for each, for
-# tools/native/imports.py. Pushed with xboxrun to /data/local/tmp/native.
+# Boot each disc image with xboxrun to its first kernel call. Print the frontier and
+# kernel-import lines for tools/native/imports.py. Deploy beside xboxrun under
+# /data/local/tmp/native. Exit 4 if the app is running before a title starts.
 #
-#   sh census.sh [/sdcard/ROMs/xbox]
-#
-# Never runs while the hakuX app is up (it shares the phone with the HLE GPU
-# work); checked before every title, exit status 4 if it is.
+# sh census.sh [/sdcard/ROMs/xbox]
 app_running() {
   pidof com.rfandango.haku_x.debug:native >/dev/null || pidof com.rfandango.haku_x >/dev/null ||
     dumpsys window | grep -m1 mCurrentFocus | grep -q haku_x

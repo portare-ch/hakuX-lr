@@ -1,16 +1,12 @@
 /*
- * hakuX native core, app front end — Vulkan layers over the custom driver
- * (debug). adrenotools hands the core Turnip's own vkGetInstanceProcAddr,
- * past Android's Vulkan loader, so the GPU debug-layer settings never reach
- * it. With debug.hakux.vkvalidation=1 at launch the Khronos validation
- * layer (debug APKs ship it beside the core) goes in front of the driver
- * here, which does the loader's part: the layer's link in the instance and
- * device create infos. A loader also writes its dispatch table into the
- * first word of each dispatchable object, which the layer files its state
- * under; Turnip reads that word itself (a key written there crashed its
- * vkGetInstanceProcAddr), so the driver's value stays: one for every object,
- * which the layer's separate instance and device maps take, the core making
- * one instance and one device.
+ * Insert the Khronos validation layer for a custom Vulkan driver when
+ * debug.hakux.vkvalidation=1 at startup. adrenotools bypasses Android's Vulkan loader, so
+ * supply the layer links in the instance and device create chains here. Debug APKs ship the
+ * layer next to the core.
+ *
+ * Keep Turnip's first dispatchable-object word. Overwriting it with a loader dispatch pointer
+ * crashed vkGetInstanceProcAddr. The validation layer's separate instance and device maps
+ * work with the shared dispatch key because the core creates one instance and one device.
  */
 #ifndef VK_NO_PROTOTYPES                /* volk's targets define it */
 #define VK_NO_PROTOTYPES

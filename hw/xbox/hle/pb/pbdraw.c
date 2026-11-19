@@ -584,14 +584,13 @@ static uint32_t tile_pitch(uint32_t bytes);
  * modes of that width are (640 / 720: 480 lines, 576 at 50 Hz; 1280: 720;
  * 1920: 1080). False when none was set or the pitch fits no such width;
  * *seq: the modes set so far. */
-/* An SD mode's frame buffer is 480 or 576 lines, which its mode word doesn't
- * tell: bit 30 (50 Hz) marks PAL modes whose buffer is 480 lines as well,
- * the encoder scaling it (Dead or Alive 3's 0x58040415, 720 x 480). The
- * height the title draws at (cur), when it is one of them; half of it when
- * that is (a back buffer supersampled 2x down, Hunter's 640 x 960); by the
- * refresh only else. Taken as 576, DOA3's 480-line targets were made 576
- * lines (linear_size), their write-backs ran 96 lines past them into its
- * push buffer, and the FMV hung on its faults. */
+/* An SD framebuffer can have 480 or 576 lines. The mode word's 50 Hz bit alone cannot
+ * distinguish them. Some PAL modes, including DOA3's 0x58040415, scale a 480-line input in
+ * the encoder.
+ *
+ * Use the current draw height when it matches, or halve a vertically supersampled height such
+ * as Hunter's 960. Otherwise infer the height from the refresh rate. Treating DOA3's 480-line
+ * targets as 576 lines wrote past them into the push buffer and hung its FMV. */
 static uint32_t sd_height(uint32_t cur, unsigned hz)
 {
     if (cur == 480 || cur == 576) {
@@ -865,16 +864,13 @@ static uint64_t d16_rows_hash(const HleSurfDesc *d)
     return XXH3_64bits_digest(&state);
 }
 
-/* The object for a surface (memory, format, pitch, size), made the first
- * time; 0 if none can be. A linear surface's height is only what its clip
- * reaches (the NV2A has none): a view of the top rows of one already made,
- * same memory, format, pitch and width, is that one, the tallest (its
- * pixels are the same bytes). DOA2 Ultimate draws its character select's
- * model into a 606 x 232 window of its back buffer: an object 311 rows high
- * of its own, drawn and never shown, the model missing. The width stays
- * part of the identity: it comes from the pitch or the display (linear_size),
- * and DOA2's supersampled 1440-wide fight buffer in the same 1536-pixel
- * pitch, shown as the wider one, had 96 never drawn columns. */
+/* Find or create a surface object for this memory, format, pitch and size. Return zero if
+ * creation fails. A linear surface's clip gives a minimum height. Reuse the tallest matching
+ * surface if the new surface covers its top rows. Otherwise a view like DOA2 Ultimate's
+ * character-select window can render into an image the game never presents.
+ *
+ * Keep width in the key. DOA2's 1440-pixel fight buffer shares a 1536-pixel pitch with a
+ * wider view, whose rightmost 96 columns would be undrawn. */
 static uint32_t object(uint32_t pa, uint32_t xfmt, uint32_t pitch, uint32_t w, uint32_t h)
 {
     uint32_t best = 0;
@@ -965,17 +961,13 @@ static uint32_t object(uint32_t pa, uint32_t xfmt, uint32_t pitch, uint32_t w, u
     return o->id;
 }
 
-/* object() for a linear target whose swizzled twin (alt: that format) may
- * already have an object over the same memory and size: that one. D3D
- * clears a swizzled target through a linear view of its memory (a fill is
- * the same in either order): Conker's 256 x 256 bloom target was never
- * cleared, and the pixels its bright pass alpha-tests away kept every
- * earlier frame's glow. Only that way round. A texture over the object
- * addresses it as its own format says, linear by texel and swizzled
- * normalized, not as the object is laid out (vk/draw.c stage_slot): Fable
- * blurs a silhouette drawn through the linear view with a linear texture,
- * and Conker's character shadows are swizzled textures (by texel, they
- * read one white corner). */
+/* Reuse a matching swizzled target when D3D binds a linear view of its memory for a clear. A
+ * fill is layout-independent. Without the shared image, Conker's bloom clear missed the
+ * swizzled target and old glow accumulated.
+ *
+ * The reverse alias is separate. Sampling uses the texture's declared addressing mode
+ * (vk/draw.c stage_slot). Fable needs texel coordinates for linear blur textures. Conker
+ * needs normalized coordinates for swizzled shadows. */
 static uint32_t object_view(uint32_t pa, uint32_t xfmt, uint32_t alt, uint32_t pitch, uint32_t w,
                             uint32_t h)
 {
@@ -1018,18 +1010,10 @@ static void ds_written(void)
 }
 static bool edge_dirty(uint32_t page);
 
-/* A linear target's memory rarely starts and ends on a page: its first and
- * last page hold other data too. Judged by those pages' dirty bits alone, a
- * CPU write to that data counted as a write to the target, and its rows
- * were uploaded from memory, which holds no pixels the GPU drew (the NV2A's
- * targets live in images here): Midnight Club 3's 384 x 240 glow target
- * shares its pages with data the CPU writes every frame, and when such a
- * write fell between the glow passes and the pass that adds the glow over
- * the scene, the scene was replaced by the memory's stale white for a frame
- * (sporadic white flashes, the HUD drawn over them). As textures do
- * (tex_written): the pages wholly inside the target count by their dirty
- * bits, the first and last by the target's own bytes on them against their
- * hashes at the last sync. */
+/* Check dirty bits for pages fully covered by the target and hash only its bytes on shared
+ * edge pages, as tex_written does. A neighbouring CPU write must leave the GPU image intact.
+ * In Midnight Club 3 a shared page beside the 384 x 240 glow target caused intermittent white
+ * flashes when stale RAM replaced the current image between glow passes. */
 static void span_edges_set(uint32_t lo, uint32_t len, uint64_t h[2])
 {
     const uint32_t hi = lo + len, p0 = lo & ~4095u, pl = (hi - 1) & ~4095u;
@@ -1064,15 +1048,13 @@ static bool obj_written(const PbObj *o)
     return span_written(o->d.pa, o->d.pitch * o->d.h, o->edge_hash);
 }
 
-/* A texture was defined from [pa, pa + len): the memory holds the title's
- * data there, newer than the images of the targets over it drawn before
- * (memory D3D reused). Those images are superseded until drawn again: no
- * writeback (savestate, kept memory, front buffer) puts them over the data,
- * nor a depth buffer's readback before a copy from that memory. The memory's dirty bits can't tell: the definition consumes
- * them. Conker
- * draws a 640 x 480 target at boot and later loads its menu's textures into
- * that memory; a savestate wrote the old image back over them, and after a
- * load the save screen's frame and pages sampled it as DXT1 (rainbow). */
+/* Defining a texture from [pa, pa + len) supersedes overlapping target images until they are
+ * drawn into again. Keep the new texture data through save, persist and display writeback or
+ * a depth readback before a copy. The definition consumes the dirty bits, so it must also
+ * mark the overlap here.
+ *
+ * Conker reuses a 640 x 480 boot target for menu textures. Saving used to write the old image
+ * over those textures, which the menu then sampled as DXT1. */
 static void mem_supersedes(uint32_t pa, uint32_t len)
 {
     for (unsigned i = 0; i < g_pd.nobjs; i++) {
@@ -1177,20 +1159,14 @@ static void wb_note(uint32_t pa, uint32_t len, uint64_t v)
     hle_tl_land_note(v, wb_landed, k);
 }
 
-/* A small linear colour target the frame moves off goes back into guest
- * memory with the next submission (the NV2A renders into memory, and a
- * title may read a target's texels without a lock once its fence passes):
- * Forza averages its scene into an 80 x 30 L8 target and reads it on the
- * CPU for its exposure; reading what was there, it drew its races far too
- * bright. A CPU access to the memory waits for the copy (the barrier).
+/* When switching away from a small linear colour target, write it back with the next
+ * submission. Guest RAM access waits for the copy. Forza reads an 80 x 30 L8 target on the
+ * CPU to choose exposure after the fence.
  *
- * A target the CPU wrote goes back too, whatever its size: a title that
- * uses a target's memory from the CPU may read it as well. Splinter Cell
- * Chaos Theory reads its loading picture's TGA pixels into a frame buffer
- * and, leaving the loading screen, copies its front buffer into the texture
- * it fades the menu in from; the memory still held the TGA's bytes, and four
- * small upside-down copies of the picture faded in across the top of the
- * screen. HAKUX_HLE_PB_CPUWB=0: small targets only (A/B). */
+ * Also write back targets the CPU has previously written, regardless of size. Chaos Theory
+ * copies its front buffer for a menu transition after loading a TGA into the same memory.
+ * Without the updated image it copied the old TGA bytes. HAKUX_HLE_PB_CPUWB=0 limits
+ * writeback to small targets for comparison. */
 static uint64_t writeback_ex(uint32_t id, bool force);
 
 /* Avoid copying an unchanged target over memory the game may have reused. */
@@ -1256,15 +1232,10 @@ static uint64_t writeback_ex(uint32_t id, bool force)
     return v;
 }
 
-/* A D24S8 depth target bound over the memory of a 32-bit colour target of
- * its size: the colour pass's words are the depth buffer's to the NV2A.
- * Mercenaries copies its scene depth out as colour into a target and then
- * depth-tests its sky dome against that memory as a depth buffer (and
- * fades the dome by it through a texture); with the two images apart the
- * dome failed against an empty depth buffer, the sky stayed black and
- * geometry smeared over it. The back end converts the colour image into
- * the depth image (HLE_OP_ZWRITE) when the colour one was written later,
- * as D3D mode's depth views do. */
+/* A D24S8 target can reuse the memory of a same-sized 32-bit colour target. If the colour
+ * image was written later, convert its words to depth and stencil with HLE_OP_ZWRITE.
+ * Mercenaries stores scene depth as colour, then binds those words as depth to test and fade
+ * its sky dome. */
 static void zwrite_from_colour(uint32_t ds)
 {
     const HleSurfDesc *d = object_desc(ds);
@@ -1478,20 +1449,14 @@ static void sync_rt(void)
     }
 }
 
-/* Before the first clear or draw into the target since its bind, a swap or
- * the end of a pass (the decoder caught up with PUT; what the guest does
- * before its next kick comes before the commands it kicks): what the CPU
- * wrote there goes in first, so that the GPU's writes land over it, as the
- * NV2A's do in memory. Checked at the swap and the display start only, the
- * writes went over the draws before them: Splinter Cell Chaos Theory reads
- * its logo's 8-bit TGA pixels into the back buffer between two kicks of a
- * frame (the second one draws over them, and its flip is a trap whose
- * handler starts the display there), and the bytes covered the top quarter
- * of the frame as four small upside-down copies. Once a pass that draws,
- * not a draw (rt_cpu_sync hashes the target's dirty edge pages). A target
- * whose memory is newer than its image another way (a copy into it, a twin's
- * landing, a device: coh_mem_newer) gets that memory too; full: the write is
- * a clear of all of it, which needs none of it. */
+/* Upload newer guest memory before the first draw or partial clear after a target bind, swap
+ * or pass boundary. This puts CPU writes made before a kick in the right order relative to
+ * GPU commands. Do the check once per pass because rt_cpu_sync hashes shared pages. Copies,
+ * other images' readbacks and device writes can also make memory newer (coh_mem_newer). A
+ * full clear can skip the upload.
+ *
+ * Chaos Theory writes TGA bytes between two kicks. Waiting until the swap to upload them can
+ * overwrite the second kick's draws with the raw bytes. */
 static void rt_first_write(bool full)
 {
     if (g_pd.rt_fresh) {
@@ -1504,13 +1469,9 @@ static void rt_first_write(bool full)
     }
 }
 
-/* Before the first write ever into the bound target, a draw or a clear of
- * part of it (its memory about to be uploaded into its image: never drawn,
- * the memory is all there is): what newer the other images over that
- * memory hold lands there first (coh_land_over). At the draw's start and the
- * clear's, not in rt_first_write: a draw's comes after its arena blocks,
- * and a landing kicks and waits; with the GPU idle the arena starts again
- * at 0, over them. Once an object: never drawn into, its memory newer. */
+/* Before the first draw or partial clear of a new image, write back newer overlapping images.
+ * Do this before allocating the draw's arena blocks. The writeback can submit all work and
+ * let the arena restart at offset zero. */
 static void rt_first_land(bool full)
 {
     PbObj *o = g_pd.rt_fresh && !full ? obj_of(g_pd.rt) : NULL;
@@ -1520,20 +1481,14 @@ static void rt_first_land(bool full)
     }
 }
 
-/* A float depth buffer (CONTROL0 bit 12) holds the depth itself: D3D's range
- * is 0 .. 1e30 for F24S8 and 0 .. 511.9375 (the format's maximum) for F16,
- * its far plane what it sets as CLIP_MAX. The image (D32_SFLOAT) holds it
- * scaled into 0 .. 1, so a vertex on the far plane does not clip. Unscaled,
- * Touge R's scene (F24S8, the far plane at 1e30) clipped or clamped to 1.0
- * against its clear at 0.0 and failed its LESSEQUAL test: the screen black
- * under the HUD. F16's scale is 1 / its maximum, as the shadow-buffer
- * compares read it (psh.c k_max): the largest whose product with the
- * maximum stays within 1.0. F24's is 2^-100 (HLE_ZFLOAT24_EXP, 1e30 at
- * 0.79): a power of two, so the image's value is the depth's own mantissa
- * and the read back (vk/zread.c) gets the word that was cleared or drawn.
- * Over 1e30, the product and the read back's each rounded: 1.8 million of
- * the clear words came back one higher (0xE193E5, D3D's 0.5e30, as
- * 0xE193E6). */
+/* Scale floating-point depth into [0, 1] for D32_SFLOAT when raw float depth is unavailable.
+ * D3D sets the far plane with CLIP_MAX, up to 1e30 for F24S8 and 511.9375 for F16. Without
+ * scaling, Touge R clipped or failed LESSEQUAL against zero.
+ *
+ * For F16, use the reciprocal of 511.9375 rounded down as needed to keep the product at most
+ * 1.0. For F24, use 2^-100. Power-of-two scaling preserves the mantissa for readback
+ * (vk/zread.c). Dividing by 1e30 could round a clear word up, for example 0xE193E5 to
+ * 0xE193E6. */
 static float zfloat_scale(bool z24)
 {
     static float s;
@@ -1553,14 +1508,11 @@ static float zfloat_scale(bool z24)
     return s;
 }
 
-/* A float depth buffer's clear value (F24: 8-bit exponent, 16-bit mantissa;
- * F16: 4-bit exponent biased 7, 12-bit mantissa) as the top of the depths
- * it stands for: the NV2A tests at the format's precision, and a far-plane
- * vertex lands on D3D's far clear, short of 1e30 by the mantissa it drops.
- * A few of the image's steps under the very top: the readback adds two
- * before it drops the mantissa (vk/zread.c, for depths interpolated a step
- * low), which from the top carried into the word, and a buffer cleared to
- * 0x874500 read back 0x874501. */
+/* Decode F24 (8 exponent bits, 16 mantissa bits) or F16 (4 exponent bits with bias 7, 12
+ * mantissa bits) near the top of the interval represented by the clear word. This lets a
+ * far-plane vertex match D3D's far clear at NV2A precision. Leave room for readback to add
+ * two float steps before truncating. Starting at the very top turned 0x874500 into 0x874501
+ * on readback. */
 static float zfloat_clear(uint32_t v, bool z24)
 {
     if (!v) {
@@ -1765,15 +1717,11 @@ static void clear(uint32_t flags)
 
 static void front_fill(uint32_t pa, uint32_t len);
 
-/* After a savestate's load the device's display is the first target bound
- * (device()), which a frame resumed midway names: Burnout 3's was a 64 x 32
- * one, and every frame went to a 64 x 32 display stretched to the screen. A
- * boot binds the back buffer first (CreateDevice). The first frame swapped
- * after the load is the display's: its logical size (the antialiasing scale
- * off) resizes the display, once. Only for a state without its display
- * (v1), and not a display the video mode sized: the target bound at a swap
- * needn't be the frame (swap), and Double-S.T.E.A.L 2's, 32 x 16, made a
- * 32 x 16 display after a load, every frame black again. */
+/* For a v1 save state with no saved display size and no size from the video mode, set the
+ * display size from the first frame swapped after load. Use its logical size without the
+ * antialiasing scale. The first surface bound after loading can be an off-screen target, such
+ * as a 64 x 32 target in Burnout 3. The surface bound at the swap can differ from the one
+ * being presented. */
 static void restored_display(void)
 {
     g_restored_display = false;
@@ -1796,17 +1744,10 @@ static void restored_display(void)
     g_pd.disp_h = h;
 }
 
-/* After a swap the frame on screen is the GPU's image, and its memory is
- * older. The NV2A draws into memory and scans it out: a title that draws
- * into its front buffer on the CPU (Midtown Madness 3's loading prompt,
- * GetBackBuffer(-1) and LockRect, in a corner of the faded menu) writes over
- * the frame there, and one may read it (Forza copies the background behind
- * its loading spinner out of it, after BlockUntilIdle, and blends the turbo
- * over the copy: from memory the GPU never wrote, a black square). The
- * memory has no guest access meanwhile: the first read or write has the
- * frame copied into it first (front_fill). Titles that leave their frame
- * buffers alone pay nothing once those are protected (mem/barrier.c keeps
- * them so until they are touched). */
+/* The front image is newer than guest RAM after a swap. Protect the range and write it back
+ * with front_fill on the guest's first read or write. This lets the CPU draw over the visible
+ * image (Midtown Madness 3's loading prompt) or copy part of it (Forza's loading spinner
+ * background). Titles that never access these buffers keep them protected between swaps. */
 static void front_stale(const PbObj *o)
 {
     const HleFmtInfo *fi = o && o->d.pitch && !o->cube ? hle_fmt_info(o->d.xfmt) : NULL;
@@ -1816,22 +1757,15 @@ static void front_stale(const PbObj *o)
 
 static void shown_part(const PbObj *o, uint32_t ax, uint32_t ay, uint32_t *w, uint32_t *h);
 
-/* The frame pace (pbmode.c's decode loop stalls on it): without it the
- * guest's push ring holds however far the renderer is behind (Sega GT 2002
- * on a Mali-G52: ~25 frames, the flip reaching the display 1030-1130 ms
- * later) and the pad is read by a simulation the screen shows a second
- * later. After a swap the decoder stops, as at a FLIP_STALL, until the GPU
- * has finished the swap `depth` before it; the ring fills, and the guest,
- * stalling on ring space in its own frame loop, throttles itself to the
- * render pace. Two back by default: one frame queued behind the one the
- * GPU runs, so it never runs dry at the swap. The wait is a timeline note
- * that kicks the decoder, which meanwhile serves the guest's stores and
- * render-target reads (it is stalled, not blocked). The depth is the
- * front end's (hle_host_frame_pace: the libretro core's Frame Pacing, off
- * by default); debug.hakux.pace (0 off, 1-3 swaps back) overrides it, read
- * at each swap. Each swap also counts how far the decoder is ahead of the
- * GPU, pacing on or off, for the diagnostics' line (hle_pbd_pace_stats).
- * Reset with the decoder (hle_pbd_reset). */
+/* Frame pacing stalls the decoder after a swap until the GPU finishes the swap depth frames
+ * earlier. As the ring fills, the guest's frame loop slows to the render rate. A depth of two
+ * keeps one frame queued behind the active one. With pacing off, Sega GT 2002 on a Mali-G52
+ * could queue about 25 frames and display input over a second later.
+ *
+ * A timeline note wakes the decoder. It can still handle guest writes and readbacks during
+ * the stall. The front end controls the depth (libretro Frame Pacing defaults to off).
+ * debug.hakux.pace overrides it per swap (0 disables pacing, 1–3 sets the depth). Record the
+ * lead in hle_pbd_pace_stats even when pacing is off. */
 #define PACE_RING 64                    /* swaps the lead is counted over (pace.h) */
 static struct {
     uint64_t swap[PACE_RING];           /* the last swaps' values, by g_pd.swaps */
@@ -2060,14 +1994,10 @@ static void fps_log(void)
     }
 }
 
-/* The part of object o the display shows: as many of its pixels from its top
- * left as the display has (ax x ay samples each: an antialiased target's),
- * as the NV2A's scanout reads them; it scales nothing. A frame buffer made
- * taller than the frame (a surface as wide as the display is as tall as it,
- * and Hunter: The Reckoning - Redeemer's display was its 640 x 960 back
- * buffer until it set its video mode) shows its frame, not all of itself
- * squeezed into the display. Whole when it is no bigger, or while the
- * display's size is a guess (no video mode known: the first target bound). */
+/* Select the top-left logical display area from the surface. Account for ax x ay samples per
+ * antialiased pixel. Scanout crops taller buffers rather than shrinking them, as with
+ * Hunter's 640 x 960 surface. Use the full surface if it fits or the display size came from a
+ * provisional target instead of a known video mode. */
 static void shown_part(const PbObj *o, uint32_t ax, uint32_t ay, uint32_t *w, uint32_t *h)
 {
     const bool crop = o && g_disp_moded && g_pd.disp_w && g_pd.disp_h;
@@ -2669,17 +2599,10 @@ static bool face_target(const PbObj *o, uint32_t pa, uint32_t w, uint32_t bytes)
            (!o->d.pitch || o->d.pitch == w * bytes);
 }
 
-/* A cube texture (format code, w x w) over the memory of six face targets
- * (pa + face * stride): an image of its own whose faces those targets
- * become, views into it (as D3D mode's cube render targets), so what the
- * faces render is what the cube samples. Every target over a face's memory
- * becomes its view, whatever its layout, as a 2D texture over a target's
- * memory samples its image (texture). Made once; 0 when a face has no
- * target. Forza renders its cars' reflection cube this way; sampled as
- * face 0's 2D image, the cars' glass and roofs came out white. Sega GT
- * 2002's sun cube for its cars' highlights is cleared black each frame
- * through linear targets (five faces) and its sun drawn into the sixth
- * swizzled: with swizzled faces only, no cube, and the cars were white. */
+/* Create one cubemap image and make each matching render target a view of face f at pa + f *
+ * stride. Accept both linear and swizzled targets, and return zero if any face lacks a
+ * target. Forza renders car reflections into these views. Sega GT 2002 clears five faces
+ * through linear views and draws the sun into the swizzled sixth face. */
 static uint32_t cube_of_targets(uint32_t pa, uint32_t code, uint32_t w, uint32_t stride)
 {
     for (unsigned i = 0; i < g_pd.nobjs; i++) {
@@ -2752,25 +2675,15 @@ static const HleSurfDesc *object_desc(uint32_t id)
     return NULL;
 }
 
-/* A blit from a linear render target into another, or into memory with none
- * (one made there with the source's format, which a texture over that
- * memory then samples): the GPU's copy of the images, at their scale, the
- * memory left as it is. Its rows there would be the source's memory's, older
- * than its image: Otogi 2 blits its blur target back over the blur's source
- * between passes, and copies its frame for the colour passes; from the
- * memory's rows, its glow drew black. A destination whose image is newer
- * than its memory is guarded (coh_drawn). Each image takes its memory's
- * newer bytes first (the CPU's, a copy's: coh_first_write; the
- * destination's, unless the copy covers all of it).
+/* Blit between linear render-target images at their render scale without writing guest RAM.
+ * Create a destination image with the source format if needed. Upload newer guest bytes
+ * before copying from either image, except when the copy fully overwrites the destination.
+ * Guard the destination after the copy. Otogi 2 needs the current image for its blur passes.
  *
- * False: the copy is memory's (hle_pbd_copy_begin), the CPU's writes into
- * the targets there gone into their images first (rt_cpu_sync). A swizzled
- * target's memory is a block of bytes to the 2D engine, its pixels not where
- * the blit's rows say, read or written. D3D's CopyRects on swizzled surfaces
- * does that: Morrowind copies its inventory's character out of its target
- * (cleared red) and back, keying the red out on the CPU in between; as image
- * copies, the character came back on red, a black band over its head (the
- * copy's 4096 x 64 rows into the 256 x 256 target). */
+ * Return false when the caller must copy guest memory with hle_pbd_copy_begin. Synchronize
+ * CPU writes first. The 2D engine sees swizzled targets as bytes, so their rows cannot be
+ * copied as image pixels. Morrowind relies on byte copies to key the red background out of
+ * its inventory character. */
 bool hle_pbd_blit_images(uint32_t sbase, uint32_t sp, uint32_t dbase, uint32_t dp, uint32_t bpp,
                          uint32_t ix, uint32_t iy, uint32_t ox, uint32_t oy, uint32_t w, uint32_t h)
 {
@@ -2967,17 +2880,12 @@ static int cmp_u64(const void *a, const void *b)
     return x < y ? -1 : x > y;
 }
 
-/* The table full: the quarter of its textures checked longest ago go, their
- * images with them, and the rest are placed again (open addressing has no
- * deletion). Keys of memory a title has reused piled up until every texture
- * went at once, and the working set was defined again over the next frames.
- * None checked since the draw being built began (draw_epoch: a wait for
- * a texture's texels kicks, and the epoch moves between its stages) goes:
- * that draw may hold its id.
- * Table full and every texture checked this epoch: all go (tex_flush).
- * Past the budget only (full false), none goes then and the budget is
- * overshot until the epoch ends. Fewer than four: the oldest, if cold.
- * False: none went. */
+/* Evict the oldest quarter of the texture cache and rebuild the open-addressed table around
+ * the remaining entries. For fewer than four entries, try to evict the oldest one. Protect
+ * textures checked since draw_epoch because the current draw may still hold their IDs.
+ *
+ * If all entries belong to this draw and the table is full, flush it. If only the memory
+ * budget was exceeded, defer eviction until the epoch changes and return false. */
 static bool tex_evict(bool full)
 {
     static uint64_t when[TEX_SLOTS];
@@ -3143,17 +3051,10 @@ static uint32_t zread(uint32_t pa, uint32_t w, uint32_t h, const uint8_t map[4],
     if (!src) {
         return 0;
     }
-    /* the memory's last writer: a colour target bound there after the depth
-     * buffer holds the texels the texture reads. Oddworld copies its scene
-     * into a 640 x 480 colour target and binds the same memory as a depth
-     * buffer for a later pass; its composite then sampled that pass's depth
-     * (cleared: 0xFFFFFF00, yellow as A8R8G8B8) instead of the scene, and the
-     * frame went yellow behind the level's loading hint. Or one written
-     * there since the depth buffer last was (a draw, clear or blit): Splinter
-     * Cell Chaos Theory's thermal vision blits its frame over its depth
-     * buffer and shimmers it from there; the depth's bytes came out as
-     * green / yellow / red contour bands. That target's texels are read in
-     * the texture's byte order (tex_order: Mercenaries' sky) */
+    /* For a texture lookup, prefer an overlapping colour target if it was bound or written
+     * after the depth target. A clear or blit also counts as a write. This preserves
+     * Oddworld's scene composite and Chaos Theory's thermal-vision colour data in reused
+     * depth memory. Sample the colour target using the texture's byte order (tex_order). */
     /* Copy readback already checked overlapping writers. A later bind
      * alone only matters to the texture lookup. */
     for (unsigned k = 0; !want && k < g_pd.nobjs; k++) {
@@ -3202,17 +3103,11 @@ static uint32_t zread(uint32_t pa, uint32_t w, uint32_t h, const uint8_t map[4],
     return g_pd.zr[i].id;
 }
 
-/* A texture's span starts and ends inside pages it may share with other
- * data the CPU rewrites (dynamic vertices, other resources). Checked by the
- * pages' dirty bits alone, at every use, such a page was write-protected
- * again by each draw and written by the CPU before the next: a host fault a
- * page a draw and the texture defined (uploaded) again each time; Burnout 3
- * redefined ~90 textures a frame and took ~14k faults a second. Instead the
- * pages wholly inside the span count by their dirty bits; the first and last
- * by the span's bytes on them against their hashes at definition. A dirty
- * edge page is left writable (no fault per write), and its bytes compared at
- * each use: XXH3 (NEON), as a serial multiply chain they were ~22% of the
- * decoder in a Burnout 3 race. */
+/* Use dirty bits for pages fully inside the texture and hash the texture's bytes on shared
+ * edge pages. Leave dirty edge pages writable so unrelated CPU writes do not trigger another
+ * texture upload or fault on each draw. Burnout 3 used to redefine about 90 textures per
+ * frame and fault about 14,000 times per second. XXH3 with NEON replaces the serial hash,
+ * which took about 22% of decoder time in one race. */
 static uint64_t span_hash(uint32_t pa, uint32_t len)
 {
     const uint8_t *m = hle_pa_ptr(pa, len);
@@ -3281,17 +3176,11 @@ typedef struct PalHash {
 } PalHash;
 static PalHash g_pal_hash[PAL_HASHES];
 
-/* A linear texture over memory a colour target with its pitch and texel size
- * covers from an earlier address (a part of it, past its first row or texel):
- * that part of the target, copied by the GPU into the texture's image (the
- * object there, dst, else a new one) when the target was drawn after the
- * image was last written, before the draw that samples it (the NV2A reads
- * the memory before the draw writes it). Breakdown draws its 640 x 448 scene
- * at row 16 of a 640 x 480 frame buffer, into a target of its own there or
- * the frame buffer clipped to it, and samples it from row 16 for its post
- * pass: from memory, which holds nothing the GPU drew, or the target there
- * not drawn this frame, the pass painted the scene black under its HUD. 0:
- * no such target. */
+/* If the texture starts inside an earlier colour target with the same pitch and texel size,
+ * copy that region into the texture image before sampling it. Copy only when the source
+ * target was written after the destination image. Create the destination if needed. Breakdown
+ * samples its 640 x 448 scene at row 16 of a 640 x 480 frame buffer for a post-processing
+ * pass. Return zero if no source target matches. */
 static uint32_t target_part(uint32_t pa, uint32_t code, const HleFmtInfo *fi, uint32_t pitch,
                             uint32_t w, uint32_t h, PbObj *dst)
 {
@@ -4009,15 +3898,12 @@ bool hle_pbd_vis_report(uint32_t pa)
     return true;
 }
 
-/* ---- memory kept across a quick reboot ----
- * D3D's PersistDisplay copies the frame on screen into a contiguous surface
- * (CopyRects: a blit, into an image of that memory here) and persists it for
- * the next title, which the core boots afresh with the persisted memory
- * restored (native/kernel/mm.c). Before that the images over the memory go
- * back into it, the last writer last: Splinter Cell Chaos Theory draws its
- * mission's loading screen over the menu's last frame; restored from memory
- * the GPU never wrote, it was black around the loading video. Requests come
- * from the guest's thread, the decode thread serves them when it is idle. */
+/* Preserve rendered frames across a quick reboot.
+ *
+ * D3D's PersistDisplay blits the front buffer to contiguous memory. Before the next XBE
+ * boots, write overlapping render images back in write order so the newest pixels survive
+ * (native/kernel/mm.c). Chaos Theory uses this frame as the background of its mission loading
+ * screen. The guest thread requests the copy and the decoder services it when idle. */
 #define KEEP_MAX 8
 static struct {
     uint32_t pa[KEEP_MAX], len[KEEP_MAX];
@@ -4033,15 +3919,11 @@ void hle_pbd_keep(uint32_t pa, uint32_t len)
     __atomic_store_n(&g_keep.req, r + 1, __ATOMIC_RELEASE);
 }
 
-/* The colour images over [pa, end) a draw, clear or copy wrote, back into
- * guest memory, in the order they were written: a target the coherence
- * keeps by its landing (coh_land, none when its memory is the newer), the
- * other linear ones' rows with the submission that goes next (*lv: the
- * latest value, a kick sends them). gpu_newer (a savestate's, over all of RAM): only
- * those whose memory the CPU hasn't written since the GPU did; the decoder
- * keeps objects after a title stops drawing into their memory, and one
- * written back over the data the title keeps there now corrupted it (PGR2
- * read a NULL pointer right after a save). Returns how many. */
+/* Write colour images overlapping [pa, end) back to guest RAM in write order. Use coh_land
+ * for tracked targets and queue row copies for other linear targets. Update *lv with the
+ * latest timeline value. With gpu_newer, used by save states, skip targets whose memory the
+ * CPU has overwritten. PGR2 could read a NULL pointer when an old image overwrote recycled
+ * guest memory. Return the number of targets queued. */
 static unsigned writeback_range(uint32_t pa, uint32_t end, bool gpu_newer, const char *what, uint64_t *lv)
 {
     unsigned n = 0, kept = 0;
@@ -4907,16 +4789,10 @@ static uint32_t carry_take(float carry[ATTRS][4])
     return mask;
 }
 
-/* A colour target whose memory a vertex array starts in: the array is the
- * target's pixels (nxdk_pgraph_tests' Surface as vertex array renders the
- * colours a later draw's diffuse stream reads). Its image lands in its
- * memory before the draw's data is taken, as a texture of another layout
- * has it land (tex_land); a wait, so before the draw allocates anything.
- * Arrays start outside every target otherwise: a compare with the range
- * over all of them, then with each target's own, listed when the targets or
- * the object slots change. (Inside [lowest, highest) lie many titles' vertex
- * buffers too: NBA Inside Drive 2003's draws asked every target, its format
- * and length looked up, about every array.) */
+/* Write back any colour target containing the start of a vertex array before taking the
+ * draw's data or allocating arena space. Surface as vertex array in nxdk_pgraph_tests reads
+ * vertex colours rendered by an earlier draw. Cache the target ranges when their slots
+ * change, and use their combined bounds to skip the scan for unrelated arrays. */
 static void vb_land(void)
 {
     static uint64_t key = ~0ull;
@@ -5521,44 +5397,26 @@ void hle_pbd_method(uint32_t m, uint32_t v)
     }
 }
 
-/* ---- render targets' memory against their images (coh_*) ----
- * The NV2A draws into memory; here a colour target's draws land in its
- * image, and its memory keeps what it held. A target knows when the two
- * last matched (synced, a written value) and how its memory was then
- * (CohSnap: the writes reported to its pages, mem/barrier.c). Every writer
- * of guest memory reports its writes (the guest's first-write faults, the
- * host's and the devices', the decoder's copies, the landings below), so
- * its memory is newer than its image once those counts moved (on a page it
- * shares, its own bytes there changed: coh_mem_newer), and its image newer
- * once it was drawn into since (written > synced).
+/* Render-target coherence.
  *
- * Image newer: the target's memory is guarded (mem/barrier.c
- * hle_barrier_guard): a swizzled target's, a linear one's that the front
- * buffer's path and the writeback at its unbind (small, or the CPU's) don't
- * keep. The guest's first access to its bytes has its image land there
- * first: asked for on the guest's thread (coh_fill), at the decoder's next
- * method or pass (coh_serve), a readback whose texels the timeline swizzles
- * (a linear target's rows: copies) into memory when the GPU reaches its
- * value (coh_land, vk/timeline.c), the guest waiting for that value alone
- * and the decoder for nothing. The guest's own bytes on a page a target
- * shares are reached for it through the host's view (native/hle/dirty.c),
- * the page kept closed. A target the guest reads (learned) lands at each
- * fence once drawn into (hle_pbd_fence: the data is there before the guest
- * looks), till COH_UNREAD of its landings in a row go untaken. Fable draws
- * its hero's head and skin into a 256 x 256 R5G6B5 target as the hero
- * loads, a dozen layered composites in a row without leaving it, and
- * compresses that memory into the DXT1 textures the model wears after
- * each: from memory the GPU never wrote, the face and arms were black after
- * a boot, or the noise of an older image there.
+ * The GPU draws into host images. Guest RAM and a target image match at synced. A later GPU
+ * write sets written > synced. CohSnap tracks later guest memory writes by per-page counters
+ * and hashes the target's bytes on shared pages.
  *
- * Memory newer: textures over it read the memory (texture()), a draw into
- * the target has it uploaded first (coh_first_write). The 2D engine's copies
- * are memory's (hle_pbd_copy_begin): one that reads a target whose image is
- * newer waits on the timeline behind that target's landing, its destination
- * closed to the guest till it lands; the decoder goes on. Morrowind copies
- * its inventory's character out of its target (cleared red) as bytes, keys
- * the red out on the CPU and copies it back: from the stale memory, the
- * character was on red with a black band over its head. */
+ * When the image is newer, guard guest RAM for swizzled targets and for linear targets
+ * outside the front-buffer and eager writeback paths. The first guest access requests a
+ * readback (coh_fill). The decoder schedules it at the next method or pass (coh_serve), then
+ * continues while the guest waits for the timeline value. The timeline writes back linear
+ * rows or swizzles the texels (coh_land, vk/timeline.c). The host handles neighbouring bytes
+ * on shared pages separately (native/hle/dirty.c). For targets the guest reads often, write
+ * back at each fence after drawing, until COH_UNREAD readbacks in a row go unused. Fable
+ * needs the rendered head and skin pixels in RAM before compressing them to DXT1.
+ *
+ * When RAM is newer, textures sample RAM and the next draw uploads it first
+ * (coh_first_write). A 2D engine copy reads guest bytes. If a source target has newer pixels,
+ * queue its writeback before the copy and protect the destination through completion.
+ * Morrowind uses this path to key out the red background of its inventory character on the
+ * CPU. */
 #define COH_SLOTS 64
 #define COH_PENDS 32
 #define COH_UNREAD 4
@@ -5645,16 +5503,13 @@ static void coh_adopt(void)
     }
 }
 
-/* Whether o's memory is newer than its image (the memory is what the NV2A
- * holds), as of the write counts' epoch it was last judged in. Only a target
- * the coherence keeps; never drawn into, its memory is all there is; its
- * landing in flight, the memory is its image's (that landing's counts are
- * taken in with it, coh_adopt). Its blocks' counts unmoved, nothing of it
- * was written. Its edge pages' counts move with a neighbour's writes too:
- * then its own bytes there tell, against their hashes when it synced (once
- * a count); the neighbour's are taken in once a frame, those pages tracked
- * again (a written page tracks no stores till then, its own bytes' among
- * them). */
+/* Check whether guest RAM is newer than a tracked target image. Cache the result by write
+ * epoch. RAM is authoritative before the first draw. An in-flight readback carries the write
+ * counters to adopt at completion (coh_adopt).
+ *
+ * Unchanged block counters rule out writes. When an edge page's counter changes, compare the
+ * target's own bytes with its snapshot, since a neighbour can share the page. Update counters
+ * for neighbouring writes and re-arm first-write tracking once per frame. */
 static bool coh_mem_newer(PbObj *o)
 {
     uint32_t len;
@@ -5937,14 +5792,11 @@ static bool copy_covers(const PbObj *o, uint32_t len, uint32_t dlo, uint32_t dp,
     return c + o->d.w * (fi->bpp / 8) <= row && q + o->d.h <= rows;
 }
 
-/* The targets the coherence keeps whose images are newer than their memory
- * land first: over the source; over the destination, where the copy leaves
- * some of their bytes. A blit's linear destination target (at dbase) doesn't
- * when the copy is made at once: its image takes the rows too (hle_pbd_blit,
- * as noted in g_coh_rows), at its scale. The copy comes after the landings
- * in flight over either range, the copies queued into either, and those
- * queued from its destination (they read it as they land); queued, the
- * guest's first write to its source waits for it too. */
+/* Write back newer source images and newer destination images whose bytes the copy only
+ * partly covers. For an immediate blit into a linear target at dbase, hle_pbd_blit updates
+ * the destination image at its render scale (g_coh_rows). Queue the copy after readbacks and
+ * earlier copies that touch either range. A queued copy also makes the first guest write to
+ * its source wait. */
 uint64_t hle_pbd_copy_begin(uint32_t slo, uint32_t sp, uint32_t dlo, uint32_t dp, uint32_t row,
                             uint32_t rows, uint32_t dbase)
 {
@@ -5980,21 +5832,14 @@ uint64_t hle_pbd_copy_begin(uint32_t slo, uint32_t sp, uint32_t dlo, uint32_t dp
             v = MAX(v, o->land_last);
         }
     }
-    /* A frame buffer the copy reads: the front buffer's path keeps its image,
-     * not its memory (coh_display), so its image is read back first, once a
-     * drawing, and the copy waits for that landing. nxdk_pgraph_tests saves
-     * each test's back buffer with an M2MF copy (pbkit++ gpum_copy): from the
-     * memory as it was, most of its pictures were an earlier test's.
+    /* Before a copy reads a front buffer, queue a readback of the newest drawn image that
+     * covers the whole source. Reuse the readback until another draw. This gives
+     * nxdk_pgraph_tests the current pixels for its M2MF captures.
      *
-     * Only the newest drawn one holding the whole source, and only while
-     * its image is the newer: not when memory superseded it (a texture
-     * defined there since, obj_superseded) or a target drawn later lies
-     * anywhere in what the readback writes (its whole pitch x height). The
-     * CPU's writes into a frame buffer go into its image before the GPU
-     * draws on it or shows it (rt_cpu_sync); uploading them here as well
-     * changed it each copy, and the extra guarded readbacks met pages the
-     * dirty tracking didn't hold (a crash). An older target over reused
-     * memory once put its old image back over a texture the same way. */
+     * Skip readback if a texture definition superseded the image, or a newer target overlaps
+     * the full pitch x height it would overwrite. CPU writes are uploaded before rendering or
+     * presenting (rt_cpu_sync). Uploading them again here caused unnecessary readbacks and
+     * could fault on untracked pages. */
     PbObj *fb = NULL;
     uint32_t fb_len = 0;
     for (unsigned i = 0; i < g_pd.nobjs; i++) {
@@ -6365,16 +6210,10 @@ static void coh_upload_swz(PbObj *o, uint32_t len)
     g_pd.rt_uploads++;
 }
 
-/* What newer the others over o's memory (len) hold lands there first,
- * waited for: o's image is about to take that memory (rt_first_land). D3D
- * clears a swizzled target through a linear view of its memory
- * (object_view), and before the swizzled one has an object, the clear goes
- * to the view's: Morrowind's inventory character, drawn for the first time
- * after a load, went over its target's older memory instead of red, and the
- * keying left the edges it had bled into that red opaque around it. As
- * coh_serve: the image of the newest writer among the targets the coherence
- * keeps; the old paths' writebacks in flight there (a small view's, one the
- * CPU used) land before it. */
+/* Before uploading guest memory to o, write back the newest overlapping tracked image and
+ * wait for pending writebacks from older paths. D3D can clear a swizzled target using a
+ * linear view before the swizzled image exists. Morrowind needs that red clear before drawing
+ * its inventory character, so its colour key removes the correct background. */
 static void coh_land_over(const PbObj *o, uint32_t len)
 {
     PbObj *best = NULL;
@@ -6467,18 +6306,11 @@ static void coh_shown(PbObj *o)
     if (!o) {
         return;
     }
-    /* a frame buffer no longer shown lately leaves the front buffer's path:
-     * kept again from its memory as it is now (its image the newer for what
-     * the GPU drew since it synced: guarded from its next draw). The CPU's
-     * writes there go into its image first, while it is still shown lately
-     * (rt_cpu_upload passes over the targets the coherence keeps): taken
-     * into the snapshot without, they were the image's, and a landing (a
-     * savestate's) put the old frame over them, textures loaded into a
-     * frame buffer's memory a Reset freed. Not as a target the CPU uses: a
-     * writeback at each unbind, were it drawn into again. Uploaded, its
-     * image is its memory; a texture defined from that memory since its
-     * last draw (whose check took the CPU's writes there: none to upload),
-     * the title's data is there: synced either way, no old frame lands. */
+    /* When a framebuffer leaves the scanout path, switch it back to normal target coherence.
+     * Upload CPU writes before taking the new snapshot, so a later save cannot overwrite data
+     * written to reused frame memory after Reset. This upload does not mark the target for
+     * writeback on every unbind. Either the upload or a later texture definition makes RAM
+     * authoritative until the next draw. */
     for (unsigned i = 0; i < g_pd.nobjs; i++) {
         PbObj *x = &g_pd.objs[i];
         if (x->display && g_coh_shows + 1 - x->shown_seq > COH_SHOWN_RECENT) {

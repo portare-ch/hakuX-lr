@@ -12,16 +12,12 @@ import java.nio.ByteOrder
 import java.nio.channels.FileChannel
 
 /**
- * Rewrites a full Xbox disc dump (the video partition, then the game's) as
- * an XISO beside it, then moves the dump into ORIGINALS_FOLDER.
- *
- * The XISO is the game partition's files packed one after another, laid out
- * as extract-xiso's rewrite does: the volume descriptor at 0x10000, the root
- * directory at sector 0x108, each directory's table followed by its files
- * and then its subdirectories; tables are binary trees sorted by upper-cased
- * name, entries 4-byte aligned and never across a sector; 0xFF pads tables
- * and files to sectors, zeros pad the image to 64 KiB. Files are copied byte
- * for byte (no media patch).
+ * Rewrite the game partition of a full Xbox dump as an XISO, then move the original into
+ * ORIGINALS_FOLDER. Match extract-xiso's layout. The volume descriptor is at 0x10000, the
+ * root is at sector 0x108, and directories precede their files and subdirectories. Directory
+ * tables are binary trees ordered by uppercased name. Align entries to four bytes and keep
+ * each inside one sector. Pad tables and files with 0xFF to sector boundaries, then the image
+ * with zeros to 64 KiB. Copy file bytes verbatim.
  */
 object XisoConverter {
   /** Where a converted dump goes, beside its XISO (the library doesn't list it). */

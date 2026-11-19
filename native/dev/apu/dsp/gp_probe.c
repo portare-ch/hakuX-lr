@@ -1,26 +1,16 @@
 /* Copyright (C) 2026-present PortareOS */
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * hakuX native core — a diagnostic probe of the guest's GP program
- * (NC_APU_GP_PROBE=DIR, with NC_APU_DSP=1). From NC_APU_GP_PROBE_AT
- * seconds of APU frames (default 30: the title's DirectSound up, its DSP
- * image loaded) the VP's mix bins are replaced with a test tone, one bin
- * at a time, silence in every other, and what the GP and EP put out is
- * recorded: the mix buffer after the GP's frame and every output FIFO
- * write (DIR/probe.bin), and the DSPs' memories as the probe starts
- * (DIR/gp_mem.bin, DIR/ep_mem.bin). tools/native/apu-gp-probe.py reads
- * them.
+ * Measure how a game's GP and EP mix bins into audio outputs under the DSP interpreter. With
+ * NC_APU_DSP=1, set NC_APU_GP_PROBE=DIR to start recording after NC_APU_GP_PROBE_AT seconds
+ * of APU frames (default 30). The probe replaces game audio and measures the digital mix.
  *
- * It measures how the title's DSP program mixes its bins to the outputs,
- * the stereo downmix among them, as the core's DSP interpreter runs it:
- * not the hardware's analog stage, and not how the VP's mix bins are
- * scaled into the GP on an Xbox. The title's own sounds are replaced
- * while it runs.
+ * Record 96-frame tones (64 ms) at quarter amplitude. After silence, test bins 0–5 at 1 kHz,
+ * 100 Hz and 8 kHz. Test bins 6–31 at 1 kHz with an unrecorded half-second gap for each
+ * effect tail.
  *
- * The schedule: silence; bins 0 to 5 (DirectSound's speakers) at 1 kHz,
- * 100 Hz and 8 kHz; bins 6 to 31 at 1 kHz with a half-second gap after
- * each, for effect tails. Each tone 96 frames (64 ms) at 0.25 of full
- * scale, recorded whole; the gaps silent and not recorded.
+ * probe.bin contains the GP mix buffer and output FIFO writes. gp_mem.bin and ep_mem.bin
+ * contain the starting DSP memories. Use tools/native/apu-gp-probe.py to read them.
  */
 #include <math.h>
 #include <stdio.h>

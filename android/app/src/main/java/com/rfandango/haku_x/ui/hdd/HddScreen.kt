@@ -71,14 +71,9 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * The Xbox's hard disk as the native core keeps it: the space each kind of
- * data takes, the game saves (each title's, each save exportable as a zip
- * and deletable; zips of saves imported), the
- * titles' data, the cache drives (cleared: the game fills them again), the
- * savestates, old copies of the disk, a whole backup (made and restored, for
- * another hakuX or to keep), and a console's or xemu's data brought in: its
- * disk image (qcow2 or raw) or its saves, re-signed for hakuX with keys read
- * from the user's dumps (the console files).
+ * Manage the native core's virtual disk, save states and backups. Import a console or xemu
+ * disk as raw or qcow2, or import individual saves. Source console dumps provide keys for
+ * re-signing imported saves.
  */
 @Composable
 fun HddScreen(onBack: () -> Unit, vm: HddViewModel = viewModel()) {

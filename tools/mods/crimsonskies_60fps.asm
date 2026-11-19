@@ -9,11 +9,9 @@ C_1000      equ 0x28EE18        ; 1000.0f
 ; the frame gate's minimum period (0x1308D9, 0x130B23 load it)
 c_period:   dd 0x3C888889       ; 1/60
 
-; ---- the gate's ms conversion (0x12FBCD, call FTOL): esi = the timer
-; (+8 the counter's frequency, +0x10 the time base, just set to now),
-; st0 = the frame's time in ms. The game advances by whole ms: the fraction
-; it drops (0.67 ms of 16.67 at 60 fps) goes back into the time base, so it
-; counts in the next frame.
+; Accumulate the fraction discarded by FTOL at 0x12FBCD. esi points to the timer (frequency
+; at +8, time base at +0x10), and st0 holds the frame time in ms. Carry about 0.67 ms at 60
+; fps into the next frame.
 ms_carry:
     fld st0
     call FTOL                   ; eax = whole ms

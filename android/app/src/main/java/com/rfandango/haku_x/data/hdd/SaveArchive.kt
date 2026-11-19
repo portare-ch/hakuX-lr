@@ -8,13 +8,13 @@ import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
 /**
- * Game saves as a zip laid out like the Xbox's E:\UDATA (UDATA/<title id>/<save>/...), the form save
- * collections and FTP copies to a console use. A title's own files (TitleMeta.xbx, TitleImage.xbx, its
- * default SaveImage.xbx) go with any of its saves, so the dashboard can name them.
+ * Package saves in the console's UDATA/<title id>/<save>/ layout. Include TitleMeta.xbx,
+ * TitleImage.xbx and the default SaveImage.xbx so the dashboard can name and display each
+ * title.
  *
- * Imports take the same zips and the usual variants: without the UDATA folder, inside another folder,
- * with E:\TDATA's title folders beside. A save in the zip replaces the save of the same folder on the disk.
- * hakuX ZIPs start with [Backup.MARKER]. Full backup imports extract E: and read the source EEPROM key.
+ * Imports also accept an omitted UDATA directory, a wrapping directory or neighbouring TDATA
+ * files. A save replaces the matching directory on disk. hakuX ZIPs start with
+ * [Backup.MARKER]. Importing a full backup extracts E: and reads the source EEPROM key.
  */
 object SaveArchive {
   /** A title's folder (E:\UDATA\<title id>) and which of its save folders to write: null, all of them. */
@@ -82,10 +82,10 @@ object SaveArchive {
   }
 
   /**
-   * What a zip of saves holds: its saves (title id to save folders), every title it has files of, the
-   * names its TitleMeta.xbx give, how many of its saves replace one on the disk, its files, entries left out,
-   * and its marker's kind: "saves" or "backup" for hakuX's zips, null for others (a console's or xemu's).
-   * Full backups include the source EEPROM so imports can re-sign saves.
+   * Summarize a save ZIP before import. Report its title and save folders, names from
+   * TitleMeta.xbx, replacements, files and skipped entries. The marker identifies hakuX saves
+   * or a backup. Unmarked console or xemu ZIPs have a null kind. Full backups include the
+   * source EEPROM for re-signing.
    */
   class Plan(
     val kind: String?,

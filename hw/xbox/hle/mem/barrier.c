@@ -30,17 +30,14 @@ static uint8_t *g_hot;              /* per page: hot beside guards (hle_mem_stal
 static uint16_t *g_nbr_n;           /* ... per page: accesses served since g_nbr_t (ms; stale lock) */
 static uint32_t *g_nbr_t;
 
-/* The GPU reads and writes guest RAM in place (the imported RAM buffer,
- * vk/guest_ram.c) without snooping the CPU's caches: the cached, coherent
- * memory type holds for the driver's own allocations, not for the imported
- * AHB. A store still in a CPU cache line is invisible to it: the movie
- * Oddworld draws on the CPU into its back buffer under the title menu,
- * uploaded in place at each draw, came out with 64-byte black dashes (lines
- * the CPU still held) in push-buffer mode. Each page counts the writes
- * reported to it (first-write faults, host writes through the RAM view);
- * arming a range for the GPU cleans the lines of its pages written since
- * their last clean, sampled before the arm protects them (a store after
- * that faults and counts). */
+/* The imported guest RAM buffer (vk/guest_ram.c) is shared with the GPU. GPU access through
+ * the imported AHB does not snoop CPU caches, even if the same memory type is coherent for
+ * driver allocations. In Oddworld, dirty cache lines showed up as 64-byte black dashes in the
+ * movie the CPU draws into the back buffer.
+ *
+ * Count first-write faults and host writes per page. When arming a GPU range, clean pages
+ * written since the last clean. Sample the counts before protecting the pages so a later
+ * store faults and increments the count. */
 static uint32_t *g_wseq;            /* per page: writes reported */
 static uint32_t *g_cseq;            /* per page: g_wseq + 1 at its last clean */
 static uint32_t g_line = 64;        /* data cache line bytes (CTR_EL0.DminLine) */
@@ -291,15 +288,12 @@ static void stale_unlock(void)
     __atomic_store_n(&g_stale_lock, 0, __ATOMIC_RELEASE);
 }
 
-/* The ranges without guest access: frames that were on screen, kept so until
- * the guest touches them. A change of protection over a frame buffer is
- * ~90 us (the RP5: Forza, 1.2 MB a range); given back at each swap, the
- * frames' were ~0.4 ms of every swap. Kept, a double-buffered title's two
- * frame buffers are protected after its first two swaps and no swap changes
- * any; a touch of one no longer on screen just gives its access back (no
- * copy: a back buffer's memory as before, Bink movies drawn into it on the
- * CPU), so a title that does that pays a fault and one change a frame.
- * hle_barrier_guard's ranges share the table, each with its fill. */
+/* Keep old frame buffers protected until the guest touches them. On the RP5, changing
+ * protection for a 1.2 MB Forza buffer costs about 90 µs. Restoring access eagerly used about
+ * 0.4 ms per swap. With lazy restore, a double-buffered title protects both buffers in the
+ * first two swaps. A guest touch to an old back buffer restores access without a copy, so
+ * CPU-rendered Bink movies pay one fault and one protection change per frame. Render-target
+ * guards share this table. */
 #define STALE_RANGES 4
 #define GUARD_RANGES 128
 static struct {
@@ -314,12 +308,11 @@ static unsigned g_nna;
 static uint32_t g_guard_gen;                    /* (stale lock) */
 static uint32_t g_guard_drops = 1;              /* guards dropped or opened (atomic) */
 static uint64_t (*g_guard_fill)(uint32_t pa, uint32_t len, bool read);
-/* The guest's accesses beside a guard's bytes on its edge pages
- * (hle_mem_stale_neighbour), each a fault the host serves (a few us): a
- * page where they come often (NBR_HOT in NBR_MS, ~1% of a core) is hot,
- * and no guard closes it as an edge page till its memory is freed or the
- * mode starts again (its targets' bytes there unguarded: a dynamic vertex
- * buffer beside a target would have cost a fault a store). */
+/* The host handles guest accesses outside a guard on a shared edge page
+ * (hle_mem_stale_neighbour). Each fault costs a few microseconds. Mark a page hot after
+ * NBR_HOT accesses within NBR_MS, a rate that can cost about 1% of a core. Guards leave that
+ * edge page accessible until its memory is freed or the mode restarts. This avoids a fault
+ * per store when a dynamic vertex buffer shares a page with a render target. */
 #define NBR_HOT 256
 #define NBR_MS 100
 static uint64_t g_nbr_served, g_nbr_hot;
@@ -362,10 +355,9 @@ static uint32_t na_page_hi(unsigned i)
     return (g_na[i].pa + g_na[i].len - 1) >> 12;
 }
 
-/* The closed range whose bytes hold pa, else a closed guard with bytes on its
- * page: a target rarely starts and ends on a page, and the guest's access
- * to its own data on a target's edge page that the decoder couldn't do for
- * it (dirty.c) needs the target's image there first */
+/* Find a closed range containing pa, or a closed guard sharing its page. If dirty.c cannot
+ * handle an access outside the guard, the guest needs the target image written back before
+ * accessing the page. */
 static int na_find_closed(uint32_t pa)
 {
     for (unsigned i = 0; i < g_nna; i++) {
@@ -392,11 +384,9 @@ static bool na_page_covered(uint32_t p, int except)
     return false;
 }
 
-/* [pa, pa + len)'s pages given their guest access back, but for those a closed
- * range other than `except` or a shut report page still needs closed (small
- * targets side by side share pages); rearm: protected for write tracking
- * first, so the guest's next store to them is seen (a guard's memory, newer
- * than its image from then on) */
+/* Restore access to pages in [pa, pa + len) unless another closed range or report page still
+ * protects them. With rearm, enable first-write tracking before restoring access so later
+ * stores can mark guest memory newer than the image. */
 static void na_open_pages(uint32_t pa, uint32_t len, int except, bool rearm)
 {
     const uint32_t p1 = (pa + len - 1) >> 12;
@@ -629,18 +619,15 @@ void hle_barrier_guard_stats(uint64_t *neighbours, uint64_t *hot)
     *hot = g_nbr_hot;
 }
 
-/* ---- visibility-test reports (barrier.h hle_barrier_report_pushed) ----
- * Blinx reads its occlusion tests a frame after it ends them and takes a
- * result D3D calls incomplete for "hidden": with ours written once the GPU
- * ran the test, a decal on the ground was drawn in some frames and not in
- * others, about 40 % of its reads finding the result missing. The pages
- * (D3D's report pages, 256 tests each) and the reports pushed into them are
- * kept here: the scout on the guest's thread adds, the decoder marks them
- * reached and the back end written, the guest's access to a page waits.
- * Not while the decoder waits on the guest short of a report: Burnout 3
- * traps ~4 times a frame, and its reads waited out the 30 ms on a decoder
- * held at a trap whose handler was to run on the waiting thread (34 fps for
- * 60; ~0.7 s a second waited). */
+/* Visibility-test reports (hle_barrier_report_pushed in barrier.h). The guest-thread scout
+ * queues reports, the decoder marks when it reaches each one, and the back end marks when it
+ * writes the result. A guest access waits for the page's pending reports. In Blinx, treating
+ * an incomplete result as hidden made a ground decal flicker because about 40% of reads
+ * arrived before the result.
+ *
+ * Skip the wait when the decoder needs guest work before it can reach the report. Burnout 3
+ * traps about four times per frame. Waiting 30 ms at those traps used up about 0.7 seconds
+ * per second and dropped the frame rate from 60 to 34 fps. */
 #define RPT_PAGES   8
 #define RPT_PENDING 256
 #define RPT_WAIT_NS 30000000ll
@@ -908,12 +895,10 @@ void hle_mem_stale_access_rw(uint32_t pa, bool write)
     }
     const uint32_t lo = g_na[i].pa, len = g_na[i].len;
     if (g_na[i].guard) {
-        /* A target's memory, older than its image: its landing (the one
-         * asked for already, or one asked for now: read, the guest reads
-         * it) is waited for, its value alone, then the memory is the
-         * guest's. Armed again meanwhile (drawn into again), it is given
-         * back anyway, older than the image, till its next arming: the guest
-         * reads what the GPU had drawn when it asked. */
+        /* Wait for the guarded image's readback. Schedule one if needed and tell the fill
+         * callback whether the guest access is a read. If another draw re-arms the range
+         * during the wait, reopen it until the next arm. The guest gets the image as of the
+         * access that triggered the wait. */
         const uint32_t gen = g_na[i].gen;
         uint64_t v = g_na[i].v;
         stale_unlock();

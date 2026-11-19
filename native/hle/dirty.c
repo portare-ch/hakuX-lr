@@ -1,16 +1,11 @@
 /*
- * hakuX native core — guest-write tracking for the HLE layer.
+ * Track guest CPU writes for HLE. Write-protect clean physical pages in every guest mapping.
+ * On the first store, call hle_mem_first_write to wait for any GPU readers, mark the page
+ * dirty, restore write access and retry the instruction. A page is protected for write
+ * tracking exactly when it is clean.
  *
- * The HLE layer asks whether the guest CPU wrote guest RAM since it last
- * looked (host.h, hle_host_mem_*), and needs to hear about the first
- * write to a page it cleaned (hle_mem_first_write: the first-write barrier may
- * wait for the GPU before the write happens). A clean page is write-protected
- * in every guest mapping, so the guest's first store faults: the handler
- * calls hle_mem_first_write, marks the page dirty, unprotects it and the store
- * runs again. Invariant: protected <=> clean.
- *
- * Host code writes through the RAM view (vm->phys), which is never protected;
- * host stores by guest VA report themselves (hle_va_store).
+ * The host's vm->phys view stays writable. Host stores by guest virtual address report their
+ * writes through hle_va_store.
  */
 #include "native/hle/hle_native.h"
 

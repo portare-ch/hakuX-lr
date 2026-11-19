@@ -41,17 +41,14 @@ void nc_core_set_dashboard(bool on);
 
 /* Runs the guest until it stops; logs the frontier summary. */
 void nc_core_run(NcCore *c);
-/* Stopping the core in its process (LIBRETRO_SPEC.md section 6), in order:
- * - nc_core_request_stop, any thread: the guest stops (nc_core_run returns)
- *   at the CPU's next block start, or where it idles or pauses;
- * - nc_core_halt, once nc_core_run has returned (or nc_core_boot failed):
- *   the devices' and the I/O threads stopped and joined (written files
- *   synced, queued reads landed), nothing of the guest's running;
- * - the renderer stopped, by the caller (it reads guest memory and the
- *   devices' registers);
- * - nc_core_destroy: everything the boot made freed (the CPU, the devices,
- *   guest memory, files, the disc) and the core's state reset, so that
- *   nc_core_boot can run again as in a new process. */
+/* Stop the core in process in this order (LIBRETRO_SPEC.md section 6).
+ *
+ * 1. Request stop from any thread. nc_core_run returns at the next CPU block, idle or pause
+ * point.
+ * 2. After nc_core_run returns or boot fails, call nc_core_halt to join device and I/O
+ * threads, sync files and finish queued reads.
+ * 3. Stop the renderer before releasing guest RAM and device registers it reads.
+ * 4. Call nc_core_destroy to free boot resources and reset the core for a fresh nc_core_boot. */
 void nc_core_request_stop(NcCore *c);
 void nc_core_halt(NcCore *c);
 void nc_core_destroy(NcCore *c);

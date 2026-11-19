@@ -1,30 +1,18 @@
 /*
- * hakuX HLE GPU — Vulkan 1.3's entry points on drivers below it: Mali's
- * Valhall parts on the builds vendors cap at 1.1 or never updated (Samsung's
- * Exynos phones, older Dimensity firmware), PowerVR's BXM, Xclipse's first
- * firmware.
+ * Vulkan 1.3 compatibility for older drivers, including Mali Valhall, PowerVR BXM and early
+ * Xclipse firmware. If a core entry point is unavailable, vkdev.c uses its extension
+ * equivalent or the fallback here.
  *
- * The back end records Vulkan 1.3: dynamic rendering, synchronization2, the
- * copy commands 2, 1.2's timeline semaphores. Below 1.3 (HleCaps.vk13 off,
- * vkdev.c) the device table's entries for them are their extensions' where the
- * driver has them, else this file's, which record Vulkan 1.0's commands:
- * - vkCmdBeginRendering / vkCmdEndRendering: a render pass instance. The pass
- *   is cached by its attachments' formats, load and store operations and
- *   layouts, the framebuffer by the pass, the views and the render area's
- *   extent. A pass's initial and final layouts are the attachments' own: the
- *   back end moves images between layouts with its barriers, as it does for
- *   dynamic rendering, and an instance adds no dependency of its own (no
- *   layout transition, so no implicit external dependency either).
- * - vkCreateGraphicsPipelines: the VkPipelineRenderingCreateInfo heading the
- *   chain becomes a pass of the same formats, compatible with every instance
- *   the draws open on them (compatibility is formats and samples).
- * - vkCmdPipelineBarrier2 / vkQueueSubmit2: 1.0's barrier and submit, the
- *   stages and accesses mapped to 1.0's (compat_map.h), one stage mask per
- *   barrier call (the union of its barriers'), the timeline values through
- *   VkTimelineSemaphoreSubmitInfo.
- * - vkCmdBlitImage2 / vkCmdCopyImage2: 1.0's commands.
- * Extended dynamic state is not emulated here: without it the draws build the
- * state into their pipelines (vk/draw.c PipeKey.ds).
+ * Dynamic rendering uses a render pass and framebuffer cache. The pass key includes
+ * attachment formats, load and store operations and layouts. The framebuffer key adds views
+ * and extent. The back end owns image transitions, so the pass starts and ends in the
+ * attachment layouts and adds no dependencies. Pipelines translate
+ * VkPipelineRenderingCreateInfo into a compatible pass using the formats and sample counts.
+ *
+ * Synchronization2 maps stages and accesses to Vulkan 1.0 (compat_map.h). Each barrier call
+ * uses the union of the individual masks. Submit forwards timeline values through
+ * VkTimelineSemaphoreSubmitInfo. Blit and copy commands use their Vulkan 1.0 equivalents.
+ * Without extended dynamic state, bake the state into PipeKey.ds (vk/draw.c).
  */
 #include "hw/xbox/hle/base.h"
 

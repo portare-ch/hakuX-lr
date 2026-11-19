@@ -73,11 +73,9 @@ private val INPUT_NAMES = mapOf(
 )
 
 /**
- * The binding an event makes for input, against the axes at rest when the
- * capture began: a key pressed (not for a stick), or the axis moved furthest
- * past half its range, in the direction it moved (for a stick, the user
- * pushes right or up). Of two axes moving together (a trigger reported as
- * LTRIGGER and BRAKE), the first in axis order.
+ * Bind the pressed key or the axis that moved furthest past half its range from the captured
+ * rest position. Stick capture accepts axes only and asks for right or up. Break ties in axis
+ * order when a trigger reports two axes.
  */
 private fun captured(e: android.view.InputEvent, input: XInput, rest: FloatArray): Binding? {
   if (e is KeyEvent) {

@@ -1,5 +1,5 @@
-// fexrun — runs FEX's 32-bit ASM unit tests through our own FEXCore
-// embedding (no Linux syscall front end), on the device.
+// Run FEX's 32-bit assembly tests through hakuX's FEXCore embedding on the device.
+// The harness does not use FEX's Linux syscall frontend.
 //
 //   fexrun [options] <test-dir> <manifest>
 //     --base identity       guest addresses are host addresses (baseline)

@@ -6,14 +6,9 @@ import java.io.File
 import java.security.MessageDigest
 
 /**
- * A game's savestates (the native core's, native/state): ten slots, each a
- * state file and the frame on screen when it was saved. Kept by the game's
- * key (GameOverrides.gameKey: its title ID and version), so the library and
- * the running game find the same ones however the game was started.
- *
- * discUri: the disc's URI as the game was started with it; the first states
- * were kept by its hash, and those move here the first time this store is
- * made for the game.
+ * Store ten save-state slots per title ID and version. Each slot holds the core's state file
+ * and the frame captured at save time. Using GameOverrides.gameKey lets the library and game
+ * find the same slots. Migrate old slots keyed by the hash of discUri on first access.
  */
 class SaveStateStore(context: Context, gameKey: String, discUri: String? = null) {
   private val root = File(context.filesDir, "native/states")

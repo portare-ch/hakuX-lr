@@ -12,11 +12,10 @@ import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
 /**
- * A hakuX backup: one zip of what the native core keeps of the console (files/native): its disk (hdd/:
- * every partition's folder, the raw partition heads, eeprom.bin) and, when asked, the savestates
- * (states/). The cache drives can be left out, as games fill them again. It's hakuX's own format, for
- * another hakuX or to keep: its saves stay as signed here, so neither making nor restoring one needs a
- * BIOS. Its first entry (MARKER) says what it holds; SaveArchive's zips carry one too.
+ * Export the native console disk as a ZIP, with partition folders, raw partition heads and
+ * eeprom.bin under hdd/. Optionally include states/ and omit cache drives, which games
+ * rebuild. Keep the existing save signatures so backup and restore need no BIOS. The first
+ * ZIP entry is [MARKER], as in SaveArchive's ZIPs.
  */
 object Backup {
   const val MARKER = "hakuX.properties"

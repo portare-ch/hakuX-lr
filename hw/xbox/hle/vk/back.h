@@ -42,17 +42,16 @@ bool hle_tl_land(uint64_t value, uint32_t arena_off, uint32_t pa, uint32_t len);
 /* The back end recorded the copy into arena_off (rows of row bytes, pitch
  * apart): those land (else nothing does). */
 void hle_tl_land_copied(uint32_t arena_off, uint32_t pitch, uint32_t row, uint32_t rows);
-/* More landings at value, made in the order queued (vk/timeline.c), each
- * reported to done(token, landed) on the thread that lands it, the timeline
- * lock held (no landing queued from it): a target's w x h texels of bpp
- * bytes the GPU packs at off of the landing buffer (the arena without one),
- * swizzled into guest memory at pa (dropped unless the back end recorded
- * the copy, hle_tl_land_copied); rows of row bytes copied in guest memory,
- * spitch / dpitch apart (a 2D blit behind a landing it reads); a note.
- * Queued at a value the landings went through already, made at once.
- * False: too many wait (hle_tl_land_room: whether n more fit; the decode
- * thread queues them all; hle_tl_land_oldest: the lowest value queued, 0 if
- * none, what makes room). */
+/* Apply queued readbacks and copies in queue order before publishing value. The swizzle
+ * operation writes packed w x h texels of bpp bytes from off in the landing buffer, or the
+ * arena, to guest pa. It requires the copy to be recorded with hle_tl_land_copied. The copy
+ * operation moves rows within guest memory, for example when a blit reads a target just
+ * written back. The note operation only signals completion.
+ *
+ * done(token, landed) runs on the thread applying the operation with the timeline lock held.
+ * Callbacks must not queue another operation. An operation queued at a value already applied
+ * runs immediately. A false result means the queue is full. Check hle_tl_land_room(n) before
+ * queuing. hle_tl_land_oldest() is the value to wait for to make room, or zero when empty. */
 typedef void (*HleLandDone)(uint32_t token, bool landed);
 bool hle_tl_land_room(unsigned n);
 uint64_t hle_tl_land_oldest(void);
@@ -78,13 +77,11 @@ void hle_back_draw_diag(void);      /* logs the draw-feature counters */
  * savestate's load, the frames since it). Any thread. */
 uint64_t hle_back_swap_count(void);
 
-/* A run without the app's window (native/run/xboxrun.c) follows the frames:
- * at each swap the render thread calls want(n), n counting this process's
- * swaps from 1. True asks for that frame: got(n) once the GPU finished it,
- * with its picture as the screen would show it (RGBA, top row first, the
- * display's size, the gamma ramp in it unless a consumer applies it), or
- * NULL when the frame had no display image. Set before the game runs; both
- * run on the render thread, which waits for them. */
+/* Headless frame capture (native/run/xboxrun.c). At each swap the render thread calls
+ * want(n), starting at n = 1. If it returns true, got(n) receives the frame after GPU
+ * completion as top-down RGBA at display size, including the gamma ramp unless the consumer
+ * applies it. A frame without a display image passes NULL. Register the hook before the game
+ * starts. Both callbacks run synchronously on the render thread. */
 typedef struct HleFrameHook {
     bool (*want)(uint64_t n, void *opaque);
     void (*got)(uint64_t n, const uint8_t *rgba, uint32_t w, uint32_t h, void *opaque);

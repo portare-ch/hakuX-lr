@@ -25,24 +25,10 @@
 #include "stereo_route.h"
 #include "native/core/mmio.h"   /* nc_mmio_retry */
 
-/* -------------------------------------------------------------------------
- * PERF_LOG-gated "silent-but-active voice" probe.
- *
- * Measures how much per-voice decode/resample/SVF/mix work voice_process()
- * spends on voices that are ACTIVE (fully processed) but MATHEMATICALLY
- * SILENT: envelope amplitude ea_value == 0 AND all 8 mixbin volumes fully
- * attenuated (vol & 0xFFF == 0xFFF, i.e. attenuate() == 0 exactly). The
- * per-bin mix contribution is ea_value * attenuate(vol[b]), so both-zero
- * implies the voice emits silence this frame.
- *
- * This probe changes NO control flow and skips NO work — it only reads
- * already-computed locals (ea_value, vol[]) and increments relaxed-atomic
- * counters. With PERF_LOG=0 the entire block compiles to nothing, so the
- * release path is byte-identical to upstream.
- *
- * The counters race across concurrent voice_worker_thread workers and the
- * SE/EP-thread emit; relaxed atomics make that benign for a coarse ratio.
- * ------------------------------------------------------------------------- */
+/* PERF_LOG counts active voices that have both zero envelope amplitude and all eight sends
+ * muted. With vol & 0xFFF equal to 0xFFF, attenuate() returns zero. The probe reads the
+ * values already computed by voice_process and uses relaxed atomics to aggregate counts
+ * across workers. */
 #ifndef PERF_LOG
 #define PERF_LOG 0
 #endif
@@ -132,12 +118,11 @@ static void set_notify_status(MCPXAPUState *d, uint32_t v, int notifier,
                            v * MCPX_HW_NOTIFIER_COUNT + notifier);
     notify_offset += 15; // Final byte is status, same for all notifiers
 
-    // FIXME: Check notify enable
-    // FIXME: Set NV1BA0_NOTIFICATION_STATUS_IN_PROGRESS when appropriate
+    // FIXME: Respect the notification enable bit and report
+    // NV1BA0_NOTIFICATION_STATUS_IN_PROGRESS when appropriate.
     apu_ram_st8(notify_offset, status);
 
-    // FIXME: Refactor this out of here
-    // FIXME: Actually provied current envelope state
+    // FIXME: Report the current envelope state instead of a fixed value.
     apu_ram_st8(notify_offset - 1, 1);
 
     apu_or(&d->regs[NV_PAPU_ISTS],
@@ -298,14 +283,9 @@ static inline uint32_t voice_get_mask_nolock(MCPXAPUState *d, uint8_t *c,
 }
 
 #if HAKUX_AUDIO_SKIP_MUTED
-/* True iff this voice contributes ZERO to every mixbin THIS frame, i.e. all 8
- * mixbin volumes are 0xFFF so attenuate(vol[i])==0 for every bin (see
- * attenuate(): returns exactly 0.0 iff vol&0xFFF==0xFFF). This is the hoisted
- * form of the vol[] reads at the bottom of voice_process (the VOLA/VOLB/VOLC
- * packing, including the split vol[6]/vol[7] nibble assembly): it MUST stay
- * bit-identical to those reads. Read here BEFORE the resample block so the
- * decode / SVF / HRTF / mix can be skipped. A divergence either drops an
- * audible voice (dangerous) or fails to skip a silent one (benign no-win). */
+/* Check whether all eight sends have zero gain before resampling. Decode VOLA/VOLB/VOLC
+ * exactly as voice_process does, including the split nibbles for sends 6 and 7. A mismatch
+ * can drop an audible voice. */
 static inline bool voice_all_vols_maxed(MCPXAPUState *d, uint8_t *c,
                                         uint16_t v)
 {
@@ -437,22 +417,14 @@ bool mcpx_apu_vp_off_pending(void)
     return false;
 }
 
-/* The guest turns a voice off (NV1BA0_PIO_VOICE_OFF). On the hardware the
- * SE finds it idle in its next pass and reports both together: the
- * SE2FE_IDLE_VOICE trap, whose handler releases the voice, and its done
- * notification. Posted here at once, the notification's interrupt ran
- * DirectSound's voice service DPC up to a frame (and the frame thread's
- * throttle) before the trap: a stream voice it restarted there waited for a
- * release the ISR defers while that DPC runs (Wreckless hung in menus and
- * in missions, its DPC spinning at 0x12CD7B). When the title takes idle
- * traps, the notification waits for the voice's idle trap and comes with it,
- * as on the hardware (mcpx_apu_vp_frame), or until the voice has left the
- * lists, is turned on again, or 64 frames (or their time, the frame thread
- * stopped for the guest). Waiting past the trap, until the trap's DPC had
- * released the voice, Blood Wake hung loading a mission: its DirectSound
- * turns a voice off at DISPATCH_LEVEL and spins at 0xFE047 until its ISR
- * has seen the notification, the DPC kept out, the trap stopping the frames
- * that would have counted the 64. */
+/* On hardware, the SE reports a VOICE_OFF completion alongside the SE2FE_IDLE_VOICE trap.
+ * Pair them when the guest takes idle traps. Posting completion first can let DirectSound
+ * restart a stream before the trap releases it, which hung Wreckless.
+ *
+ * Also release the notification if the voice leaves the lists, restarts, or 64 frames elapse
+ * (including equivalent wall time if the frame thread stops). Deliver at the trap rather than
+ * waiting for its DPC. Blood Wake polls the notification at DISPATCH_LEVEL, where that DPC
+ * cannot run. */
 static void voice_off(MCPXAPUState *d, uint16_t v)
 {
     voice_set_mask(d, v, NV_PAVS_VOICE_PAR_STATE,
@@ -497,16 +469,10 @@ static void voice_off_nolock(MCPXAPUState *d, uint8_t *c, uint16_t v)
 /* vp_write: the guest CPU's register write is being applied */
 static __thread bool t_guest_write;
 
-/* A voice's spinlock. The VP's batch holds it while the voice workers
- * process the frame: 0.2 ms on average, but now and then 4-40 ms (a worker
- * preempted). The guest's DirectSound waited for it in a register write,
- * inside one MMIO access, its interrupts held off all that time: Forza's
- * vblank came 20-30 ms late and its frame a vblank late, a few times a
- * minute in a race. In the native core such a write gives up after 0.2 ms
- * and the guest's store runs again (nc_mmio_retry): it waits as long, but
- * from instruction to instruction, the interrupts taken in between. Only
- * where nothing was changed yet (may_retry), and where the access can run
- * again (an MMIO site's; a faulting access waits here as before). */
+/* The voice workers hold this spinlock while processing a batch. If a guest write can retry
+ * and has made no changes, give up after 0.2 ms and retry the MMIO instruction. Interrupts
+ * can run between attempts. A preempted worker can otherwise delay a Forza vblank by 20–30
+ * ms. Fault-based MMIO accesses still wait here. */
 static bool voice_spin_lock(MCPXAPUState *d, uint16_t v, bool may_retry)
 {
     if (may_retry && t_guest_write) {
@@ -1023,8 +989,8 @@ uint64_t mcpx_apu_vp_read(void *opaque, uint32_t addr, unsigned int size)
 
     switch (addr) {
     case NV1BA0_PIO_FREE:
-        /* we don't simulate the queue for now,
-         * pretend to always be empty */
+        /* Report the voice command queue as empty. This implementation handles commands
+         * inline. */
         return 0x80;
     default:
         break;
@@ -1706,7 +1672,7 @@ static int voice_resample(MCPXAPUState *d, uint8_t *c, uint16_t v,
         /* made at its VOICE_ON (voice_reset_filters); here only for a voice
          * a state load left playing, or if that ran out of memory */
         filter->voice = v;
-        // FIXME: Don't do 2ch resampling if this is a mono voice
+        // FIXME: Resample mono voices as one channel.
         filter->resampler = vp_resample_new(&voice_resample_callback, d->vp.resample_quality, 2, filter);
         if (filter->resampler == NULL) {
             return -1;
@@ -1907,19 +1873,10 @@ static void voice_process(MCPXAPUState *d, uint8_t *c,
         voice_off_nolock(d, c, v);
     }
 #else
-    /* HAKUX_AUDIO_NO_PROCESS=1: skip the expensive sample-production +
-     * mixing path. Envelopes above still advance guest-observable
-     * PAR_STATE / CUR_ECNT / level registers, and mcpx_apu_vp_frame's
-     * outer voice-list walk (the v1 deadlock site) is untouched, so the
-     * guest still sees voice-list progression and fe_method side
-     * effects. `samples[]` is already zeroed at the declaration above,
-     * and `mixbins[]` is left untouched -> downstream DSP mixes silence.
-     * NOTE: this also short-circuits voice_resample / voice_get_samples,
-     * which would normally advance NV_PAVS_VOICE_PAR_OFFSET_CBO and the
-     * SSL segment/end-of-buffer / SSLA_DONE notifier / voice_off() path.
-     * Titles that drive playback off CBO/SSL polling may stall; this is
-     * an FPS-cost probe, not a shippable audio mode. (void)samples;
-     * (void)multipass; (void)rate; (void)mixbins; */
+    /* HAKUX_AUDIO_NO_PROCESS=1 measures the cost of sample decoding, resampling and mixing.
+     * The voice walk and envelopes still run, and this voice contributes no samples. The
+     * sample offset (CBO) and SSL completion notifications no longer advance. Titles that
+     * poll them can stall. */
     (void)samples;
     (void)multipass;
     (void)rate;
@@ -2264,21 +2221,12 @@ static void voice_process(MCPXAPUState *d, uint8_t *c,
             }
         }
 
-        /* Every other voice (multipass, a voice whose sound began sending
-         * only to the LFE or effect bins): for VP mon, simply mix
-         * all voices together here, selecting the maximal volume used for
-         * any given mixbin as the overall volume for this voice.
+        /* For monitor output, use the largest send gain for voices routed only to effects or
+         * LFE and for multipass output. Skip a multipass source voice here. Its samples
+         * already reach the monitor when its destination voice is processed.
          *
-         * If the current voice belongs to a multipass sub-voice group we must
-         * skip it here to avoid mixing it in twice because the sub-voices are
-         * mixed into the multipass bin and that sub-mix will be mixed in here
-         * later when the destination (i.e. second pass) voice is processed.
-         * TODO: Are the 2D, 3D and MP voice lists merely a DirectSound
-         *       convention? Perhaps hardware doesn't care if e.g. a multipass
-         *       voice is in the 2D or 3D list. On the other hand, MON_VP is
-         *       not how the hardware works anyway so not much point worrying
-         *       about precise emulation here. DirectSound compatibility is
-         *       enough.
+         * TODO: Verify whether the hardware restricts multipass voices to the dedicated list
+         * or DirectSound merely uses that convention.
          */
         int mp_bin = -1;
         uint16_t mp_dst_voice = 0xFFFF;
@@ -2440,24 +2388,14 @@ static void *voice_worker_thread(void *arg)
     return NULL;
 }
 
-/* A listed voice for the frame, by its state under its spinlock (the guest's
- * methods change that state holding the voice: mcpx_apu_vp_write's guard).
- * The frame never waits on the guest for long: a voice the guest holds (its
- * VOICE_LOCK, or a method running) is waited for HELD_WAIT_US, holding none
- * of its own (the guest's unlock takes it), the first frame it is held, then
- * left for a later frame. Waiting for the unlock, the frame deadlocked with a
- * guest that locks the voices of a group (a multichannel stream) one by one,
- * its next lock waiting on one the frame's batch held already; and with one
- * that waits on the APU holding a voice (a notification, the GP's mailbox:
- * the frame that produces it never came). On the hardware the VP keeps its
- * pace whatever the CPU holds. The wait lasts while the listener can't tell:
- * up to HELD_WAIT_US, while more than a callback's worth is queued for the
- * output (the frames then catch up before the next callback), slept for
- * after HELD_SPIN_US. A title's holds end within a fraction of a millisecond
- * (Forza's race: 0.22 ms at most in a minute); spun for throughout, the wait
- * kept the holding thread off a core they shared: holds then lasted until
- * the spin gave up, and about one a second was left out of its frames (a
- * gap of 0.7-2.7 ms in the voice). */
+/* Inspect each voice under its spinlock. On the first frame the guest holds VOICE_LOCK,
+ * release the spinlock and wait while the output queue has at least a callback's worth of
+ * audio and HELD_WAIT_US has not elapsed. Sleep after HELD_SPIN_US so the guest can run on a
+ * shared core. Skip a voice if it remains held.
+ *
+ * Dropping locks before waiting lets the guest unlock the voice or continue locking a group.
+ * Waiting indefinitely can also deadlock a guest that holds a voice while polling for an APU
+ * notification. */
 #define HELD_WAIT_US 8000
 #define HELD_SPIN_US 50                 /* then slept for, HELD_NAP_US at a time */
 #define HELD_NAP_US 100
@@ -2716,17 +2654,10 @@ static void voice_work_finalize(MCPXAPUState *d)
     vwd->workers = NULL;
 }
 
-/* The SE reports the idle voices on its lists to the FE, one trap at a time:
- * on the hardware a pass reports each of them, in list order, and the guest
- * releases those it wants gone. Here a frame reports one, the next after the
- * one reported last (the first when that one has left the lists): reported
- * from the head each frame, an idle voice the guest leaves on its list hid
- * those after it for good. DirectSound releases a voice group (a
- * multichannel stream's linked voices) on its last voice's report alone:
- * MechAssault stops a three-voice stream before a mission and waits for it
- * to stop playing; with its first voice reported every frame and ignored,
- * the group was never released and the game spun in GetStatus, loading,
- * where the guest turned the three off within one frame (the Odin 3). */
+/* Report one idle voice per frame and resume after the last one reported. If it left the
+ * lists, start at the first one. Starting at the head every frame can hide later idle voices
+ * from the FE. DirectSound releases some multichannel streams only after the last voice's
+ * notification, which MechAssault waits for when loading a mission. */
 static bool voice_still_listed(MCPXAPUState *d, uint8_t *c, uint16_t wanted)
 {
     for (unsigned list = 0; list < ARRAY_SIZE(voice_list_regs); list++) {

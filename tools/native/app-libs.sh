@@ -1,17 +1,13 @@
 #!/usr/bin/env bash
-# Puts the native core's app libraries (libhakuxcore.so, libSDL3.so and
-# adrenotools' hook libraries from the native build) into the app's jniLibs,
-# stripped, for assembleDebug to pack.
-# They are build outputs (gitignored), refreshed by running this after
-# `cmake --build build/native/core --target hakuxcore`.
+# Strip the native app libraries and copy them into jniLibs for assembleDebug. Run after
+# building the hakuxcore target.
 #
-#   tools/native/app-libs.sh [native build dir]
+# tools/native/app-libs.sh [native build dir]
 set -euo pipefail
 here=$(cd "$(dirname "$0")/../.." && pwd)
 build=${1:-$here/build/native/core}
 ndk=${ANDROID_NDK:-/c/Users/USER/AppData/Local/Android/Sdk/ndk/29.0.14206865}
-# The NDK's strip, from the host's prebuilt directory: the Windows one this
-# script was written on, or the Linux one a Linux build machine has.
+# Use the NDK's strip tool for the current Windows or Linux host.
 strip=
 for h in linux-x86_64 windows-x86_64; do
   for s in llvm-strip llvm-strip.exe; do

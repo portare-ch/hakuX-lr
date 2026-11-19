@@ -67,9 +67,8 @@ static uint64_t now_ms(void)
     return (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000;
 }
 
-/* Whether this frame came in already, within DUP_MS, from another address:
- * the same console over its other network. A frame repeated from the same
- * address is the console's own repeat, and goes through. */
+/* Drop a copy of the same frame from another address within DUP_MS. A retransmission by the
+ * same sender still reaches the guest. */
 static bool duplicate(const uint8_t *frame, size_t len, const struct sockaddr_in *from)
 {
     uint64_t h = 1469598103934665603ull;    /* FNV-1a */
@@ -298,17 +297,15 @@ static void learn(const uint8_t *mac, const struct sockaddr_in *from)
            mac[4], mac[5], a, ntohs(from->sin_port), remote ? " (outside the local network)" : "");
 }
 
-/* Whether the console at s keeps its address against this one: it uses
- * it already, it isn't hakuX's (it can't move), or it is hakuX's about to
- * lease it too with a lower MAC. */
+/* Give another console priority for this address if it already uses it, cannot choose a new
+ * one, or is probing with a lower MAC. */
 static bool keeps(const Station *s)
 {
     return s->uses || !s->claims || !own(NULL) || memcmp(s->mac, g_lan.own, 6) < 0;
 }
 
-/* The address the console with this MAC has (claims: from its hello;
- * uses: its frames, or its claim leased). Ours, once leased, used by
- * another: the user is told. */
+/* Track this MAC's claimed address from hellos and its in-use address from traffic or a
+ * leased claim. Warn if another console uses our leased address. */
 static void learn_ip(const uint8_t *mac, uint32_t ip, bool claims, bool uses)
 {
     Station *s = station(mac);

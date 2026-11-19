@@ -1,31 +1,18 @@
 /*
- * hakuX HLE GPU — the window's presenter (swapchain.h): the front frame
- * (display.h) drawn into the app's window through a Vulkan swapchain, once
- * per display refresh, on the window's thread (native/app/present.c).
+ * Present the front frame (display.h) through the app window's Vulkan swapchain on the
+ * native/app/present.c thread. FIFO image acquisition paces it to the display. Each refresh
+ * letterboxes the frame and applies the display's gamma ramp. Apply FXAA once per new frame
+ * at its render size. Average all covered source pixels when downscaling and use bilinear or
+ * SGSR when upscaling.
  *
- * Each refresh: a swapchain image (waiting for one paces the thread to the
- * panel: FIFO), the front frame, and one pass that letterboxes the frame
- * into the image, the rest black, through the display's gamma ramp. The
- * anti-aliasing on the way:
- *  - FXAA over each new frame at its own size, into an image of ours, once a
- *    frame however many refreshes show it;
- *  - a frame larger than its place in the window (a render scale above the
- *    screen's) is averaged down, each window pixel the mean of the frame
- *    pixels it covers, where a bilinear sample would skip most of them and
- *    keep the edges' stairs;
- *  - a smaller one is scaled up bilinearly, or by Snapdragon Game Super
- *    Resolution 1, which rebuilds its edges.
  * FXAA is FXAA 3.11 Quality (Timothy Lottes) as PCSX2's fxaa.fx tunes it
  * (GPL-3.0-or-later); SGSR is Qualcomm's sgsr1_shader_mobile.frag
  * (BSD-3-Clause, licenses/snapdragon-gsr.license.txt).
  *
- * The queue is the render thread's too (hle_vk_queue_lock): queue order
- * puts our reads of a frame after its writes, and the render thread's next
- * write of the slot after our reads (its barriers). The device table is the
- * presenter's own: the render thread's wraps its commands for
- * strip batching (batch.c). The surface follows the window: a new one (on
- * Android, the activity's surface made again) gets a new surface and
- * swapchain, none drops them.
+ * Use the render thread's queue under hle_vk_queue_lock. Queue order and barriers protect
+ * each display slot from reuse until the presentation read completes. Use a separate device
+ * table because the render thread wraps recording commands for strip batching. Recreate or
+ * release the surface and swapchain as the window changes.
  */
 #include "hw/xbox/hle/base.h"
 #include "hw/xbox/hle/hle.h"
@@ -1011,18 +998,13 @@ void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, u
             VK_PIPELINE_STAGE_2_NONE, 0);
     T.vkEndCommandBuffer(cb);
 
-    /* The present waits for the pass on the GPU: Turnip's hands the
-     * compositor a fence over it (Mesa's vk_android.c: a submit and a sync
-     * file), and the window's thread goes on to the next refresh. Waiting
-     * for the pass here, behind the game's frames on the one queue, held
-     * the thread past refreshes whenever the GPU was busy, and the next
-     * front frame was replaced before it was picked up ("UI missed").
-     * HLE_QUIRK_PRESENT_CPU_WAIT: the image is presented once it's drawn,
-     * with nothing left to wait for. Presenting with a semaphore to wait on
-     * made Android's present ask Qualcomm's driver for a fence over it,
-     * which waited (3-6 ms a refresh) with the queue's lock held, the render
-     * thread's submits waiting on it; Halo 2 lost 2% of its frames to GL's
-     * presenter. The wait is ours there, unlocked. */
+    /* Pass a semaphore to present so Turnip can hand the compositor a fence and let the
+     * window thread continue. Waiting on the shared GPU queue first could make the UI miss
+     * front frames.
+     *
+     * With HLE_QUIRK_PRESENT_CPU_WAIT, wait before present and outside the queue lock.
+     * Qualcomm's Android driver otherwise waited for the semaphore under that lock for 3–6 ms
+     * per refresh, blocking render submits. */
     const bool cpu_wait = hle_quirk(HLE_QUIRK_PRESENT_CPU_WAIT);
     const uint64_t value = g_ps.submitted + 1;
     VkSemaphoreSubmitInfo wait = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .semaphore = f->acquired,

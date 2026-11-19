@@ -159,13 +159,10 @@ sc.raw(0x58)                                      # pop eax (flags kept)
 sc.jcc32(0x82, RUN)                               # jc RUN: a task that draws
 sc.rel32(0xE9, C_ALWAYS)                          # jmp C_ALWAYS
 blocks.append(sc.done())
-# Tasks that run every frame without drawing: the select screen's fighters
-# load through a service (0x12F490, fed by 0x12F460) whose requests the
-# frames in between leave half done: the fighters were drawn every other tick.
-# The fight's render task (0x116B20) starts each frame: it resets D3D's
-# render state and the draw lists, sets the lights and queues the fighters'
-# shadows; skipped, the frames in between drew with the last frame's state
-# and lists, the ground under the fighters darker every other tick
+# Run non-drawing tasks that prepare the next render. The character select loader (0x12F490,
+# fed by 0x12F460) needs every frame to finish fighter requests. The fight render task
+# (0x116B20) resets D3D state and draw lists, sets lights and queues shadows. Skipping it
+# made the ground alternate in brightness.
 al = Asm(C_ALWAYS)
 for entry in ALWAYS:
     al.raw(0x81, 0x7E, 0x0C); al.u32(entry)       # cmp dword [esi+0xC], entry (the slot's task)
@@ -197,11 +194,10 @@ for k, (entry, nreloc) in enumerate(DRAWS):
     e.b += b'\x90' * (nreloc - 5)
     blocks.append(e.done())
 
-# The game's frame counter (0x87D56C: draw requests stamp it, a task that
-# finds it unmoved repeats its last frame) counts logic frames only. Its two
-# loops bump it after their one-frame wait; the menus' loop (0xDAF24) draws,
-# so it runs on the other frames too, and the counter went at 120 a second:
-# the select screen's fighters were drawn every other tick.
+# Advance the game counter at 0x87D56C only on logic frames. Draw requests use it to detect
+# when to repeat the previous frame. The menu loop at 0xDAF24 also runs for extra renders, so
+# incrementing there unconditionally advanced the counter at 120 Hz and made fighters
+# flicker.
 for k, (at, reg, inc_at) in enumerate(((0xD935B, 2, 0xD9364), (0xDAF24, 1, 0xDAF32))):
     load = bytes((0x8B, 0x05 | reg << 3)) + struct.pack('<I', COUNTER)  # mov e?x, [COUNTER]
     assert file_bytes(at, 6) == load and file_bytes(inc_at, 1) == bytes((0x40 | reg,))
@@ -250,17 +246,11 @@ j = Asm(CREATE)
 j.rel32(0xE9, C_CREATE)
 blocks.append(j.done())
 
-# The 2D lists (layers 0-9 of items: text, icons, panels): tasks append to
-# them during a frame, the 2D task (slot 15, every frame: it draws) draws
-# them and resets them, with their node and vertex scratch. Tasks that don't
-# draw append too, on logic frames only: the select screen's (slot 1,
-# 0x13B800) puts up its "A Select / B Back" legend so, and it was missing
-# every other frame. Now the lists a logic frame drew stay until the next
-# logic frame's start (C_LOGIC resets them), and the frames in between drop
-# their appends (APPEND's own answer when it is full, 0): they draw the
-# logic frame's 2D again, like its 3D. A reset at the end of the frame in
-# between left nothing for a third pass in one tick (a late vblank): the
-# legend went out for a frame now and then.
+# Keep the logic frame's 2D lists (text, icons and panels) for every extra render until
+# C_LOGIC resets them at the next logic frame. Slot 15 draws the lists. Other tasks, such as
+# slot 1 at 0x13B800, append menu prompts only on logic frames. Drop extra-frame appends by
+# returning APPEND's full-list result, zero. Resetting after the first extra render loses the
+# prompts if a late vblank needs a third pass.
 rs = Asm(C_RESET)
 rs.raw(0xC7, 0x05); rs.u32(PENDING); rs.u32(1)    # mov dword [PENDING], 1: put off
 rs.raw(0xC3)                                      # ret
