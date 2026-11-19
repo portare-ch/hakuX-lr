@@ -2162,8 +2162,16 @@ static void cmd_readback(const HleCmdReadback *c)
         VkImageLayout il = s->layout;
         if (s->scale > 1 || w != s->d.w || h != s->d.h) {
             /* the guest gets guest-size pixels (or the size asked for:
-             * a multisampled display persisted at display size) */
-            img = hle_surf_down(cb, s, il, 0, 0, w, h, c->nearest);
+             * a multisampled display persisted at display size). Of a
+             * scaled target at its own size, one host pixel of each guest
+             * pixel's block, not the block's blend: across an edge the
+             * blend is a colour between the two sides, which no pixel of
+             * the console's has (nxdk_pgraph_tests at 2x: 291 pictures
+             * more match their captures). The pixel a nearest blit takes
+             * is the block's centre at an odd scale and the one below and
+             * right of it at an even one, where none is at the centre. */
+            const bool one = c->nearest || (s->scale > 1 && w == s->d.w && h == s->d.h);
+            img = hle_surf_down(cb, s, il, 0, 0, w, h, one);
             il = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
         }
         bool fb = !g_hram.zero_copy;
