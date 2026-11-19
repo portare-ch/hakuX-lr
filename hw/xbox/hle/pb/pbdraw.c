@@ -1304,6 +1304,13 @@ static bool covers_display(const PbObj *o)
            o->d.h >= g_pd.disp_h;
 }
 
+/* The surface clip is empty (no width or no height): no pixel is inside it,
+ * and nothing is drawn or cleared. nxdk_pgraph_tests' Surface clip sets
+ * 0 x 384 and 512 x 0 and draws: the console leaves the frame as it was,
+ * and the draws went into the target as it was last bound, whole. The
+ * targets stay as they were bound. */
+static bool g_clip_empty;
+
 /* The targets the surface methods describe, bound when they changed. */
 static void sync_rt(void)
 {
@@ -1317,6 +1324,7 @@ static void sync_rt(void)
     uint32_t cw = R(NV097_SET_SURFACE_CLIP_HORIZONTAL) >> 16, cx = R(NV097_SET_SURFACE_CLIP_HORIZONTAL) & 0xFFFF;
     uint32_t ch = R(NV097_SET_SURFACE_CLIP_VERTICAL) >> 16, cy = R(NV097_SET_SURFACE_CLIP_VERTICAL) & 0xFFFF;
     uint32_t w = cx + cw, h = cy + ch;
+    g_clip_empty = !swz && (!cw || !ch);
     /* antialiasing (SET_SURFACE_FORMAT 15:12: 1 center-corner 2x horizontal, 2
      * square-offset 2x2): the clip is in logical pixels, the surface (pitch,
      * image) twice as wide / high; positions scale by it on the NV2A */
@@ -1634,6 +1642,9 @@ static void zbase(PbObj *o)
 static void clear(uint32_t flags)
 {
     sync_rt();
+    if (g_clip_empty) {
+        return;
+    }
     uint32_t hr = R(NV097_SET_CLEAR_RECT_HORIZONTAL), vr = R(NV097_SET_CLEAR_RECT_VERTICAL);
     /* the rect in logical pixels, the surface's scaled by its antialiasing */
     const int32_t ax = (int32_t)MAX(g_pd.aa_x, 1u), ay = (int32_t)MAX(g_pd.aa_y, 1u);
@@ -4865,6 +4876,10 @@ static void vb_land(void)
 static void draw(void)
 {
     sync_rt();
+    if (g_clip_empty) {
+        skip(SK_DRAW_EMPTY);
+        return;
+    }
     if (!g_pd.rt && !g_pd.ds) {
         skip(SK_DRAW_NO_TARGET);
         if (g_dlog_left > 0) {
