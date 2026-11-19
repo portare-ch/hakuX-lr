@@ -355,6 +355,8 @@ const char *nc_kernel_guest_str(NcKernel *k, uint32_t va, char *buf, size_t len)
 /* Allocates an object (OBJECT_HEADER + zeroed body) and returns the body VA. */
 /* ObfDereferenceObject: an object no one holds any more is freed (ob.c). */
 void nc_ob_dereference(NcKernel *k, uint32_t object);
+/* ObfReferenceObject: the object stays until the reference is given back. */
+void nc_ob_reference(NcKernel *k, uint32_t object);
 uint32_t nc_ob_create(NcKernel *k, enum NcObType type, uint32_t body_size);
 uint32_t nc_ob_handle(NcKernel *k, uint32_t object, enum NcObType type);
 uint32_t nc_ob_lookup(NcKernel *k, uint32_t handle, enum NcObType *type);

@@ -920,6 +920,14 @@ static bool disc_read_later(NcKernel *k, const NcFile *nf, const uint32_t *a, co
     }
     const bool queued = g_reader.started && g_reader.busy < DISC_JOBS;
     if (queued) {
+        /* The read holds its file object until it completes, as an IRP
+         * does: the title may close the handle meanwhile, and the object's
+         * event and completion port are needed then. Morrowind closes
+         * Media.xpr with a read still under way; the freed object's memory,
+         * reused, gave a completion port that was no address at all. */
+        if (fo) {
+            nc_ob_reference(k, fo);
+        }
         pin_buffer(k, &j, 1);
         g_reader.q[(g_reader.head + g_reader.n++) % DISC_JOBS] = j;
         g_reader.busy++;
@@ -972,6 +980,9 @@ static void disc_read_done(NcKernel *k, const DiscJob *j)
         nc_apc_queue(k, j->thread, &apc, 1);
     } else if (!j->apc && j->apc_ctx && j->fo) {
         nc_iomgr_file_post(k, j->fo, j->apc_ctx, st, n);
+    }
+    if (j->fo) {
+        nc_ob_dereference(k, j->fo);       /* (the read's own, disc_read_later) */
     }
 }
 
