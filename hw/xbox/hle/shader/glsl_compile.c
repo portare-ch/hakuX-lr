@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — GLSL -> SPIR-V via glslang C API.
+ * hakuX-lr HLE GPU — GLSL -> SPIR-V via glslang C API.
  */
 #include "hw/xbox/hle/base.h"
 #include "hw/xbox/hle/shader/glsl_compile.h"
@@ -8,7 +8,7 @@
 #include <glslang/Include/glslang_c_interface.h>
 #ifdef __ANDROID__
 #include <android/log.h>
-#define GLSL_LOG(...) __android_log_print(ANDROID_LOG_ERROR, "hakuX-hle-glsl", __VA_ARGS__)
+#define GLSL_LOG(...) __android_log_print(ANDROID_LOG_ERROR, "hakuX-lr-hle-glsl", __VA_ARGS__)
 #else
 #define GLSL_LOG(...) fprintf(stderr, __VA_ARGS__)
 #endif

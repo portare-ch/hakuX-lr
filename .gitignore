@@ -44,7 +44,7 @@ profile-out-*/
 
 # Local dev tools (not versioned), but for the core's (its app libraries,
 # the savestate lock, device runs), the mods' generators (mods/README.md)
-# and the Linux test setup (tools/linux/setup-hakux.sh)
+# and the Linux test setup (tools/linux/setup-hakux-lr.sh)
 /tools/*
 !/tools/native/
 !/tools/mods/

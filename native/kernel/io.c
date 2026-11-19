@@ -1,5 +1,5 @@
 /*
- * hakuX native core — files, devices and the object namespace.
+ * hakuX-lr native core — files, devices and the object namespace.
  *
  * Devices: \Device\CdRom0 is the title's disc (XDVDFS, read-only);
  * \Device\Harddisk0\PartitionN are host directories (hdd root/PartitionN),
@@ -242,7 +242,7 @@ static int link_find(const char *name)
 static bool link_set(const char *name, const char *target)
 {
     if (strlen(target) >= sizeof(g_links[0].target)) {
-        nc_log("hakuX-native-io", "link %s not made: its target is too long (%zu chars): %s", name, strlen(target),
+        nc_log("hakuX-lr-native-io", "link %s not made: its target is too long (%zu chars): %s", name, strlen(target),
                target);
         return false;
     }
@@ -257,7 +257,7 @@ static bool link_set(const char *name, const char *target)
     }
     snprintf(g_links[i].name, sizeof(g_links[i].name), "%s", name);
     snprintf(g_links[i].target, sizeof(g_links[i].target), "%s", target);
-    nc_log("hakuX-native-io", "link %s -> %s", name, target);
+    nc_log("hakuX-lr-native-io", "link %s -> %s", name, target);
     return true;
 }
 
@@ -540,7 +540,7 @@ static struct {
 static void close_now(const CloseJob *j)
 {
     if (fsync(j->fd) != 0) {
-        nc_log("hakuX-native-io", "sync %s: %s", j->path, strerror(errno));
+        nc_log("hakuX-lr-native-io", "sync %s: %s", j->path, strerror(errno));
     }
     close(j->fd);
     if (j->old_path[0]) {
@@ -720,7 +720,7 @@ void nc_io_set_device_time(bool on)
     if (e) {
         sscanf(e, "%u,%u,%u,%u", &g_dev_disc.req_us, &g_dev_disc.kbps, &g_dev_hdd.req_us, &g_dev_hdd.kbps);
     }
-    nc_log("hakuX-native-io", "console timing %s: disc %u us + %u kB/s, hard disk %u us + %u kB/s", on ? "on" : "off",
+    nc_log("hakuX-lr-native-io", "console timing %s: disc %u us + %u kB/s, hard disk %u us + %u kB/s", on ? "on" : "off",
            g_dev_disc.req_us, g_dev_disc.kbps, g_dev_hdd.req_us, g_dev_hdd.kbps);
 }
 
@@ -954,7 +954,7 @@ static void disc_read_done(NcKernel *k, const DiscJob *j)
     }
     uint32_t st = NC_STATUS_SUCCESS, n = j->n;
     if (!ok) {
-        nc_log("hakuX-native-io", "read %s +%llx (%u) into %08x failed: %s", j->path, (unsigned long long)j->off,
+        nc_log("hakuX-lr-native-io", "read %s +%llx (%u) into %08x failed: %s", j->path, (unsigned long long)j->off,
                j->n, j->va, strerror(err));
         st = 0xC000009Cu; /* STATUS_DEVICE_DATA_ERROR */
         n = 0;
@@ -1015,7 +1015,7 @@ static bool set_aside(const char *host, char *old_path, size_t len)
     mkdir(dir, 0775);
     snprintf(old_path, len, "%s/%u-%u", dir, (unsigned)getpid(), ++serial);
     if (rename(host, old_path) != 0) {
-        nc_log("hakuX-native-io", "overwrite %s: keeping its old bytes failed: %s", host, strerror(errno));
+        nc_log("hakuX-lr-native-io", "overwrite %s: keeping its old bytes failed: %s", host, strerror(errno));
         return false;
     }
     return true;
@@ -1074,7 +1074,7 @@ static uint32_t dir_mismatch(const char *path, uint32_t options, uint32_t st)
 {
     static unsigned logged;
     if (logged++ < 20) {
-        nc_log("hakuX-native-io", "open %s (options %x): %s", path, options,
+        nc_log("hakuX-lr-native-io", "open %s (options %x): %s", path, options,
                st == STATUS_FILE_IS_A_DIRECTORY ? "a directory" : "not a directory");
     }
     return st;
@@ -1087,11 +1087,11 @@ static uint32_t do_open(NcKernel *k, uint32_t access, uint32_t share, uint32_t a
     ansi(k, nc_vm_rd32(k->vm, attrs + 4), name, sizeof(name));
     const uint32_t root = nc_vm_rd32(k->vm, attrs);
     if (!resolve_name(k, root, name, sizeof(name))) {
-        nc_log("hakuX-native-io", "open %s relative to handle %08x: not a directory handle", name, root);
+        nc_log("hakuX-lr-native-io", "open %s relative to handle %08x: not a directory handle", name, root);
         return NC_STATUS_INVALID_HANDLE;
     }
     if (!canon(name, path, sizeof(path))) {
-        nc_log("hakuX-native-io", "open %s: no such drive", name);
+        nc_log("hakuX-lr-native-io", "open %s: no such drive", name);
         return STATUS_OBJECT_PATH_NOT_FOUND;
     }
     const char *rel;
@@ -1109,7 +1109,7 @@ static uint32_t do_open(NcKernel *k, uint32_t access, uint32_t share, uint32_t a
         const size_t at = last ? (size_t)(last - path) : 0;
         const bool in_dir = at == 0 || (at == 3 && !strncmp(path, "\\??", 3)) ||
                             (at == 7 && !strncasecmp(path, "\\Device", 7));
-        nc_log("hakuX-native-io", "open %s: unknown device (a missing %s)", path, in_dir ? "name" : "path");
+        nc_log("hakuX-lr-native-io", "open %s: unknown device (a missing %s)", path, in_dir ? "name" : "path");
         return in_dir ? STATUS_OBJECT_NAME_NOT_FOUND : STATUS_OBJECT_PATH_NOT_FOUND;
     }
     if (dev == -1) {
@@ -1121,7 +1121,7 @@ static uint32_t do_open(NcKernel *k, uint32_t access, uint32_t share, uint32_t a
         }
         NcDiscFile df;
         if (!nc_disc_find(k->disc, rel, &df)) {
-            nc_log("hakuX-native-io", "open %s: not on the disc", path);
+            nc_log("hakuX-lr-native-io", "open %s: not on the disc", path);
             return STATUS_OBJECT_NAME_NOT_FOUND;
         }
         const bool dir = df.attr & 0x10;
@@ -1158,7 +1158,7 @@ static uint32_t do_open(NcKernel *k, uint32_t access, uint32_t share, uint32_t a
         int exists = host_path(dev, rel, host, sizeof(host));
         if (exists < 0) {
             if (g_trace_io) {
-                nc_log("hakuX-native-io", "open %s: path not found", path);
+                nc_log("hakuX-lr-native-io", "open %s: path not found", path);
             }
             return STATUS_OBJECT_PATH_NOT_FOUND;
         }
@@ -1168,19 +1168,19 @@ static uint32_t do_open(NcKernel *k, uint32_t access, uint32_t share, uint32_t a
             is_dir = true; /* the partition root */
         }
         if (exists && !is_dir && file_other(NULL, host, true)) {
-            nc_log("hakuX-native-io", "open %s: delete pending", path);
+            nc_log("hakuX-lr-native-io", "open %s: delete pending", path);
             return STATUS_DELETE_PENDING;
         }
         if (exists && disposition == FILE_CREATE) {
             return STATUS_OBJECT_NAME_COLLISION;
         }
         if (exists && !is_dir && share_refused(host, share_kinds(access), (uint8_t)(share & 7))) {
-            nc_log("hakuX-native-io", "open %s: sharing violation (access %08x, share %x)", path, access, share & 7);
+            nc_log("hakuX-lr-native-io", "open %s: sharing violation (access %08x, share %x)", path, access, share & 7);
             return STATUS_SHARING_VIOLATION;
         }
         if (!exists && (disposition == FILE_OPEN || disposition == FILE_OVERWRITE)) {
             if (g_trace_io) {
-                nc_log("hakuX-native-io", "open %s: not found", path);
+                nc_log("hakuX-lr-native-io", "open %s: not found", path);
             }
             return STATUS_OBJECT_NAME_NOT_FOUND;
         }
@@ -1218,7 +1218,7 @@ static uint32_t do_open(NcKernel *k, uint32_t access, uint32_t share, uint32_t a
             }
             fd = open(host, flags, 0664);
             if (fd < 0) {
-                nc_log("hakuX-native-io", "open %s (%s): %s", path, host, strerror(errno));
+                nc_log("hakuX-lr-native-io", "open %s (%s): %s", path, host, strerror(errno));
                 if (old_path[0]) {
                     rename(old_path, host); /* the file as it was */
                 }
@@ -1255,7 +1255,7 @@ static uint32_t do_open(NcKernel *k, uint32_t access, uint32_t share, uint32_t a
     nf->can_write = (access & ACCESS_WRITES) != 0;
     nc_kernel_trace_trigger(path);
     *handle = file_handle(k, nf);
-    nc_log("hakuX-native-io", "open %s -> %s%s", path, nf->is_dir ? "dir " : "",
+    nc_log("hakuX-lr-native-io", "open %s -> %s%s", path, nf->is_dir ? "dir " : "",
            *info == 2 ? "(created)" : *info == 3 ? "(overwritten)" : *info == 0 ? "(superseded)" : "");
     return *handle ? NC_STATUS_SUCCESS : NC_STATUS_INSUFFICIENT_RESOURCES;
 }
@@ -1293,7 +1293,7 @@ static uint64_t IoCreateFile(NcKernel *k, NcFrame *f, const uint32_t *a)
     static bool told;
     if ((a[9] & 4) && !told) {
         told = true;
-        nc_log("hakuX-native-io", "IoCreateFile with IO_OPEN_TARGET_DIRECTORY: the file itself opened");
+        nc_log("hakuX-lr-native-io", "IoCreateFile with IO_OPEN_TARGET_DIRECTORY: the file itself opened");
     }
     return NtCreateFile(k, f, a);
 }
@@ -1332,7 +1332,7 @@ static void raw_io(int part, uint64_t off, uint8_t *buf, uint32_t len, bool writ
         return;
     }
     if (write ? pwrite(fd, buf, n, (off_t)off) != (ssize_t)n : pread(fd, buf, n, (off_t)off) < 0) {
-        nc_log("hakuX-native-io", "raw partition%d %s +%llx: %s", part, write ? "write" : "read",
+        nc_log("hakuX-lr-native-io", "raw partition%d %s +%llx: %s", part, write ? "write" : "read",
                (unsigned long long)off, strerror(errno));
     }
     close(fd);
@@ -1526,7 +1526,7 @@ static uint64_t read_runs(NcKernel *k, const uint32_t *a, IoRun *run, unsigned n
         }
         io_moved(k, nf, a[7], off + len);
         if (g_trace_io) {
-            nc_log("hakuX-native-io", "read %s raw +%llx %u", nf->path, (unsigned long long)off, len);
+            nc_log("hakuX-lr-native-io", "read %s raw +%llx %u", nf->path, (unsigned long long)off, len);
         }
         return io_finish(k, nf, a, NC_STATUS_SUCCESS, len, true);
     }
@@ -1564,7 +1564,7 @@ static uint64_t read_runs(NcKernel *k, const uint32_t *a, IoRun *run, unsigned n
             disc_read_later(k, nf, a, run, nrun, off, n, !async, dev_us)) {
             io_moved(k, nf, a[7], off + n);
             if (g_trace_io) {
-                nc_log("hakuX-native-io", "read %s +%llx %u into %08x%s %s%s%s", nf->path, (unsigned long long)off,
+                nc_log("hakuX-lr-native-io", "read %s +%llx %u into %08x%s %s%s%s", nf->path, (unsigned long long)off,
                        n, va0, nrun > 1 ? " (scattered)" : "", async ? "pending" : "waited for",
                        a[1] ? " event" : "", a[2] ? " apc" : "");
             }
@@ -1583,7 +1583,7 @@ static uint64_t read_runs(NcKernel *k, const uint32_t *a, IoRun *run, unsigned n
             o += run[i].len;
         }
         if (!ok) {
-            nc_log("hakuX-native-io", "read %s +%llx (%u) into %08x failed: %s", nf->path, (unsigned long long)off, n,
+            nc_log("hakuX-lr-native-io", "read %s +%llx (%u) into %08x failed: %s", nf->path, (unsigned long long)off, n,
                    va0, strerror(errno));
             st = 0xC000009Cu; /* STATUS_DEVICE_DATA_ERROR */
             n = 0;
@@ -1595,7 +1595,7 @@ static uint64_t read_runs(NcKernel *k, const uint32_t *a, IoRun *run, unsigned n
         if (n >= 8 && run[0].len >= 8) {
             memcpy(b, nc_vm_host(k->vm, va0), 8);
         }
-        nc_log("hakuX-native-io", "read %s +%llx %u into %08x -> %08x n=%u%s%s [%02x%02x%02x%02x %02x%02x%02x%02x]",
+        nc_log("hakuX-lr-native-io", "read %s +%llx %u into %08x -> %08x n=%u%s%s [%02x%02x%02x%02x %02x%02x%02x%02x]",
                nf->path, (unsigned long long)off, len, va0, st, n, a[1] ? " event" : "", a[2] ? " apc" : "",
                b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]);
     }
@@ -1689,7 +1689,7 @@ static bool handle_can_write(const NcFile *nf, const char *what)
     }
     static unsigned logged;
     if (logged++ < 16) {
-        nc_log("hakuX-native-io", "%s %s through a handle opened without write access: refused "
+        nc_log("hakuX-lr-native-io", "%s %s through a handle opened without write access: refused "
                "(first 16 logged)", what, nf->path);
     }
     return false;
@@ -1753,7 +1753,7 @@ static uint64_t write_from(NcKernel *k, const uint32_t *a, NcFile *nf, uint8_t *
             raw_io(0, off, src, a[6], true);
             io_moved(k, nf, a[7], off + a[6]);
             if (g_trace_io) {
-                nc_log("hakuX-native-io", "write %s raw +%llx %u", nf->path, (unsigned long long)off, a[6]);
+                nc_log("hakuX-lr-native-io", "write %s raw +%llx %u", nf->path, (unsigned long long)off, a[6]);
             }
         }
         return io_finish(k, nf, a, NC_STATUS_SUCCESS, a[6], true);
@@ -1769,7 +1769,7 @@ static uint64_t write_from(NcKernel *k, const uint32_t *a, NcFile *nf, uint8_t *
         if (o == 0 && a[6] >= 12 && !memcmp(sb, "FATX", 4)) {
             const int part = partition_root(nf);
             g_cluster_sectors[part] = nc_rd32(sb + 8);
-            nc_log("hakuX-native-io", "%s formatted (%u-sector clusters): emptied %s", nf->path,
+            nc_log("hakuX-lr-native-io", "%s formatted (%u-sector clusters): emptied %s", nf->path,
                    g_cluster_sectors[part], nf->host);
             remove_tree(nf->host, false);
         }
@@ -1802,7 +1802,7 @@ static uint64_t write_from(NcKernel *k, const uint32_t *a, NcFile *nf, uint8_t *
         if (n >= 8) {
             memcpy(b, src, 8);
         }
-        nc_log("hakuX-native-io", "write %s +%llx %u from %08x -> %08x [%02x%02x%02x%02x %02x%02x%02x%02x]", nf->path,
+        nc_log("hakuX-lr-native-io", "write %s +%llx %u from %08x -> %08x [%02x%02x%02x%02x %02x%02x%02x%02x]", nf->path,
                (unsigned long long)off, a[6], a[5], st, b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]);
     }
     io_moved(k, nf, a[7], off + (n > 0 ? (uint64_t)n : 0));
@@ -1945,7 +1945,7 @@ static uint32_t query_file(NcKernel *k, NcFile *nf, uint32_t cls, uint32_t buf, 
         nc_wr32(o, 0);
         break;
     default:
-        nc_log("hakuX-native-io", "query information class %u on %s not implemented", cls, nf->path);
+        nc_log("hakuX-lr-native-io", "query information class %u on %s not implemented", cls, nf->path);
         return 0xC0000003u; /* STATUS_INVALID_INFO_CLASS */
     }
     if (buf_len < len) {
@@ -1997,7 +1997,7 @@ static uint64_t NtSetInformationFile(NcKernel *k, NcFrame *f, const uint32_t *a)
                 }
             }
             if ((nf->fd >= 0 ? futimens(nf->fd, ts) : utimensat(AT_FDCWD, nf->host, ts, 0)) != 0) {
-                nc_log("hakuX-native-io", "set times on %s: %s", nf->path, strerror(errno));
+                nc_log("hakuX-lr-native-io", "set times on %s: %s", nf->path, strerror(errno));
             }
         }
         break;
@@ -2028,7 +2028,7 @@ static uint64_t NtSetInformationFile(NcKernel *k, NcFrame *f, const uint32_t *a)
             /* deletes are few, and a save that loses a file is hard to trace back */
             char calls[96];
             nc_kernel_frame_chain(k, f, calls, sizeof(calls));
-            nc_log("hakuX-native-io", "delete %s -> %x (from %08x |%s)", nf->path, st,
+            nc_log("hakuX-lr-native-io", "delete %s -> %x (from %08x |%s)", nf->path, st,
                    nc_vm_rd32(k->vm, nc_frame_gpr(f, NC_ESP)), calls);
         }
         break;
@@ -2063,7 +2063,7 @@ static uint64_t NtSetInformationFile(NcKernel *k, NcFrame *f, const uint32_t *a)
             snprintf(nf->path, sizeof(nf->path), "%s", path);
         }
         if (st != NC_STATUS_SUCCESS) {
-            nc_log("hakuX-native-io", "rename %s to %s (replace %u) -> %x", nf->path, name, in[0], st);
+            nc_log("hakuX-lr-native-io", "rename %s to %s (replace %u) -> %x", nf->path, name, in[0], st);
         }
         break;
     }
@@ -2075,7 +2075,7 @@ static uint64_t NtSetInformationFile(NcKernel *k, NcFrame *f, const uint32_t *a)
         break;
     }
     default:
-        nc_log("hakuX-native-io", "set information class %u on %s not implemented", a[4], nf->path);
+        nc_log("hakuX-lr-native-io", "set information class %u on %s not implemented", a[4], nf->path);
         st = 0xC0000003u;
         break;
     }
@@ -2213,7 +2213,7 @@ static uint32_t volume_info(NcKernel *k, const NcFile *nf, uint32_t cls, uint32_
         break;
     }
     default:
-        nc_log("hakuX-native-io", "volume information class %u not implemented", cls);
+        nc_log("hakuX-lr-native-io", "volume information class %u not implemented", cls);
         *len_out = 0;
         return 0xC0000003u;
     }
@@ -2358,7 +2358,7 @@ static uint64_t NtQueryDirectoryFile(NcKernel *k, NcFrame *f, const uint32_t *a)
         return nf ? STATUS_INVALID_DEVICE_REQUEST : NC_STATUS_INVALID_HANDLE;
     }
     if (a[7] != 1) {
-        nc_log("hakuX-native-io", "directory information class %u not implemented", a[7]);
+        nc_log("hakuX-lr-native-io", "directory information class %u not implemented", a[7]);
         return 0xC0000003u;
     }
     char mask[128] = "*";
@@ -2397,14 +2397,14 @@ static uint64_t NtQueryDirectoryFile(NcKernel *k, NcFrame *f, const uint32_t *a)
     }
     uint32_t st;
     if (g_trace_io) {
-        nc_log("hakuX-native-io", "list %s mask '%s' (%u entries): %s", nf->path, nf->mask, n,
+        nc_log("hakuX-lr-native-io", "list %s mask '%s' (%u entries): %s", nf->path, nf->mask, n,
                i < n ? entries[i].name : "no more");
     }
     if (i >= n) {
         st = nf->dir_next == 0 ? STATUS_NO_SUCH_FILE : STATUS_NO_MORE_FILES;
         static unsigned none_logged;
         if (st == STATUS_NO_SUCH_FILE && none_logged++ < 50) {
-            nc_log("hakuX-native-io", "list %s mask '%s': nothing matches (%u entries)", nf->path, nf->mask, n);
+            nc_log("hakuX-lr-native-io", "list %s mask '%s': nothing matches (%u entries)", nf->path, nf->mask, n);
         }
         io_status(k, a[4], st, 0);
         complete(k, a);
@@ -2458,7 +2458,7 @@ static uint64_t NtDeleteFile(NcKernel *k, NcFrame *f, const uint32_t *a)
     const char *rel;
     int dev;
     if (!canon(name, path, sizeof(path)) || (dev = device_of(path, &rel)) < 0) {
-        nc_log("hakuX-native-io", "delete %s: no such drive", name);
+        nc_log("hakuX-lr-native-io", "delete %s: no such drive", name);
         return STATUS_ACCESS_DENIED;
     }
     if (host_path(dev, rel, host, sizeof(host)) != 1) {
@@ -2469,12 +2469,12 @@ static uint64_t NtDeleteFile(NcKernel *k, NcFrame *f, const uint32_t *a)
     NcFile *open_on = dir ? NULL : file_other(NULL, host, false);
     if (open_on) {
         open_on->del = true;                        /* it goes with the last handle on it */
-        nc_log("hakuX-native-io", "delete %s: at its last close (from %08x)", path,
+        nc_log("hakuX-lr-native-io", "delete %s: at its last close (from %08x)", path,
                nc_vm_rd32(k->vm, nc_frame_gpr(f, NC_ESP)));
         return NC_STATUS_SUCCESS;
     }
     const uint32_t r = (dir ? rmdir(host) : unlink(host)) == 0 ? NC_STATUS_SUCCESS : STATUS_ACCESS_DENIED;
-    nc_log("hakuX-native-io", "delete %s: %s (from %08x)", path, r == NC_STATUS_SUCCESS ? "done" : strerror(errno),
+    nc_log("hakuX-lr-native-io", "delete %s: %s (from %08x)", path, r == NC_STATUS_SUCCESS ? "done" : strerror(errno),
            nc_vm_rd32(k->vm, nc_frame_gpr(f, NC_ESP)));
     return r;
 }
@@ -2607,9 +2607,9 @@ static void scsi_pass_through(NcKernel *k, uint32_t sptd, uint32_t len)
         d[12] = 1;                             /* Authentication */
     } else if (security_sector_cdb(cdb) && n >= SS_SIG + NC_XC_SIG_SIZE) {
         security_sector(k, d, n);
-        nc_log("hakuX-native-io", "scsi ad: security sector (%u bytes), signed with the synthetic key", n);
+        nc_log("hakuX-lr-native-io", "scsi ad: security sector (%u bytes), signed with the synthetic key", n);
     } else {
-        nc_log("hakuX-native-io", "scsi %02x (%u bytes): zeros", cdb[0], n);
+        nc_log("hakuX-lr-native-io", "scsi %02x (%u bytes): zeros", cdb[0], n);
     }
 }
 
@@ -2627,7 +2627,7 @@ static void scsi_pass_through(NcKernel *k, uint32_t sptd, uint32_t len)
 static uint64_t NtControlFile(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
     NcFile *nf = file_of(k, a[0]);
-    nc_log("hakuX-native-io", "control %08x on %s (in %u, out %u)", a[5], nf ? nf->path : "?", a[7], a[9]);
+    nc_log("hakuX-lr-native-io", "control %08x on %s (in %u, out %u)", a[5], nf ? nf->path : "?", a[7], a[9]);
     uint32_t status = NC_STATUS_SUCCESS, info = 0;
     if (nf && nf->partition >= 0 && (a[5] >> 16) == 7) { /* FILE_DEVICE_DISK */
         info = disk_ioctl(nf, a[5], a[8] ? nc_vm_host(k->vm, a[8]) : NULL, a[8] ? a[9] : 0, &status);
@@ -2641,7 +2641,7 @@ static uint64_t NtControlFile(NcKernel *k, NcFrame *f, const uint32_t *a)
         }
         if (i < 16 && !told[i]) {
             told[i] = a[5];
-            nc_log("hakuX-native-io", "control %08x on %s: not known here (invalid device request)", a[5],
+            nc_log("hakuX-lr-native-io", "control %08x on %s: not known here (invalid device request)", a[5],
                    nf ? nf->path : "?");
         }
         status = STATUS_INVALID_DEVICE_REQUEST;
@@ -2688,7 +2688,7 @@ static uint64_t NtOpenSymbolicLinkObject(NcKernel *k, NcFrame *f, const uint32_t
     ansi(k, nc_vm_rd32(k->vm, a[1] + 4), name, sizeof(name));
     int i = link_find(name);
     if (i < 0) {
-        nc_log("hakuX-native-io", "symbolic link %s: none", name);
+        nc_log("hakuX-lr-native-io", "symbolic link %s: none", name);
         return STATUS_OBJECT_NAME_NOT_FOUND;
     }
     NcFile *nf = file_new();
@@ -2756,7 +2756,7 @@ static void device_add(const char *path, uint32_t object)
             return;
         }
     }
-    nc_log("hakuX-native-io", "device table full: %s not named", path);
+    nc_log("hakuX-lr-native-io", "device table full: %s not named", path);
 }
 
 static uint32_t device_new(NcKernel *k, uint32_t driver, uint32_t ext_size, uint32_t type)
@@ -2808,7 +2808,7 @@ static uint64_t IoCreateDevice(NcKernel *k, NcFrame *f, const uint32_t *a)
         device_add(path, d);
     }
     nc_vm_wr32(k->vm, a[5], d);
-    nc_log("hakuX-native-io", "device %s created: type %02x, driver %08x, extension %u", path[0] ? path : "(unnamed)",
+    nc_log("hakuX-lr-native-io", "device %s created: type %02x, driver %08x, extension %u", path[0] ? path : "(unnamed)",
            a[3], a[0], a[1]);
     return NC_STATUS_SUCCESS;
 }
@@ -2838,7 +2838,7 @@ static uint64_t ObReferenceObjectByName(NcKernel *k, NcFrame *f, const uint32_t 
     uint32_t d = device_named(path);
     if (!d) {
         if (device_of(path, &rel) == -2 || *rel) {
-            nc_log("hakuX-native-io", "reference by name %s: not found", name);
+            nc_log("hakuX-lr-native-io", "reference by name %s: not found", name);
             return STATUS_OBJECT_NAME_NOT_FOUND;
         }
         d = device_new(k, 0, 0, device_of(path, &rel) == -1 ? 0x02 : 0x07);
@@ -2950,7 +2950,7 @@ uint32_t nc_io_device_irp(NcKernel *k, uint32_t dev, uint32_t irp, uint32_t sp, 
             }
             if (i < 16 && !told[i]) {
                 told[i] = code;
-                nc_log("hakuX-native-io", "irp control %08x on %s: not known here (invalid device request)", code,
+                nc_log("hakuX-lr-native-io", "irp control %08x on %s: not known here (invalid device request)", code,
                        path);
             }
             status = STATUS_INVALID_DEVICE_REQUEST;
@@ -3291,7 +3291,7 @@ const char *nc_io_state_drain(NcKernel *k, uint64_t timeout_ns)
     for (unsigned i = 0; i < MAX_FILES; i++) {
         const NcFile *nf = &g_files[i];
         if (nf->used && nf->kind == F_HOST && nf->partition == 1 && nf->wrote) {
-            nc_log("hakuX-native-state", "%s is being written", nf->path);
+            nc_log("hakuX-lr-native-state", "%s is being written", nf->path);
             return "the game is writing its save; try again in a moment";
         }
     }
@@ -3441,12 +3441,12 @@ bool nc_file_state_load(NcRd *r, unsigned v)
                 nf->fd = open(nf->host, O_RDWR | O_CREAT | O_CLOEXEC, 0664);
                 if (nf->fd >= 0) {
                     nf->del = true;
-                    nc_log("hakuX-native-state", "%s: deleted while open when the state was saved; empty",
+                    nc_log("hakuX-lr-native-state", "%s: deleted while open when the state was saved; empty",
                            nf->path);
                 }
             }
             if (nf->fd < 0) {
-                nc_log("hakuX-native-state", "%s (%s) can't be opened again: %s", nf->path, nf->host,
+                nc_log("hakuX-lr-native-state", "%s (%s) can't be opened again: %s", nf->path, nf->host,
                        strerror(errno));
                 if (nf->partition >= 3) {
                     nc_state_fail("the game's cache file %s is gone: another game has used its cache drive "
@@ -3461,7 +3461,7 @@ bool nc_file_state_load(NcRd *r, unsigned v)
         if (nf->old_path[0]) {
             struct stat sb;
             if (stat(nf->old_path, &sb) != 0) {
-                nc_log("hakuX-native-state", "%s: its overwritten bytes (%s) are gone", nf->path, nf->old_path);
+                nc_log("hakuX-lr-native-state", "%s: its overwritten bytes (%s) are gone", nf->path, nf->old_path);
                 nf->old_path[0] = 0;
                 nf->old_size = 0;
             } else {
@@ -3469,7 +3469,7 @@ bool nc_file_state_load(NcRd *r, unsigned v)
             }
         }
         if (nc_state_trace()) {
-            nc_log("hakuX-native-state", "file %u: %s at %llu", i, nf->path, (unsigned long long)nf->pos);
+            nc_log("hakuX-lr-native-state", "file %u: %s at %llu", i, nf->path, (unsigned long long)nf->pos);
         }
     }
     return ok && !r->fail;

@@ -63,7 +63,7 @@ void hle_pcache_init(void)
         g_autofree char *shared = g_strdup_printf("%shle_pipeline_cache.bin", base);
         struct stat sb;
         if (stat(shared, &sb) == 0 && remove(shared) == 0) {
-            hle_log("hakuX-hle-pipe", "the shared pipeline cache removed (%lld bytes): one per "
+            hle_log("hakuX-lr-hle-pipe", "the shared pipeline cache removed (%lld bytes): one per "
                     "title now", (long long)sb.st_size);
         }
     }
@@ -75,7 +75,7 @@ void hle_pcache_init(void)
         ci.pInitialData = NULL;
         T.vkCreatePipelineCache(g_hvk.dev, &ci, NULL, &g_pc.cache);
     }
-    hle_log("hakuX-hle-pipe", "pipeline cache %s: %zu bytes", g_pc.blob ? g_pc.blob : "(none)",
+    hle_log("hakuX-lr-hle-pipe", "pipeline cache %s: %zu bytes", g_pc.blob ? g_pc.blob : "(none)",
             data ? (size_t)len : 0);
     g_free(data);
     g_pc.last_save = g_get_monotonic_time();
@@ -119,7 +119,7 @@ static void write_blob(void)
     if (buf) {
         const int64_t t2 = g_get_monotonic_time();
         g_file_set_contents(g_pc.blob, buf, n, NULL);   /* temp file + rename */
-        hle_log("hakuX-hle-pipe", "pipeline cache saved: %zu bytes (merged in %.1f ms, "
+        hle_log("hakuX-lr-hle-pipe", "pipeline cache saved: %zu bytes (merged in %.1f ms, "
                 "serialized in %.1f ms, written in %.1f ms), spirv hits=%llu misses=%llu", n,
                 (t1 - t0) / 1000.0, (t2 - t1) / 1000.0, (g_get_monotonic_time() - t2) / 1000.0,
                 (unsigned long long)g_pc.spv_hits, (unsigned long long)g_pc.spv_misses);

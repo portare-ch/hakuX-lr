@@ -1,7 +1,7 @@
 /* Copyright (C) 2026-present PortareOS */
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * hakuX HLE GPU — the accuracy level: which of the renderer's graphics
+ * hakuX-lr HLE GPU — the accuracy level: which of the renderer's graphics
  * trade-offs a run makes. A level is resolved once, before the device is
  * made, into the settings below; the renderer reads those, never the level.
  * Each setting that changes a shader is in its key (HlePshKey.precise,

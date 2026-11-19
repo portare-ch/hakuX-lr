@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — NV2A vertex program (XDK xvs microcode) -> GLSL 4.50
+ * hakuX-lr HLE GPU — NV2A vertex program (XDK xvs microcode) -> GLSL 4.50
  * (spec §5.8; pure). Decoding uses subprojects/nv2a_vsh_cpu; the GLSL is
  * HLE's own (independent of the LLE render path).
  *

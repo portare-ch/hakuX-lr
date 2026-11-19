@@ -129,7 +129,7 @@ void hle_pipe_init(size_t key_size, HlePipeBuildFn build, const char *variant)
     g_pa.nocache = debug_switch("HAKUX_HLE_NOCACHE", "debug.hakux.nocache") == 1;
     hle_mutex_init(&g_pa.mu);
     hle_cond_init(&g_pa.cv);
-    hle_log("hakuX-hle-pipe", "pipelines: asynchronous %s%s, prebuild %s%s%s",
+    hle_log("hakuX-lr-hle-pipe", "pipelines: asynchronous %s%s, prebuild %s%s%s",
             g_pa.async ? "on" : "off", a >= 0 ? " (debug)" : "",
             g_pa.prebuild ? "on" : "off", p >= 0 ? " (debug)" : "",
             g_pa.nocache ? ", no disk caches (debug)" : "");
@@ -446,7 +446,7 @@ void hle_pipe_title(uint32_t title_id, uint32_t timedate)
     if (g_file_set_contents(tmp, (const gchar *)b.p, (gssize)b.n, NULL)) {
         rename(tmp, g_pa.path);
     }
-    hle_log("hakuX-hle-pipe", "pipeline record %s: %s, %u pipelines, %u programs (%zu bytes)",
+    hle_log("hakuX-lr-hle-pipe", "pipeline record %s: %s, %u pipelines, %u programs (%zu bytes)",
             g_pa.path, read ? "read" : "new", g_pa.nlist, g_pa.nprogs, b.n);
     g_free(b.p);
 }
@@ -548,7 +548,7 @@ void hle_pipe_prebuild(uint32_t max, void (*add)(uint64_t hash, VkPipeline p))
             failed++;
         }
     }
-    hle_log("hakuX-hle-pipe", "prebuild: %u of %u recorded pipelines in %.0f ms on %u threads "
+    hle_log("hakuX-lr-hle-pipe", "prebuild: %u of %u recorded pipelines in %.0f ms on %u threads "
             "(%u failed, %u needing features off this session)", ok, g_pa.nlist,
             (g_get_monotonic_time() - t0) / 1000.0, nth, failed, unsup);
     hle_atomic_set(&g_pa.pb_total, 0);

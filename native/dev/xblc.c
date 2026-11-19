@@ -177,7 +177,7 @@ static void gate(Xblc *x, int16_t *s, int n, int rate)
         if (x->dumped >= 60L * rate) {
             fclose(x->dump);
             x->dump = NULL;
-            nc_log("hakuX-native-usb", "communicator %u: microphone recording done (%d Hz)", x->player + 1, rate);
+            nc_log("hakuX-lr-native-usb", "communicator %u: microphone recording done (%d Hz)", x->player + 1, rate);
         }
     }
     if (x->gate_threshold <= 0 || rate <= 0) {
@@ -228,13 +228,13 @@ static void gate(Xblc *x, int16_t *s, int n, int rate)
                 if (since < CLICK_MS) {
                     x->above = 0;
                     if (x->trace) {
-                        nc_log("hakuX-native-usb", "communicator %u: %.0f dBFS %.0f ms after a button: not opened",
+                        nc_log("hakuX-lr-native-usb", "communicator %u: %.0f dBFS %.0f ms after a button: not opened",
                                x->player + 1, db, since);
                     }
                 } else {
                     x->hold = rate * GATE_HOLD_MS / 1000;
                     if (x->trace) {
-                        nc_log("hakuX-native-usb", "communicator %u: opened at %.0f dBFS (background %.0f, voicing %.2f, button %.0f ms ago)",
+                        nc_log("hakuX-lr-native-usb", "communicator %u: opened at %.0f dBFS (background %.0f, voicing %.2f, button %.0f ms ago)",
                                x->player + 1, db, x->floor_db, voiced, since < 1e8 ? since : -1);
                     }
                 }
@@ -243,7 +243,7 @@ static void gate(Xblc *x, int16_t *s, int n, int rate)
                 x->peak_db = db > x->peak_db ? db : x->peak_db;
                 x->dc += x->win_sum / x->win_n;
                 if (++x->trace_n >= 1000 / GATE_WINDOW_MS) {
-                    nc_log("hakuX-native-usb", "communicator %u: microphone peak %.0f dBFS, background %.0f, offset %.0f, %d loud windows unvoiced, gate %s",
+                    nc_log("hakuX-lr-native-usb", "communicator %u: microphone peak %.0f dBFS, background %.0f, offset %.0f, %d loud windows unvoiced, gate %s",
                            x->player + 1, x->peak_db, x->floor_db, x->dc / x->trace_n, x->unvoiced,
                            x->hold > 0 ? "open" : "closed");
                     x->trace_n = 0;
@@ -391,7 +391,7 @@ static AAudioStream *open_stream(Xblc *x, bool mic, int rate)
     if (r != AAUDIO_OK) {
         if (mic && !x->logged_no_mic) {
             x->logged_no_mic = true;
-            nc_log("hakuX-native-usb", "communicator %u: no microphone (AAudio: %s; the microphone permission?)",
+            nc_log("hakuX-lr-native-usb", "communicator %u: no microphone (AAudio: %s; the microphone permission?)",
                    x->player + 1, AAudio_convertResultToText(r));
         }
         return NULL;
@@ -437,7 +437,7 @@ static void *reopen_thread(void *arg)
     pthread_mutex_unlock(&x->lock);
     x->in = in;
     x->out = out;
-    nc_log("hakuX-native-usb", "communicator %u: %d Hz (microphone %d Hz, headphone %d Hz)", x->player + 1, rate,
+    nc_log("hakuX-lr-native-usb", "communicator %u: %d Hz (microphone %d Hz, headphone %d Hz)", x->player + 1, rate,
            x->mic_rate, x->phone_rate);
     pthread_mutex_unlock(&x->streams);
     return NULL;
@@ -493,7 +493,7 @@ static int xblc_control(NcUsbDev *d, const uint8_t *s, uint8_t *data, int len)
             return 0;               /* the voice preset's own gain control does it */
         }
     }
-    nc_log("hakuX-native-usb", "communicator: unhandled request %02x %02x value %04x index %04x", type, req, value,
+    nc_log("hakuX-lr-native-usb", "communicator: unhandled request %02x %02x value %04x index %04x", type, req, value,
            index);
     return NC_USB_STALL;
 }
@@ -563,7 +563,7 @@ NcUsbDev *nc_xblc_new(unsigned player)
         x->block_min[b] = 0;    /* nothing heard yet: no background */
     }
     x->floor_db = -96;
-    nc_log("hakuX-native-usb", "communicator %u: noise gate %s", player + 1, x->gate_threshold > 0 ? (g ? g : "-38") : "off");
+    nc_log("hakuX-lr-native-usb", "communicator %u: noise gate %s", player + 1, x->gate_threshold > 0 ? (g ? g : "-38") : "off");
     x->mic.max = x->rate / 10;
     x->phone.max = x->rate / 5;
     x->dev.name = "communicator";

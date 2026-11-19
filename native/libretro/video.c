@@ -1,7 +1,7 @@
 /* Copyright (C) 2026-present PortareOS */
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * hakuX libretro video output.
+ * Video output for hakuX-lr.
  *
  * Frames use Vulkan when available, otherwise CPU readback as XRGB8888.
  * By default, RetroArch keeps the previous image between submissions.
@@ -105,7 +105,7 @@ void nc_lr_video_size(uint32_t w, uint32_t h, uint32_t ow, uint32_t oh)
     struct retro_game_geometry geo;
     nc_lr_video_geometry(&geo);
     nc_lr_env(RETRO_ENVIRONMENT_SET_GEOMETRY, &geo);
-    nc_log("hakuX-libretro", "video: %ux%u, %ux%u without its overscan, shown at %.3f", w, h, ow, oh,
+    nc_log("hakuX-lr", "video: %ux%u, %ux%u without its overscan, shown at %.3f", w, h, ow, oh,
            geo.aspect_ratio);
 }
 

@@ -1,5 +1,5 @@
 /*
- * hakuX native core — FEXCore embedding.
+ * hakuX-lr native core — FEXCore embedding.
  *
  * Shaped like FEX's WOW64 front end: FEXCore as a library, no Linux syscall
  * layer. The guest runs in FEX system mode behind the guest memory base;
@@ -80,7 +80,7 @@ public:
     if (Info && Cfg.sysop(Cfg.opaque, reinterpret_cast<NcFrame*>(Frame), Op, Size)) {
       return;
     }
-    nc_log("hakuX-native", "cpu: unhandled %s at %08x", Info ? "system op" : "syscall", static_cast<uint32_t>(Frame->State.rip));
+    nc_log("hakuX-lr-native", "cpu: unhandled %s at %08x", Info ? "system op" : "syscall", static_cast<uint32_t>(Frame->State.rip));
     abort();
   }
   FEXCore::HLE::ExecutableRangeInfo QueryGuestExecutableRange(FEXCore::Core::InternalThreadState*, uint64_t) override {
@@ -95,12 +95,12 @@ class Signals final : public FEXCore::SignalDelegator {};
 
 void MsgHandler(LogMan::DebugLevels Level, const char* Message) {
   if (Level <= LogMan::DebugLevels::INFO) {
-    nc_log("hakuX-native-fex", "%s %s", LogMan::DebugLevelStr(Level), Message);
+    nc_log("hakuX-lr-native-fex", "%s %s", LogMan::DebugLevelStr(Level), Message);
   }
 }
 
 void AssertHandler(const char* Message) {
-  nc_log("hakuX-native-fex", "ASSERT %s", Message);
+  nc_log("hakuX-lr-native-fex", "ASSERT %s", Message);
   abort();
 }
 
@@ -283,7 +283,7 @@ extern "C" NcCpu* nc_cpu_create(const NcCpuConfig* cfg, uint32_t fs_base) {
     x87_full = (e && !strcmp(e, "80")) || !strcmp(v, "80");
     FEXCore::Config::Set(FEXCore::Config::CONFIG_X87REDUCEDPRECISION, x87_full ? "0" : "1");
     if (x87_full) {
-      nc_log("hakuX-native", "cpu: FEX with the full 80-bit x87");
+      nc_log("hakuX-lr-native", "cpu: FEX with the full 80-bit x87");
     }
   }
   // The reduced x87 keeps the precision a title sets when it is single
@@ -303,7 +303,7 @@ extern "C" NcCpu* nc_cpu_create(const NcCpuConfig* cfg, uint32_t fs_base) {
     x87_pc_off = (e && !strcmp(e, "0")) || !strcmp(v, "0");
     FEXCore::Config::Set(FEXCore::Config::CONFIG_X87REDUCEDPRECISIONCONTROL, x87_pc_off ? "0" : "1");
     if (x87_pc_off) {
-      nc_log("hakuX-native", "cpu: FEX's reduced x87 without precision control");
+      nc_log("hakuX-lr-native", "cpu: FEX's reduced x87 without precision control");
     }
   }
   // The dispatcher's inline block lookup: every system op (kernel calls, HLE
@@ -321,7 +321,7 @@ extern "C" NcCpu* nc_cpu_create(const NcCpuConfig* cfg, uint32_t fs_base) {
 #endif
     if ((e && !strcmp(e, "0")) || !strcmp(v, "0")) {
       FEXCore::Config::Set(FEXCore::Config::CONFIG_HOSTFEATURES, std::to_string(static_cast<uint64_t>(FEXCore::Config::HostFeatures::DISABLEAFP)));
-      nc_log("hakuX-native", "cpu: FEX without AFP (FPCR.AH/NEP)");
+      nc_log("hakuX-lr-native", "cpu: FEX without AFP (FPCR.AH/NEP)");
     }
   }
 
@@ -340,7 +340,7 @@ extern "C" NcCpu* nc_cpu_create(const NcCpuConfig* cfg, uint32_t fs_base) {
   Cpu->CTX->EnableExitOnHLT();
   Cpu->CTX->SetGuestCycleCounterRatio(TscRatioQ32());
   if (!Cpu->CTX->InitCore()) {
-    nc_log("hakuX-native", "cpu: InitCore failed");
+    nc_log("hakuX-lr-native", "cpu: InitCore failed");
     delete Cpu;
     return nullptr;
   }
@@ -354,7 +354,7 @@ extern "C" NcCpu* nc_cpu_create(const NcCpuConfig* cfg, uint32_t fs_base) {
   constexpr size_t CRS = FEXCore::Core::InternalThreadState::CALLRET_STACK_SIZE;
   void* Map = mmap(nullptr, CRS + 2 * NC_PAGE, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   if (Map == MAP_FAILED || mprotect(static_cast<uint8_t*>(Map) + NC_PAGE, CRS, PROT_READ | PROT_WRITE) != 0) {
-    nc_log("hakuX-native", "cpu: no call-ret stack (%s)", strerror(errno));
+    nc_log("hakuX-lr-native", "cpu: no call-ret stack (%s)", strerror(errno));
     return nullptr;
   }
   cpu->Thread->CallRetStackBase = static_cast<uint8_t*>(Map) + NC_PAGE;
@@ -436,7 +436,7 @@ extern "C" void nc_cpu_invalidate(NcCpu* cpu, uint32_t va, uint32_t len) {
       Logged = 0;
     }
     if (Logged++ < 10) {
-      nc_log("hakuX-native", "cpu: translations of %08x+%x dropped (from %p)", va, len, __builtin_return_address(0));
+      nc_log("hakuX-lr-native", "cpu: translations of %08x+%x dropped (from %p)", va, len, __builtin_return_address(0));
     }
   }
   // The thread's own lookup caches too (its L1/L2 entries and call-return
@@ -458,7 +458,7 @@ extern "C" bool nc_cpu_x87_single_check(NcCpu* cpu) {
   }
   cpu->X87Single = true;
   cpu->CTX->EnableX87SinglePrecision();
-  nc_log("hakuX-native", "cpu: the title selected x87 single precision (FCW %04x, seen at %08x): translations round to it",
+  nc_log("hakuX-lr-native", "cpu: the title selected x87 single precision (FCW %04x, seen at %08x): translations round to it",
          cpu->Thread->CurrentFrame->State.FCW, static_cast<uint32_t>(cpu->Thread->CurrentFrame->State.rip));
   nc_cpu_invalidate(cpu, 0, 0xFFFFF000u);
   return true;
@@ -494,7 +494,7 @@ extern "C" void nc_cpu_x87_single_restore(NcCpu* cpu) {
   if (cpu->X87Watch && !cpu->X87Single) {
     cpu->X87Single = true;
     cpu->CTX->EnableX87SinglePrecision();
-    nc_log("hakuX-native", "cpu: x87 single precision, as the state's title had selected it");
+    nc_log("hakuX-lr-native", "cpu: x87 single precision, as the state's title had selected it");
   }
 }
 

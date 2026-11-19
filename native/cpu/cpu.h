@@ -1,5 +1,5 @@
 /*
- * hakuX native core — the guest CPU (FEXCore, fork branch hakuX).
+ * hakuX-lr native core — the guest CPU (FEXCore, fork branch hakuX).
  *
  * C interface to the JIT for the rest of the core. One CPU runs the guest;
  * privileged and system instructions come back through a system-op callback

@@ -1,5 +1,5 @@
 /*
- * hakuX native core — USB devices behind the OHCI controller (ohci.c).
+ * hakuX-lr native core — USB devices behind the OHCI controller (ohci.c).
  *
  * A device answers its standard requests from descriptor tables (usb.c);
  * class and vendor requests go to its control callback, other endpoints to

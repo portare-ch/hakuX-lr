@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — on-disk shader and pipeline caches (P3 Task 13): SPIR-V
+ * hakuX-lr HLE GPU — on-disk shader and pipeline caches (P3 Task 13): SPIR-V
  * by the generated GLSL, and the Vulkan pipeline cache, under the xemu base
  * path. A later boot skips glslang and most of the driver's compile.
  */

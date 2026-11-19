@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — fixed-function shader generators (spec §5.8 FF; pure).
+ * hakuX-lr HLE GPU — fixed-function shader generators (spec §5.8 FF; pure).
  * Keys are built by the back end from the draw state (render/texture-state
  * arrays + FVF); the generators emit GLSL 4.50 for glslang.
  *

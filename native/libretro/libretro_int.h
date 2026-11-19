@@ -1,7 +1,7 @@
 /* Copyright (C) 2026-present PortareOS */
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * hakuX native core — the libretro core's parts (LIBRETRO_SPEC.md):
+ * hakuX-lr native core — the libretro core's parts (LIBRETRO_SPEC.md):
  * core.c the ABI and the game's lifecycle, audio.c the APU's output (and
  * the Communicator's headphone), input.c the RetroPad as the Duke, mic.c the
  * Communicator's microphone, video.c the frames to RetroArch, options.c the

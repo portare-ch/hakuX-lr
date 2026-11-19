@@ -1,5 +1,5 @@
 /*
- * hakuX native core — executive, HAL, AV and title services.
+ * hakuX-lr native core — executive, HAL, AV and title services.
  *
  * Ex pool and non-volatile (EEPROM) settings, XBE section loading, object
  * references, DbgPrint, the HAL and AV calls the titles make, and the DPC and
@@ -374,7 +374,7 @@ static void eeprom_create(NcKernel *k)
         } while (!memcmp(hd_key, zero, sizeof(zero)));
     }
     eeprom_identity(hd_key);
-    nc_log("hakuX-native", "ex: the console's HD key: %s",
+    nc_log("hakuX-lr-native", "ex: the console's HD key: %s",
            !legacy ? "a random one of its own" : g_keep_file ? "the old shared one (eeprom.bin can't be kept)"
                                                            : "the old shared one, which the data on E: uses");
 }
@@ -392,7 +392,7 @@ static void eeprom_upgrade(void)
         return;
     }
     eeprom_reidentify();
-    nc_log("hakuX-native", "ex: the console has an identity of its own for the network (its HD key kept)");
+    nc_log("hakuX-lr-native", "ex: the console has an identity of its own for the network (its HD key kept)");
 }
 
 /* The app asked for a new identity (<hdd>/eeprom.renew): another console on
@@ -407,7 +407,7 @@ static void eeprom_renew(void)
     }
     eeprom_reidentify();
     unlink(p);
-    nc_log("hakuX-native", "ex: a new identity for the console, as the app asked (its HD key kept)");
+    nc_log("hakuX-lr-native", "ex: a new identity for the console, as the app asked (its HD key kept)");
 }
 
 /* Atomically replace the EEPROM file only when its contents change. */
@@ -426,7 +426,7 @@ static void eeprom_store(void)
         ok = fclose(out) == 0 && ok;
     }
     if (!ok || rename(tmp, p) != 0) {
-        nc_log("hakuX-native", "ex: can't keep the EEPROM in %s", p);
+        nc_log("hakuX-lr-native", "ex: can't keep the EEPROM in %s", p);
         unlink(tmp);
         return;
     }
@@ -447,10 +447,10 @@ static uint8_t *eeprom(NcKernel *k)
         if (!have && in) {
             g_keep_file = true;
             eeprom_create(k);
-            nc_log("hakuX-native", "ex: %s isn't a whole EEPROM: a new one for this run", p);
+            nc_log("hakuX-lr-native", "ex: %s isn't a whole EEPROM: a new one for this run", p);
         } else if (!have) {
             eeprom_create(k);                   /* save after applying frontend settings */
-            nc_log("hakuX-native", "ex: new console EEPROM in %s", p);
+            nc_log("hakuX-lr-native", "ex: new console EEPROM in %s", p);
         } else {
             memcpy(g_stored, g_eeprom, sizeof(g_stored));
             g_stored_known = true;
@@ -493,10 +493,10 @@ static uint8_t *eeprom(NcKernel *k)
         eeprom_seal();
         eeprom_store();
         g_eeprom_ready = true;
-        nc_log("hakuX-native", "ex: video flags %08x, AV pack %d, AV region %08x, language %u, time zone bias %d min",
+        nc_log("hakuX-lr-native", "ex: video flags %08x, AV pack %d, AV region %08x, language %u, time zone bias %d min",
                nc_rd32(g_eeprom + 0x94), g_av_pack, nc_rd32(g_eeprom + 0x58), nc_rd32(g_eeprom + 0x90),
                (int32_t)nc_rd32(g_eeprom + 0x64));
-        nc_log("hakuX-native", "ex: console serial %.12s, MAC %02x:%02x:%02x:%02x:%02x:%02x%s", g_eeprom + 0x34,
+        nc_log("hakuX-lr-native", "ex: console serial %.12s, MAC %02x:%02x:%02x:%02x:%02x:%02x%s", g_eeprom + 0x34,
                g_eeprom[0x40], g_eeprom[0x41], g_eeprom[0x42], g_eeprom[0x43], g_eeprom[0x44], g_eeprom[0x45],
                g_sec_plain ? " (an image from before: its section in the clear)" : "");
     }
@@ -525,7 +525,7 @@ static uint64_t ExQueryNonVolatileSetting(NcKernel *k, NcFrame *f, const uint32_
 {
     const NvSetting *s = nv_find(a[0]);
     if (!s) {
-        nc_log("hakuX-native", "ex: non-volatile setting 0x%x not known", a[0]);
+        nc_log("hakuX-lr-native", "ex: non-volatile setting 0x%x not known", a[0]);
         return 0xC0000034u; /* STATUS_OBJECT_NAME_NOT_FOUND */
     }
     if (a[1]) {
@@ -578,7 +578,7 @@ static uint64_t XeLoadSection(NcKernel *k, NcFrame *f, const uint32_t *a)
     uint32_t refs = nc_vm_rd32(k->vm, s + 0x18);
     nc_vm_wr32(k->vm, s + 0x18, refs + 1);
     const uint32_t va = nc_vm_rd32(k->vm, s + 0x04), vsize = nc_vm_rd32(k->vm, s + 0x08);
-    nc_log("hakuX-native", "ex: load section %.8s %08x+%x (refs %u)", section_name(k, s), va, vsize, refs + 1);
+    nc_log("hakuX-lr-native", "ex: load section %.8s %08x+%x (refs %u)", section_name(k, s), va, vsize, refs + 1);
     if (refs) {
         return NC_STATUS_SUCCESS;
     }
@@ -630,7 +630,7 @@ static uint64_t XeUnloadSection(NcKernel *k, NcFrame *f, const uint32_t *a)
         return NC_STATUS_INVALID_PARAMETER;
     }
     nc_vm_wr32(k->vm, s + 0x18, refs - 1);
-    nc_log("hakuX-native", "ex: unload section %.8s (refs %u)", section_name(k, s), refs - 1);
+    nc_log("hakuX-lr-native", "ex: unload section %.8s (refs %u)", section_name(k, s), refs - 1);
     if (refs == 1) {
         const uint32_t va = nc_vm_rd32(k->vm, s + 0x04), vsize = nc_vm_rd32(k->vm, s + 0x08);
         section_release(k, s, va, vsize);
@@ -736,13 +736,13 @@ static uint64_t DbgPrint(NcKernel *k, NcFrame *f, const uint32_t *a)
         n--;
     }
     out[n] = 0;
-    nc_log("hakuX-native-dbg", "%s", out);
+    nc_log("hakuX-lr-native-dbg", "%s", out);
     return 0;
 }
 
 static uint64_t DbgBreakPoint(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
-    nc_log("hakuX-native-dbg", "DbgBreakPoint from %08x", nc_vm_rd32(k->vm, nc_frame_gpr(f, NC_ESP)));
+    nc_log("hakuX-lr-native-dbg", "DbgBreakPoint from %08x", nc_vm_rd32(k->vm, nc_frame_gpr(f, NC_ESP)));
     return 0;
 }
 
@@ -764,14 +764,14 @@ static uint64_t AvGetSavedDataAddress(NcKernel *k, NcFrame *f, const uint32_t *a
 {
     static unsigned s_logged;
     if (s_logged++ < 4) {
-        nc_log("hakuX-native", "AvGetSavedDataAddress: %08x", g_av_saved);
+        nc_log("hakuX-lr-native", "AvGetSavedDataAddress: %08x", g_av_saved);
     }
     return g_av_saved;
 }
 
 static uint64_t AvSetSavedDataAddress(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
-    nc_log("hakuX-native", "AvSetSavedDataAddress %08x", a[0]);
+    nc_log("hakuX-lr-native", "AvSetSavedDataAddress %08x", a[0]);
     g_av_saved = a[0];
     return 0;
 }
@@ -819,7 +819,7 @@ static uint64_t AvSendTVEncoderOption(NcKernel *k, NcFrame *f, const uint32_t *a
     static uint32_t s_logged;
     if (!(s_logged & (1u << (a[1] & 31)))) {
         s_logged |= 1u << (a[1] & 31);
-        nc_log("hakuX-native", "av: TV encoder option %u param %08x -> %08x", a[1], a[2], r);
+        nc_log("hakuX-lr-native", "av: TV encoder option %u param %08x -> %08x", a[1], a[2], r);
     }
     if (a[3]) {
         nc_vm_wr32(k->vm, a[3], r);
@@ -830,7 +830,7 @@ static uint64_t AvSendTVEncoderOption(NcKernel *k, NcFrame *f, const uint32_t *a
 /* AvSetDisplayMode(RegisterBase, Step, Mode, Format, Pitch, FrameBuffer) */
 static uint64_t AvSetDisplayMode(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
-    nc_log("hakuX-native", "av: display mode %08x format %08x pitch %u fb %08x", a[2], a[3], a[4], a[5]);
+    nc_log("hakuX-lr-native", "av: display mode %08x format %08x pitch %u fb %08x", a[2], a[3], a[4], a[5]);
     if (a[2]) {
         /* AV mode bit 30: the 50 Hz modes (PAL 576-line timings, as
          * 0x58030314 is); the 480-line, 480p and HD modes are 60 Hz. */
@@ -843,7 +843,7 @@ static uint64_t AvSetDisplayMode(NcKernel *k, NcFrame *f, const uint32_t *a)
 /* HalReadWritePCISpace(BusNumber, SlotNumber, RegisterNumber, Buffer, Length, WritePCISpace) */
 static uint64_t HalReadWritePCISpace(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
-    nc_log("hakuX-native", "hal: PCI %s bus %u slot %u reg %02x len %u", a[5] & 0xff ? "write" : "read", a[0], a[1],
+    nc_log("hakuX-lr-native", "hal: PCI %s bus %u slot %u reg %02x len %u", a[5] & 0xff ? "write" : "read", a[0], a[1],
            a[2], a[4]);
     if (!(a[5] & 0xff)) {
         memset(nc_vm_host(k->vm, a[3]), 0, a[4]);
@@ -932,7 +932,7 @@ bool nc_kernel_launch_dir(const uint8_t page[NC_LAUNCH_PAGE], char *out, size_t 
     }
     *semi = 0;
     if ((size_t)snprintf(out, n, "%s", p) >= n) {
-        nc_log("hakuX-native", "relaunch: the launch folder is too long for D: (%zu chars): %s", strlen(p), p);
+        nc_log("hakuX-lr-native", "relaunch: the launch folder is too long for D: (%zu chars): %s", strlen(p), p);
         out[0] = 0;
         return false;
     }
@@ -976,7 +976,7 @@ void nc_kernel_launch_page_restore(NcKernel *k, const uint8_t page[NC_LAUNCH_PAG
     const uint32_t slot = data_va(k, "LaunchDataPage");
     const uint32_t va = slot ? nc_mm_contig_alloc(k, NC_LAUNCH_PAGE) : 0;
     if (!va) {
-        nc_log("hakuX-native", "relaunch: no launch data page for the title");
+        nc_log("hakuX-lr-native", "relaunch: no launch data page for the title");
         return;
     }
     memcpy(nc_vm_host(k->vm, va), page, NC_LAUNCH_PAGE);
@@ -1017,7 +1017,7 @@ static uint64_t HalReturnToFirmware(NcKernel *k, NcFrame *f, const uint32_t *a)
             nc_kernel_request_stop(k, f, "relaunch into %s (launch type %u)", xbe, nc_vm_rd32(k->vm, page));
             return 0;
         }
-        nc_log("hakuX-native", "relaunch: can't write %s", path);
+        nc_log("hakuX-lr-native", "relaunch: can't write %s", path);
     }
     char launch[LAUNCH_PATH_LEN + 1] = "";
     if (page) {

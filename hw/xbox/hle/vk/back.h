@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — back end (spec §5): render thread, timeline, surfaces.
+ * hakuX-lr HLE GPU — back end (spec §5): render thread, timeline, surfaces.
  * No Vulkan types; callable from any HLE module.
  */
 #ifndef HW_XBOX_HLE_VK_BACK_H

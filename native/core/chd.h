@@ -1,7 +1,7 @@
 /* Copyright (C) 2026-present PortareOS */
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * hakuX native core — CHD disc images (MAME's compressed hunks of data, made
+ * hakuX-lr native core — CHD disc images (MAME's compressed hunks of data, made
  * by chdman createdvd), read through libchdr: the image's bytes as an ISO's.
  */
 #ifndef NATIVE_CORE_CHD_H

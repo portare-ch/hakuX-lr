@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — first-write barrier and write recorder.
+ * hakuX-lr HLE GPU — first-write barrier and write recorder.
  */
 #include "hw/xbox/hle/base.h"
 #include "hw/xbox/hle/hle.h"
@@ -820,7 +820,7 @@ static bool rpt_access(uint32_t pa)
                 if (stuck) {
                     g_rpt.held++;
                 } else if (g_rpt.timeouts++ < 8) {
-                    hle_log("hakuX-hle-pb", "report gate: page %08x's reports not written in 30 ms",
+                    hle_log("hakuX-lr-hle-pb", "report gate: page %08x's reports not written in 30 ms",
                             g_rpt.page[pg] << 12);
                 }
                 late = false;
@@ -1050,7 +1050,7 @@ void hle_mem_first_write(uint64_t ram_addr, unsigned size)
         /* Nothing was ever armed, so no HLE bit should be clean. A trap here
          * means the dirty client is not maintained (Step 1(c)). */
         if (g_st.unarmed++ == 0) {
-            hle_log("hakuX-hle-mem", "barrier: UNARMED trap at pa=%08x", pa);
+            hle_log("hakuX-lr-hle-mem", "barrier: UNARMED trap at pa=%08x", pa);
         }
         return;
     }

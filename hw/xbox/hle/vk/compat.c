@@ -186,7 +186,7 @@ static void VKAPI_CALL c_begin_rendering(VkCommandBuffer cb, const VkRenderingIn
     if (ri->flags || ri->viewMask || ri->colorAttachmentCount > MAX_COLORS) {
         if (!g_c.said) {
             g_c.said = true;
-            hle_log("hakuX-hle-back", "compat: rendering flags %x, view mask %x, %u colours "
+            hle_log("hakuX-lr-hle-back", "compat: rendering flags %x, view mask %x, %u colours "
                     "not emulated", ri->flags, ri->viewMask, ri->colorAttachmentCount);
         }
     }
@@ -416,14 +416,14 @@ static VkResult VKAPI_CALL c_submit2(VkQueue q, uint32_t n, const VkSubmitInfo2 
     VkPipelineStageFlags wst[NS][NE];
     VkCommandBuffer cbs[NS][NE];
     if (n > NS) {
-        hle_log("hakuX-hle-back", "compat: %u submits in one call (%u emulated)", n, NS);
+        hle_log("hakuX-lr-hle-back", "compat: %u submits in one call (%u emulated)", n, NS);
         return VK_ERROR_INITIALIZATION_FAILED;
     }
     for (uint32_t i = 0; i < n; i++) {
         const VkSubmitInfo2 *x = &s[i];
         if (x->waitSemaphoreInfoCount > NE || x->commandBufferInfoCount > NE ||
             x->signalSemaphoreInfoCount > NE) {
-            hle_log("hakuX-hle-back", "compat: a submit of %u waits, %u command buffers, %u "
+            hle_log("hakuX-lr-hle-back", "compat: a submit of %u waits, %u command buffers, %u "
                     "signals (%u each emulated)", x->waitSemaphoreInfoCount,
                     x->commandBufferInfoCount, x->signalSemaphoreInfoCount, NE);
             return VK_ERROR_INITIALIZATION_FAILED;
@@ -502,7 +502,7 @@ void hle_compat_install(struct VolkDeviceTable *t)
         g_c.fbs = g_hash_table_new_full(fb_hash, fb_equal, g_free, NULL);
         g_c.init = true;
         if (!c->vk13 || !c->dyn_render || !c->sync2) {
-            hle_log("hakuX-hle-back", "compat: Vulkan %s, %s, %s", c->vk13 ? "1.3" : "below 1.3",
+            hle_log("hakuX-lr-hle-back", "compat: Vulkan %s, %s, %s", c->vk13 ? "1.3" : "below 1.3",
                     c->dyn_render ? "dynamic rendering" : "render passes",
                     c->sync2 ? "synchronization2" : "1.0 barriers and submits");
         }
@@ -571,7 +571,7 @@ void hle_compat_shutdown(void)
      * destroy after this would find no tables (the owners' shutdowns first) */
     const guint live = g_hash_table_size(g_c.views);
     if (live) {
-        hle_log("hakuX-hle-back", "compat: %u image views not destroyed before the stop", live);
+        hle_log("hakuX-lr-hle-back", "compat: %u image views not destroyed before the stop", live);
     }
     g_hash_table_foreach(g_c.fbs, fb_destroy, NULL);
     g_hash_table_foreach(g_c.passes, pass_destroy, NULL);

@@ -1,7 +1,7 @@
 /* Copyright (C) 2026-present PortareOS */
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * hakuX native core — UPnP port forwarding for NAT (nat.c).
+ * hakuX-lr native core — UPnP port forwarding for NAT (nat.c).
  *
  * The host must request the forward: the console's address on libslirp's
  * network (10.0.2.16-215, from its MAC) is not reachable on the router's LAN.
@@ -45,7 +45,7 @@
 #define RETRY_MS 5000                   /* initial retry delay; doubles up to the cap */
 #define RETRY_MAX_MS 300000
 #define RESPONSE_MAX 65536
-#define TAG "hakuX-native-net"
+#define TAG "hakuX-lr-native-net"
 
 typedef struct Url {
     struct sockaddr_in addr;
@@ -602,7 +602,7 @@ static int add_mapping(unsigned lease, int *error)
     snprintf(args, sizeof(args),
              "<NewRemoteHost></NewRemoteHost><NewExternalPort>%u</NewExternalPort><NewProtocol>UDP</NewProtocol>"
              "<NewInternalPort>%u</NewInternalPort><NewInternalClient>%s</NewInternalClient>"
-             "<NewEnabled>1</NewEnabled><NewPortMappingDescription>hakuX Xbox Live</NewPortMappingDescription>"
+             "<NewEnabled>1</NewEnabled><NewPortMappingDescription>hakuX-lr Xbox Live</NewPortMappingDescription>"
              "<NewLeaseDuration>%u</NewLeaseDuration>",
              g_upnp.port, g_upnp.port, g_upnp.local, lease);
     const int status = soap("AddPortMapping", args, HTTP_MS);

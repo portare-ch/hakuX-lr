@@ -1,5 +1,5 @@
 /*
- * hakuX native core — the HLE GPU (hw/xbox/hle) on the native core: boot,
+ * hakuX-lr native core — the HLE GPU (hw/xbox/hle) on the native core: boot,
  * the debug probes and the PC samplers. What the HLE asks of its host
  * (host.h) is host_native.c's.
  *
@@ -99,7 +99,7 @@ void nc_hle_boot(NcKernel *k, NcVm *vm, NcCpu *cpu, const NcCpuContext *boot)
     }
     if (!hle_active()) {
         const char *mode = getenv("HAKUX_HLE_MODE");
-        nc_log("hakuX-native-hle", "HLE GPU off (HAKUX_HLE_MODE %s)", mode ? mode : "unset");
+        nc_log("hakuX-lr-native-hle", "HLE GPU off (HAKUX_HLE_MODE %s)", mode ? mode : "unset");
         return;
     }
     g_active = true;
@@ -115,15 +115,15 @@ void nc_hle_boot(NcKernel *k, NcVm *vm, NcCpu *cpu, const NcCpuContext *boot)
     hle_title_start();
     nc_hle_host_flush_discard(); /* nothing translated yet */
     if (hle_pb_active()) {
-        nc_log("hakuX-native-hle", "title %08x in push-buffer mode", g_hle.title.xbe.title_id);
+        nc_log("hakuX-lr-native-hle", "title %08x in push-buffer mode", g_hle.title.xbe.title_id);
     } else {
-        nc_log("hakuX-native-hle", "title %08x: no push-buffer mode, nothing is drawn",
+        nc_log("hakuX-lr-native-hle", "title %08x: no push-buffer mode, nothing is drawn",
                g_hle.title.xbe.title_id);
     }
     if (g_hle_unavailable[0]) {
         /* the Vulkan driver lacks what the HLE GPU needs (vkdev.c says what) */
         nc_hle_set_fatal(NC_FATAL_DRIVER, g_hle_unavailable);
-        nc_log("hakuX-native-hle", "can't run the title: %s", g_fatal);
+        nc_log("hakuX-lr-native-hle", "can't run the title: %s", g_fatal);
     }
 }
 
@@ -228,7 +228,7 @@ static void smp_setup(void)
     g_smp_thread = pthread_self();
     g_smp_ready = true;
     g_hle_pc_sampler = smp_sample;
-    nc_log("hakuX-native-hle", "pc sampler: SIGPROF on the vCPU thread, core library at %p", info.dli_fbase);
+    nc_log("hakuX-lr-native-hle", "pc sampler: SIGPROF on the vCPU thread, core library at %p", info.dli_fbase);
 }
 
 void nc_hle_cpu_leave(void)

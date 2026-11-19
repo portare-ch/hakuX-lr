@@ -1,18 +1,20 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 """Installer and launcher regressions using local cores and fake external tools."""
+import hashlib
 import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import unittest
 
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "tools/linux/setup-hakux.sh"
-DESKTOP = ROOT / "tools/linux/hakux-steamdeck.desktop"
+SCRIPT = ROOT / "tools/linux/setup-hakux-lr.sh"
+DESKTOP = ROOT / "tools/linux/hakux-lr-steamdeck.desktop"
 FAKE_TOOL = r'''#!PYTHON
 import json
 import os
@@ -59,6 +61,18 @@ elif name == "pgrep":
     sys.exit(0 if os.environ.get("STEAM_RUNNING", "1") == "1" else 1)
 elif name == "steamos-add-to-steam":
     sys.exit(int(os.environ.get("STEAM_RESULT", "0")))
+elif name == "curl" and "TEST_ARCHIVE" in os.environ:
+    archive = Path(os.environ["TEST_ARCHIVE"])
+    url = args[-1]
+    if url.startswith("https://api.github.com/repos/portare-ch/hakuX-lr/releases?"):
+        tag = "linux-v" + archive.name.rsplit("-", 2)[-2]
+        print(json.dumps([{"assets": [{"browser_download_url":
+            f"https://github.com/portare-ch/hakuX-lr/releases/download/{tag}/{archive.name}"}]}]))
+    else:
+        requested = url.rsplit("/", 1)[-1]
+        if requested not in (archive.name, archive.name + ".sha256"):
+            sys.exit(22)
+        Path(args[args.index("-o") + 1]).write_bytes(archive.with_name(requested).read_bytes())
 else:
     # No network, package installation or elevated commands in these tests.
     sys.exit(97)
@@ -84,21 +98,41 @@ class SetupTest(unittest.TestCase):
         # Exclude host package managers and RetroArch from auto-detection.
         for name in ("sh", "tr", "head", "cut", "ls", "sort", "readlink", "stat",
                      "getent", "cat", "mkdir", "mktemp", "rm", "cp", "mv", "find",
-                     "tail", "ln", "chmod", "dirname"):
+                     "tail", "ln", "chmod", "dirname", "tar", "gzip", "sha256sum"):
             (self.bindir / name).symlink_to(shutil.which(name))
         self.env = dict(os.environ, HOME=str(self.home),
                         PATH=str(self.bindir),
                         CALL_LOG=str(self.log), DISPLAY=":test", WAYLAND_DISPLAY="",
                         XDG_CURRENT_DESKTOP="KDE", XDG_DATA_HOME=str(self.home / ".local/share"))
-        self.core = self.root / "hakux_libretro.so"
+        self.core = self.root / "hakux-lr_libretro.so"
         self.core.write_bytes(b"test core GLIBC_2.39\0")
-        self.core.with_suffix(".info").write_text('display_name = "hakuX"\n')
+        self.core.with_suffix(".info").write_text('corename = "hakuX-lr"\n')
 
-    def install(self, *args, **env):
-        result = subprocess.run(["sh", str(SCRIPT), "--core", str(self.core), *args],
+    def install(self, *args, local_core=True, **env):
+        command = ["sh", str(SCRIPT)]
+        if local_core:
+            command.extend(["--core", str(self.core)])
+        result = subprocess.run([*command, *args],
                                 env=dict(self.env, **env), capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         return result
+
+    def archive(self, project, version, core_name):
+        release = self.root / f"{project}-{version}"
+        core = release / f"lib/libretro/{project}_libretro.so"
+        core.parent.mkdir(parents=True)
+        core.write_bytes(self.core.read_bytes())
+        core.with_suffix(".info").write_text(f'corename = "{core_name}"\n')
+        licenses = release / f"share/licenses/{project}"
+        licenses.mkdir(parents=True)
+        (licenses / "LICENSE").write_text("license\n")
+        (release / "BUILD-INFO").write_text(f"{core_name} {version}\narchitecture aarch64\n")
+        archive = release.with_name(release.name + "-aarch64.tar.gz")
+        with tarfile.open(archive, "w:gz") as package:
+            package.add(release, arcname=release.name)
+        digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+        archive.with_name(archive.name + ".sha256").write_text(f"{digest}  {archive.name}\n")
+        return archive
 
     def calls(self, name):
         return [call[1:] for line in self.log.read_text().splitlines()
@@ -112,7 +146,7 @@ class SetupTest(unittest.TestCase):
         self.assertFalse(self.calls("sudo"))
         self.assertFalse(self.calls("pacman"))
         self.assertIn("sudo modprobe kvm_amd", result.stderr)
-        self.assertIn("RA_KIND='flatpak'", (self.prefix / "hakux.env").read_text())
+        self.assertIn("RA_KIND='flatpak'", (self.prefix / "hakux-lr.env").read_text())
 
     def test_flatpak_checks_runtime_libc(self):
         result = self.install()
@@ -135,7 +169,7 @@ class SetupTest(unittest.TestCase):
         tool.chmod(0o755)
         result = self.install("--no-packages", TEST_OS="arch")
         self.assertIn("glibc 2.17 is older", result.stderr)
-        self.assertIn("RA_KIND='system'", (self.prefix / "hakux.env").read_text())
+        self.assertIn("RA_KIND='system'", (self.prefix / "hakux-lr.env").read_text())
         self.assertFalse(self.calls("flatpak"))
 
     def test_steam_shortcut_is_added_once(self):
@@ -167,11 +201,56 @@ class SetupTest(unittest.TestCase):
         game.touch()
         games = self.home / "roms/xbox"
         (games / "Halo.iso").symlink_to(game)
-        result = subprocess.run([str(self.prefix / "start-hakux.sh"), "halo"],
+        result = subprocess.run([str(self.prefix / "start-hakux-lr.sh"), "halo"],
                                 env=self.env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn(str(games / "Halo.iso"), self.calls("flatpak")[-1])
-        self.assertIn("-L", self.calls("flatpak")[-1])
+        self.assertIn(str(self.prefix / "cores/hakux-lr_libretro.so"), self.calls("flatpak")[-1])
+
+    def test_latest_release_handles_both_archive_names(self):
+        for project, version, core_name in (("hakux", "0.34.0", "hakuX"), ("hakux-lr", "0.35.0", "hakuX-lr")):
+            with self.subTest(project=project):
+                archive = self.archive(project, version, core_name)
+                self.install(local_core=False, TEST_ARCHIVE=str(archive))
+                self.assertEqual((self.prefix / "cores/hakux-lr_libretro.so").read_bytes(), self.core.read_bytes())
+                self.assertIn(f'corename = "{core_name}"', (self.prefix / "info/hakux-lr_libretro.info").read_text())
+                self.assertTrue((self.prefix / "licenses/LICENSE").is_file())
+
+    def test_explicit_old_release_falls_back_to_legacy_filename(self):
+        archive = self.archive("hakux", "0.34.0", "hakuX")
+        self.install("--version", "0.34.0", local_core=False, TEST_ARCHIVE=str(archive))
+        downloads = [args[-1].rsplit("/", 1)[-1] for args in self.calls("curl")]
+        self.assertIn("hakux-lr-0.34.0-aarch64.tar.gz", downloads)
+        self.assertIn("hakux-0.34.0-aarch64.tar.gz", downloads)
+
+    def test_update_preserves_saves_and_prior_launcher(self):
+        self.install()
+        old_launcher = self.prefix / "start-hakux.sh"
+        (self.prefix / "start-hakux-lr.sh").rename(old_launcher)
+        old_core = self.prefix / "cores/hakux_libretro.so"
+        (self.prefix / "cores/hakux-lr_libretro.so").rename(old_core)
+        old_info = self.prefix / "info/hakux_libretro.info"
+        (self.prefix / "info/hakux-lr_libretro.info").rename(old_info)
+        save = self.prefix / "saves/hakuX/hdd/Partition1/save.dat"
+        save.parent.mkdir(parents=True)
+        save.write_bytes(b"Xbox save")
+
+        self.install()
+        self.assertEqual(save.read_bytes(), b"Xbox save")
+        self.assertEqual((self.prefix / "saves/hakuX-lr/hdd/Partition1/save.dat").read_bytes(), b"Xbox save")
+        self.assertFalse(old_core.exists())
+        self.assertFalse(old_info.exists())
+        self.assertEqual(old_launcher.resolve(), self.prefix / "start-hakux-lr.sh")
+        self.assertEqual(len(self.calls("steamos-add-to-steam")), 1)
+
+    def test_update_keeps_an_existing_new_save_directory(self):
+        previous = self.prefix / "saves/hakuX"
+        current = self.prefix / "saves/hakuX-lr"
+        previous.mkdir(parents=True)
+        current.mkdir()
+        self.install()
+        self.assertTrue(current.is_dir())
+        self.assertFalse(current.is_symlink())
 
     @unittest.skipUnless(shutil.which("desktop-file-validate"), "desktop-file-utils not installed")
     def test_desktop_entries_are_valid(self):

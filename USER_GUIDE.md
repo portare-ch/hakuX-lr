@@ -31,17 +31,17 @@ apt, dnf, pacman and zypper. `--retroarch flatpak` selects Flatpak.
 `--retroarch appimage` selects the AMD64 AppImage and needs `bsdtar`, `7z` or `7za`.
 
 ```sh
-curl -fsSLO https://raw.githubusercontent.com/portare-ch/hakuX-lr/master/tools/linux/setup-hakux.sh
-sh setup-hakux.sh
+curl -fsSLO https://raw.githubusercontent.com/portare-ch/hakuX-lr/master/tools/linux/setup-hakux-lr.sh
+sh setup-hakux-lr.sh
 ```
 
 Put games in `~/roms/xbox` or the games folder printed by the installer.
-Run `~/.local/bin/start-hakux.sh` to open RetroArch. Pass a file path or part
+Run `~/.local/bin/start-hakux-lr.sh` to open RetroArch. Pass a file path or part
 of a game’s name to start it directly. The launcher uses the desktop session
 when available and KMS for direct display on a system without a desktop.
 
 Run the installer again to update. `--version`, `--tarball` and `--core` select
-a specific release or local build. Run `sh setup-hakux.sh --help` for all
+a specific release or local build. Run `sh setup-hakux-lr.sh --help` for all
 options. Settings and logs default to `~/.local/share/hakux-lr/`. Place
 personal RetroArch settings in its `user.cfg` to carry them across updates.
 
@@ -54,9 +54,26 @@ it uses the user Flatpak, installing it if needed. It looks for EmuDeck’s `Emu
 including on SD cards, and falls back to `~/roms/xbox`.
 
 - Hold **L1 + R1 + Start + Select** for RetroArch’s in-game menu.
-- To add a missing Steam shortcut, choose **Steam → Add a Game → Add a Non-Steam Game → hakuX (Xbox)** in Desktop Mode.
-- If a game fails to launch, run `~/.local/bin/start-hakux.sh` in Konsole to see the error. Check the installer output for KVM access instructions.
-- To uninstall, back up your saves, remove `~/.local/share/hakux-lr`, `~/.local/bin/start-hakux.sh` and `~/.local/share/applications/hakux-lr.desktop`, then remove the shortcut from Steam.
+- To add a missing Steam shortcut, choose **Steam → Add a Game → Add a Non-Steam Game → hakuX-lr (Xbox)** in Desktop Mode.
+- If a game fails to launch, run `~/.local/bin/start-hakux-lr.sh` in Konsole to see the error. Check the installer output for KVM access instructions.
+- To uninstall, back up your saves, remove `~/.local/share/hakux-lr`, `~/.local/bin/start-hakux-lr.sh` and `~/.local/share/applications/hakux-lr.desktop`, then remove the shortcut from Steam.
+
+## Upgrading from the old core name
+
+Releases through 0.34.0 used `hakux-*` archives and appeared as **Microsoft - Xbox (hakuX)**.
+The [Linux setup script](#linux-setup-script) accepts both archive names and
+keeps its installed launcher and sorted save directory accessible after
+the upgrade. If you installed the core manually, back up
+`hdd/` in RetroArch's save directory, install the new core and matching info
+file, then remove the old core entry.
+
+If your manual install sorts saves by core name, copy your existing
+`hdd/` from the `hakuX` save folder to `hakuX-lr`. To carry over per-core overrides, options or
+remaps, copy the corresponding `hakuX` folders under RetroArch's config and
+remap directories to `hakuX-lr`, and rename the core-specific files inside
+from `hakuX.cfg`, `hakuX.opt` or `hakuX.rmp` to the matching `hakuX-lr` names.
+Game-specific filenames stay the same. Set **hakuX-lr** as the default core
+again for any Xbox playlist that used the old entry.
 
 ## PortareOS
 
@@ -65,15 +82,21 @@ transfer games over Wi-Fi, enable **Settings → SSH**. Connect over SFTP as
 `root` using the IP address and password under **Settings → About**.
 
 To override the bundled core, back up your [saves](#saves) and extract the
-ARM64 Linux release. Copy `hakux_libretro.so` and `hakux_libretro.info` from
+ARM64 Linux release. Copy `hakux-lr_libretro.so` and `hakux-lr_libretro.info` from
 `lib/libretro/` to `/storage/cores/` on the Nova, creating the directory if
 needed, then restart. This override also applies after OS updates. To use the
 bundled core again, remove both files and restart.
 
+On PortareOS builds that still ship `/usr/lib/libretro/hakux_libretro.so`,
+name the files `hakux_libretro.so` and `hakux_libretro.info` when copying them
+to `/storage/cores/`. Copy `hakuX/hakuX.cfg` under
+`/storage/.config/retroarch/config/` to `hakuX-lr/hakuX-lr.cfg` under the same
+directory. This preserves `/storage/saves/xbox` and keeps run-ahead off.
+
 ## Android (experimental)
 
 For the full core name and file associations in RetroArch, copy
-`hakux_libretro.info` from the Android ZIP to **Settings → Directory → Core Info**.
+`hakux-lr_libretro.info` from the Android ZIP to **Settings → Directory → Core Info**.
 Android uses the Fast mix by default. Selecting **Full DSP (experimental)**
 runs the effects through an interpreter.
 
@@ -148,7 +171,7 @@ together and is on by default. To disconnect, turn Network off and reopen
 the game.
 
 - **System Link.** Enable Network on each device and use the game’s System Link menu. Discovery uses UDP port 3075. For peers on other subnets or a VPN, put one `IP` or `IP:PORT` per line in `lan-peers.txt` in RetroArch’s save directory (`/storage/saves/xbox/` on PortareOS).
-- **Insignia.** Load the hakuX core and choose **Start Core** to open the bundled dashboard. Under **Xbox Live**, select **Register this console**, then **Create an Insignia account** using the subscription code from [Insignia](https://insignia.live).
+- **Insignia.** Load hakuX-lr and choose **Start Core** to open the bundled dashboard. Under **Xbox Live**, select **Register this console**, then **Create an Insignia account** using the subscription code from [Insignia](https://insignia.live).
 
 Applied cheats, XBE patches and uncapped frame rates disable Xbox Live for
 the session. System Link remains available. To reconnect to Insignia, turn
@@ -172,6 +195,6 @@ Collect the logs before starting another game.
 | Installation | Logs |
 | --- | --- |
 | PortareOS | `/var/log/exec.log` and `/var/log/retroarch/retroarch.log` |
-| Linux setup script or Steam Deck installer | `hakux.log` and `retroarch.log` under `~/.local/share/hakux-lr/logs/` by default |
+| Linux setup script or Steam Deck installer | `hakux-lr.log` and `retroarch.log` under `~/.local/share/hakux-lr/logs/` by default |
 | Manual Linux installation | [Capture RetroArch’s terminal output](TESTING.md#logs-1) |
-| Android | `adb logcat`, with tags starting with `hakuX` |
+| Android | `adb logcat`, with tags starting with `hakuX-lr` |

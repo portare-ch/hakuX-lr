@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — Vulkan driver quirks: what a driver gets wrong that the
+ * hakuX-lr HLE GPU — Vulkan driver quirks: what a driver gets wrong that the
  * back end works around. Each quirk is a bit with a name and the drivers it
  * is on for by default, picked from the driver's identity at device
  * creation (quirks.c). A new one is a row in that table and a test of

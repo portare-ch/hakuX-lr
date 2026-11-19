@@ -1,7 +1,7 @@
 /* Copyright (C) 2026-present PortareOS */
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * hakuX HLE GPU — the part of an NV09F (image blit) copy the NV2A makes, as
+ * hakuX-lr HLE GPU — the part of an NV09F (image blit) copy the NV2A makes, as
  * xemu's pgraph image blit has it. Pure: the decoder passes the registers.
  */
 #ifndef HW_XBOX_HLE_PB_BLITCLIP_H

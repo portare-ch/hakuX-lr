@@ -42,7 +42,7 @@ void nc_online_modified(NcOnlineCause cause, const char *what)
     }
     __atomic_store_n(&g_cause, cause, __ATOMIC_RELEASE);
     nc_net_internet(false);
-    nc_log("hakuX-native", "online: %s changed the game: Xbox Live (the Internet) is off until it boots "
+    nc_log("hakuX-lr-native", "online: %s changed the game: Xbox Live (the Internet) is off until it boots "
            "again; system link stays", what);
     __atomic_store_n(&g_notice, what, __ATOMIC_RELEASE);
 }

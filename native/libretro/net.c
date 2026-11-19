@@ -136,7 +136,7 @@ static void insignia_dns(char *out, size_t n)
     struct in_addr a;
     if (!*first || inet_pton(AF_INET, first, &a) != 1) {
         if (*first) {
-            nc_log("hakuX-libretro", "network: insignia-dns.txt names no IPv4 address (%s): Insignia's DNS server",
+            nc_log("hakuX-lr", "network: insignia-dns.txt names no IPv4 address (%s): Insignia's DNS server",
                    first);
         }
         snprintf(out, n, "%s", INSIGNIA_DNS);
@@ -191,10 +191,10 @@ static void insignia_status(void)
     char names[200];
     const unsigned count = insignia_accounts(names, sizeof(names));
     if (count) {
-        nc_log("hakuX-libretro", "network: Insignia account%s on this console: %s", count == 1 ? "" : "s", names);
+        nc_log("hakuX-lr", "network: Insignia account%s on this console: %s", count == 1 ? "" : "s", names);
         return;
     }
-    nc_log("hakuX-libretro", "network: no Insignia account on this console");
+    nc_log("hakuX-lr", "network: no Insignia account on this console");
 }
 
 /* Configure LAN broadcast and explicit peers. */
@@ -208,9 +208,9 @@ static void lan_setup(void)
     snprintf(arg, sizeof(arg), "lanpeers=%s", peers);
     nc_net_option(arg);
     if (found) {
-        nc_log("hakuX-libretro", "network: LAN on %s (%s), consoles named: %s", ifname, bcast, *peers ? peers : "none");
+        nc_log("hakuX-lr", "network: LAN on %s (%s), consoles named: %s", ifname, bcast, *peers ? peers : "none");
     } else {
-        nc_log("hakuX-libretro", "network: LAN, no local network found (broadcast to 255.255.255.255), consoles "
+        nc_log("hakuX-lr", "network: LAN, no local network found (broadcast to 255.255.255.255), consoles "
                "named: %s", *peers ? peers : "none");
     }
 }
@@ -224,7 +224,7 @@ void nc_lr_net_apply(const char *mode)
         nc_net_option("net=on");
         snprintf(arg, sizeof(arg), "dns=%s", dns);
         nc_net_option(arg);
-        nc_log("hakuX-libretro", "network: on (Xbox Live through Insignia and system link), DNS %s%s", dns,
+        nc_log("hakuX-lr", "network: on (Xbox Live through Insignia and system link), DNS %s%s", dns,
                strcmp(dns, INSIGNIA_DNS) ? " (insignia-dns.txt)" : "");
         lan_setup();
         insignia_status();
@@ -236,7 +236,7 @@ void nc_lr_net_apply(const char *mode)
         static const struct retro_message msg = {"Xbox Live in the dashboard needs Network on in the core options",
                                                  480};
         nc_lr_env(RETRO_ENVIRONMENT_SET_MESSAGE, (void *)&msg);
-        nc_log("hakuX-libretro", "network: the dashboard without the network");
+        nc_log("hakuX-lr", "network: the dashboard without the network");
     }
 }
 
@@ -249,7 +249,7 @@ void nc_lr_net_run(void)
                  "game on one of them for system link", addr);
         const struct retro_message msg = {text, 600};
         nc_lr_env(RETRO_ENVIRONMENT_SET_MESSAGE, (void *)&msg);
-        nc_log("hakuX-libretro", "network: %s", text);
+        nc_log("hakuX-lr", "network: %s", text);
     }
     if (!nc_net_take_twin(addr, sizeof(addr)) || g_twin_told) {
         return;
@@ -264,5 +264,5 @@ void nc_lr_net_run(void)
              renew ? "this one gets its own when the game starts next" : "they can't see each other");
     const struct retro_message msg = {text, 600};
     nc_lr_env(RETRO_ENVIRONMENT_SET_MESSAGE, (void *)&msg);
-    nc_log("hakuX-libretro", "network: %s%s", text, renew ? "" : " (no eeprom.renew)");
+    nc_log("hakuX-lr", "network: %s%s", text, renew ? "" : " (no eeprom.renew)");
 }

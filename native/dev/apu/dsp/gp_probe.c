@@ -63,7 +63,7 @@ void gp_probe_init(void)
         return;
     }
     if (!g_apu_config.use_dsp) {
-        nc_log("hakuX-apu", "gp probe: off, it needs NC_APU_DSP=1 (the GP's output used)");
+        nc_log("hakuX-lr-apu", "gp probe: off, it needs NC_APU_DSP=1 (the GP's output used)");
         return;
     }
     snprintf(g_probe.dir, sizeof(g_probe.dir), "%s", dir);
@@ -81,7 +81,7 @@ void gp_probe_init(void)
         add(bin, 1000, 750);
     }
     g_probe.on = true;
-    nc_log("hakuX-apu", "gp probe: %d tones into %s from frame %llu", g_probe.nsegs, g_probe.dir,
+    nc_log("hakuX-lr-apu", "gp probe: %d tones into %s from frame %llu", g_probe.nsegs, g_probe.dir,
            (unsigned long long)g_probe.start);
 }
 
@@ -128,7 +128,7 @@ static void start(MCPXAPUState *d)
     snprintf(path, sizeof(path), "%s/probe.bin", g_probe.dir);
     g_probe.out = fopen(path, "wb");
     g_probe.started = true;
-    nc_log("hakuX-apu", "gp probe: started, GP %s, EP %s",
+    nc_log("hakuX-lr-apu", "gp probe: started, GP %s, EP %s",
            (d->gp.regs[NV_PAPU_GPRST] & NV_PAPU_GPRST_GPDSPRST) ? "running" : "held",
            (d->ep.regs[NV_PAPU_EPRST] & NV_PAPU_GPRST_GPDSPRST) ? "running" : "held");
 }
@@ -199,9 +199,9 @@ void gp_probe_frame_end(MCPXAPUState *d)
                 fclose(g_probe.out);
                 g_probe.out = NULL;
             }
-            nc_log("hakuX-apu", "gp probe: done, %d tones recorded in %s", g_probe.nsegs, g_probe.dir);
+            nc_log("hakuX-lr-apu", "gp probe: done, %d tones recorded in %s", g_probe.nsegs, g_probe.dir);
         } else if (g_probe.segs[g_probe.seg].bin >= 0) {
-            nc_log("hakuX-apu", "gp probe: bin %d at %.0f Hz", g_probe.segs[g_probe.seg].bin,
+            nc_log("hakuX-lr-apu", "gp probe: bin %d at %.0f Hz", g_probe.segs[g_probe.seg].bin,
                    g_probe.segs[g_probe.seg].hz);
         }
     }

@@ -17,5 +17,5 @@ for F in "$DIR"/*.iso; do
     exit 4
   fi
   echo "== $F"
-  timeout 60 ./xboxrun "$F" 2>&1 | grep -E 'hakuX-native-(frontier|imports)'
+  timeout 60 ./xboxrun "$F" 2>&1 | grep -E 'hakuX-lr-native-(frontier|imports)'
 done

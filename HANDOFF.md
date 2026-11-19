@@ -46,7 +46,7 @@ DOA2 mod (below).
   configure: `android/README.md`.
 - Savestates from adb: `setprop debug.hakux.state save:<slot>` or
   `load:<slot>` (a new value each time). Use a slot the user doesn't have.
-- GPU time: `setprop debug.hakux.perf <new value>` logs `hakuX-hle-prof:
+- GPU time: `setprop debug.hakux.perf <new value>` logs `hakuX-lr-hle-prof:
   gpu=` once a second for `debug.hakux.perfsec` seconds (10 by default).
   For A/B in one session, flip a quirk live with `debug.hakux.quirks`
   (`+name` / `-name`): separate launches of the same slot drift.

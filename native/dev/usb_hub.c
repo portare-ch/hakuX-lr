@@ -1,5 +1,5 @@
 /*
- * hakuX native core — a USB 1.1 hub (USB 1.1 chapter 11): the front panel's,
+ * hakuX-lr native core — a USB 1.1 hub (USB 1.1 chapter 11): the front panel's,
  * and the one inside each Xbox controller (gamepad on port 1, memory unit
  * slots on 2-3). Its descriptors and port behaviour are those of the hub the
  * Xbox USB stack is known to enumerate (QEMU's usb-hub, as xemu attaches it):

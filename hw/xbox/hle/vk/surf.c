@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — render-target / depth surfaces (spec §5.5: HLE-owned
+ * hakuX-lr HLE GPU — render-target / depth surfaces (spec §5.5: HLE-owned
  * images; identity by front-end object id).
  */
 #include "hw/xbox/hle/base.h"
@@ -189,7 +189,7 @@ static void destroy_now(HleVkSurf *s)
     if (s->img && g_rec_open && s->rec_gen == g_rec_gen) {
         /* Must never happen: the open recording references this image. */
         if (g_surf_bugs++ < 8) {
-            hle_log("hakuX-hle-back", "BUG: destroying surface %u used by the open "
+            hle_log("hakuX-lr-hle-back", "BUG: destroying surface %u used by the open "
                     "recording", s->id);
         }
     }
@@ -312,19 +312,19 @@ HleVkSurf *hle_surf_define(const HleSurfDesc *d)
                 s->nfaces = d->faces == 6 && d->w == d->h ? 6 : 1;
             }
             if (s->fmt == VK_FORMAT_UNDEFINED) {
-                hle_log("hakuX-hle-back", "surface %u: format 0x%x not renderable",
+                hle_log("hakuX-lr-hle-back", "surface %u: format 0x%x not renderable",
                         d->id, d->xfmt);
             }
             if (s->general && g_log_general < 48) {
                 g_log_general++;
-                hle_log("hakuX-hle-back", "surface %u: %s %ux%u fmt 0x%x levels %u faces %u "
+                hle_log("hakuX-lr-hle-back", "surface %u: %s %ux%u fmt 0x%x levels %u faces %u "
                         "(parent %u level %u face %u)", d->id, d->parent ? "view" : "texture",
                         d->w, d->h, d->xfmt, s->nlevels, s->nfaces, d->parent, d->level,
                         d->face);
             }
             if (s->scale != g_hle_rscale && g_log_unscaled < 16) {
                 g_log_unscaled++;
-                hle_log("hakuX-hle-back", "surface %u: %ux%u fmt 0x%x at guest resolution",
+                hle_log("hakuX-lr-hle-back", "surface %u: %ux%u fmt 0x%x at guest resolution",
                         d->id, d->w, d->h, d->xfmt);
             }
             return s;
@@ -356,7 +356,7 @@ HleVkSurf *hle_surf_define(const HleSurfDesc *d)
             m += snprintf(line + m, sizeof(line) - m, " %ux%u/%x/%c:%u", hist[j].w, hist[j].h,
                           hist[j].f, "tgv"[hist[j].k], hist[j].n);
         }
-        hle_log("hakuX-hle-back", "surface table full (%u; %u to destroy):%s", HLE_MAX_VK_SURF,
+        hle_log("hakuX-lr-hle-back", "surface table full (%u; %u to destroy):%s", HLE_MAX_VK_SURF,
                 parked, line);
     }
     return NULL;

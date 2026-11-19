@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — Vulkan driver quirks (see quirks.h).
+ * hakuX-lr HLE GPU — Vulkan driver quirks (see quirks.h).
  */
 #include "hw/xbox/hle/base.h"
 #include "hw/xbox/hle/vk/quirks.h"
@@ -241,7 +241,7 @@ static uint32_t apply(uint32_t mask, const char *spec)
             }
         }
         if (!bits) {
-            hle_log("hakuX-hle-back", "quirks: \"%s\" is not a quirk (ignored)", name);
+            hle_log("hakuX-lr-hle-back", "quirks: \"%s\" is not a quirk (ignored)", name);
         }
         mask = off ? mask & ~bits : mask | bits;
     }
@@ -254,7 +254,7 @@ static void set(uint32_t mask, const char *why)
     g_hle_quirks = mask;
     names(mask, on, sizeof(on));
     names(g_defaults, def, sizeof(def));
-    hle_log("hakuX-hle-back", "quirks: %s (driver defaults %s%s%s)", on, def, why ? "; " : "",
+    hle_log("hakuX-lr-hle-back", "quirks: %s (driver defaults %s%s%s)", on, def, why ? "; " : "",
             why ? why : "");
 }
 
@@ -271,7 +271,7 @@ void hle_quirks_init(VkPhysicalDevice phys)
             g_defaults |= k_quirks[i].bit;
         }
     }
-    hle_log("hakuX-hle-back", "vk: driver \"%s\" (id %u) %s", d.drv.driverName, d.drv.driverID,
+    hle_log("hakuX-lr-hle-back", "vk: driver \"%s\" (id %u) %s", d.drv.driverName, d.drv.driverID,
             d.drv.driverInfo);
     const char *e = getenv("HAKUX_HLE_QUIRKS");
     set(apply(g_defaults, e), e ? "HAKUX_HLE_QUIRKS" : NULL);

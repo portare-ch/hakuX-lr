@@ -46,17 +46,17 @@ def main():
         if title != TITLE or version != VERSION:
             sys.exit(f'run {run}: title {title!r}, certificate version {version:08x}; '
                      f'want {TITLE!r}, {VERSION:08x}')
-        (ROOT / 'native/dash/hakux-dash.xbe').write_bytes(xbe)
+        (ROOT / 'native/dash/hakux-lr-dash.xbe').write_bytes(xbe)
         pin = {'repository': REPO, 'commit': commit, 'run': int(run),
                'sha256': hashlib.sha256(xbe).hexdigest(), 'size': len(xbe)}
-        (ROOT / 'native/dash/hakux-dash.json').write_text(json.dumps(pin, indent=2) + '\n')
-        parts = [f'The hakuX-lr dashboard (native/dash/hakux-dash.xbe), built from\n'
+        (ROOT / 'native/dash/hakux-lr-dash.json').write_text(json.dumps(pin, indent=2) + '\n')
+        parts = [f'The hakuX-lr dashboard (native/dash/hakux-lr-dash.xbe), built from\n'
                  f'https://github.com/{REPO} at {commit}.\n',
                  (art / 'LICENSE').read_text(), (art / 'THIRD_PARTY_NOTICES.md').read_text()]
         for text in sorted((art / 'licenses').rglob('*.txt')):
             parts.append(f'==== {text.relative_to(art)} ====\n\n{text.read_text()}')
-        (ROOT / 'licenses/hakux-dash.license.txt').write_text('\n\n'.join(p.rstrip('\n') for p in parts) + '\n')
-    print(f'native/dash/hakux-dash.xbe: {REPO}@{commit[:12]}, run {run}, {len(xbe)} bytes')
+        (ROOT / 'licenses/hakux-lr-dash.license.txt').write_text('\n\n'.join(p.rstrip('\n') for p in parts) + '\n')
+    print(f'native/dash/hakux-lr-dash.xbe: {REPO}@{commit[:12]}, run {run}, {len(xbe)} bytes')
 
 
 if __name__ == '__main__':

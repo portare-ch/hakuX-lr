@@ -1,5 +1,5 @@
 /*
- * hakuX native core, app front end (libhakuxcore.so): SDL3 window and input,
+ * hakuX-lr native core, app front end (libhakuxcore.so): SDL3 window and input,
  * the core on its own thread, and the HLE GPU's frames presented (through
  * its Vulkan swapchain).
  * Independent of xemu: it talks to native/core and the HLE GPU's display only.

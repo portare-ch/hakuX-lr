@@ -1,5 +1,5 @@
 /*
- * hakuX native core — time, dispatcher objects, waits, IRQL.
+ * hakuX-lr native core — time, dispatcher objects, waits, IRQL.
  *
  * Dispatcher objects live in guest memory with the Xbox layouts (nxdk
  * xboxkrnl.h, CC0): DISPATCHER_HEADER { Type, Absolute, Size, Inserted,
@@ -907,7 +907,7 @@ static uint64_t KeReleaseSemaphore(NcKernel *k, NcFrame *f, const uint32_t *a)
     const uint32_t old = release_semaphore(k, a[0], (int32_t)a[2], &status, (int32_t)a[1]);
     if (status != NC_STATUS_SUCCESS && !told) {
         told = true;
-        nc_log("hakuX-native", "ke: KeReleaseSemaphore %08x by %d past its limit %d (count %d): not released",
+        nc_log("hakuX-lr-native", "ke: KeReleaseSemaphore %08x by %d past its limit %d (count %d): not released",
                a[0], (int32_t)a[2], (int32_t)nc_vm_rd32(k->vm, a[0] + SEMAPHORE_LIMIT), (int32_t)old);
     }
     return old;
@@ -1045,7 +1045,7 @@ static uint32_t queue_take(NcKernel *k, uint32_t q)
     static bool told;
     if (cur >= nc_vm_rd32(k->vm, q + QUEUE_MAXIMUM) && !told) {
         told = true;
-        nc_log("hakuX-native", "ke: queue %08x gives an entry to a thread past its MaximumCount (%u)", q,
+        nc_log("hakuX-lr-native", "ke: queue %08x gives an entry to a thread past its MaximumCount (%u)", q,
                nc_vm_rd32(k->vm, q + QUEUE_MAXIMUM));
     }
     list_remove(k, e);
@@ -1732,7 +1732,7 @@ static void clock_boot(void)
     const time_t s = (time_t)((BOOT_FILETIME + g_time_offset) / 10000000u) - (time_t)11644473600ll;
     struct tm tm;
     gmtime_r(&s, &tm);
-    nc_log("hakuX-native", "ke: console clock %04d-%02d-%02d %02d:%02d:%02d UTC, %s", tm.tm_year + 1900,
+    nc_log("hakuX-lr-native", "ke: console clock %04d-%02d-%02d %02d:%02d:%02d UTC, %s", tm.tm_year + 1900,
            tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
            g_clock_ms ? "as set in the settings" : "the phone's time");
 }

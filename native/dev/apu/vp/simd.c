@@ -1,6 +1,6 @@
 /* Copyright (C) 2026-present PortareOS */
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/* hakuX native core — the VP's vector level on x86-64 (simd.h) */
+/* hakuX-lr native core — the VP's vector level on x86-64 (simd.h) */
 #include "simd.h"
 
 #if defined(__x86_64__)

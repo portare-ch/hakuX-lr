@@ -1,5 +1,5 @@
 /*
- * hakuX native core — SHA-1, HMAC-SHA1, RC4, DES and modular exponentiation
+ * hakuX-lr native core — SHA-1, HMAC-SHA1, RC4, DES and modular exponentiation
  * (FIPS 180-1, RFC 2104, FIPS 46-3), written from the specifications.
  */
 #include "native/kernel/xc_crypto.h"

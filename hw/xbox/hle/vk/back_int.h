@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — back-end internals shared by the vk/ sources (CONFIG_VULKAN
+ * hakuX-lr HLE GPU — back-end internals shared by the vk/ sources (CONFIG_VULKAN
  * only).
  */
 #ifndef HW_XBOX_HLE_VK_BACK_INT_H

@@ -1,5 +1,5 @@
 /*
- * hakuX native core — the kernel in a savestate: NcKernel's own state, the
+ * hakuX-lr native core — the kernel in a savestate: NcKernel's own state, the
  * time and interrupt state of the modules around it (KERN), and the threads
  * (THRD). Thread pointers are stored as slots, CPU contexts by their fields
  * (NcCpuState), never as the JIT's layout.
@@ -82,7 +82,7 @@ bool nc_kern_state_load(NcRd *r, unsigned v)
         memset(k->handles_more, 0, sizeof(k->handles_more));    /* its table ended at NC_HANDLES_V1 */
     }
     if (k->xbe_base != base || k->xbe_size != size || k->kprocess != kprocess) {
-        nc_log("hakuX-native-state", "the state's image is at %08x+%x (process %08x), this boot's at %08x+%x (%08x)",
+        nc_log("hakuX-lr-native-state", "the state's image is at %08x+%x (process %08x), this boot's at %08x+%x (%08x)",
                k->xbe_base, k->xbe_size, k->kprocess, base, size, kprocess);
         return false;
     }
@@ -101,7 +101,7 @@ bool nc_kern_state_load(NcRd *r, unsigned v)
     nc_kernel_av_saved_set(s.av_saved);
     nc_intr_isr_line_set(s.isr_line);
     nc_irq_state_set(s.irq_enabled, s.irq_lines);
-    nc_log("hakuX-native-state", "kernel: guest time %.3f s, %llu kernel calls", s.guest_ns / 1e9,
+    nc_log("hakuX-lr-native-state", "kernel: guest time %.3f s, %llu kernel calls", s.guest_ns / 1e9,
            (unsigned long long)k->calls);
     return true;
 }
@@ -213,7 +213,7 @@ bool nc_thrd_state_load(NcRd *r, unsigned v)
     k->isr_interrupted = thread_at(k, refs.isr_interrupted);
     k->resume_first = thread_at(k, refs.resume_first);
     g_point = refs.point;
-    nc_log("hakuX-native-state", "threads: %u, current %d (%s)", n, refs.current,
+    nc_log("hakuX-lr-native-state", "threads: %u, current %d (%s)", n, refs.current,
            g_point == NC_STATE_AT_IDLE ? "idle: the scheduler picks first" : "at its kernel entry");
     return true;
 }

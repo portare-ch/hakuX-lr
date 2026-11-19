@@ -1,4 +1,4 @@
-# Upstreaming hakuX's Linux and libretro work
+# Upstreaming hakuX-lr's Linux and libretro work
 
 Status: draft for the owner's review, 2026-10-25. Nothing here has been sent
 upstream.
@@ -11,7 +11,7 @@ everything it relies on. Two upstreams are in view:
 - **libretro**, RetroArch's distribution: the core info file, buildbot builds
   and documentation, built from wherever the libretro target lives.
 
-portare-ch/hakuX would then shrink to what is PortareOS's own: release
+portare-ch/hakuX-lr would then shrink to what is PortareOS's own: release
 packaging and notes, or nothing at all. PortareOS's integration already lives
 in portare-ch/distribution and is not affected.
 
@@ -46,7 +46,7 @@ licence is GPL-3.0-or-later, as here.
 - **Builds** come from a `.gitlab-ci.yml` in the core's own tree that includes
   libretro-infrastructure's ci-templates. Dolphin, a CMake core, builds Linux
   AArch64 with `.libretro-linux-cmake-aarch64` and Android with
-  `.libretro-android-cmake-arm64-v8a`: the two targets hakuX can have.
+  `.libretro-android-cmake-arm64-v8a`: the two targets hakuX-lr can have.
 - **Xbox cores already listed:** xemu and DirectXbox, both
   `is_experimental`, with `systemid = "xbox"` and `database = "Microsoft - Xbox"`
   (the database exists). xemu's info file was added on 2026-07-04, updated on
@@ -74,7 +74,7 @@ licence is GPL-3.0-or-later, as here.
 
 | Feature | Where it lives | Upstream, it becomes |
 | --- | --- | --- |
-| VRR, timed presents and the kernel's LFC (#8) | portare-ch/distribution | Nothing in hakuX: the core only needs its phase lock, which is generic |
+| VRR, timed presents and the kernel's LFC (#8) | portare-ch/distribution | Nothing in hakuX-lr: the core only needs its phase lock, which is generic |
 | The Xbox's exact 60000/1001 Hz, one frame per `retro_run` | The core | Unchanged; it suits every RetroArch |
 | The overscan crop that fills a 4:3 panel | `native/libretro/video.c` | A core option ("Crop overscan", on by default), so a TV can keep the full frame |
 | The console disk and caches in `/storage/saves/xbox` | RetroArch's save directory, set by PortareOS's override | Unchanged: the core uses whatever save directory the frontend gives |
@@ -140,8 +140,8 @@ licence is GPL-3.0-or-later, as here.
 
 | # | Step | Where | Ready when |
 | --- | --- | --- | --- |
-| 0 | Fixes in this fork: the info file; PortareOS-only behaviour behind one build option; `setenv` replaced; overscan option; an Android build of the fork | portare-ch/hakuX | Container tests pass and the Android build works; on the Nova, PortareOS's package behaves as today |
-| 1 | Merge upstream's 1.1.0 into the fork, then keep merging | portare-ch/hakuX | No conflicts left; Burnout 3 and BLACK as before on the Nova |
+| 0 | Fixes in this fork: the info file; PortareOS-only behaviour behind one build option; `setenv` replaced; overscan option; an Android build of the fork | portare-ch/hakuX-lr | Container tests pass and the Android build works; on the Nova, PortareOS's package behaves as today |
+| 1 | Merge upstream's 1.1.0 into the fork, then keep merging | portare-ch/hakuX-lr | No conflicts left; Burnout 3 and BLACK as before on the Nova |
 | 2 | Pull request: portability shims and the Linux build | rfandango/hakuX | Upstream reviews it, or the time limit passes |
 | 3 | Pull request: exact vblank, shared-device Vulkan, console setting APIs | rfandango/hakuX | Android unchanged in upstream's own checks |
 | 4 | Pull request: the libretro target, its tests, the Linux docs | rfandango/hakuX | CTest in upstream's tree |

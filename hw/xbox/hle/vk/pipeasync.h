@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — pipelines built off the render thread, and before the game
+ * hakuX-lr HLE GPU — pipelines built off the render thread, and before the game
  * runs (pipeasync.c):
  * - Asynchronous builds (the app's "Asynchronous shader compilation"): a
  *   pipeline that would compile is built by worker threads while draws that

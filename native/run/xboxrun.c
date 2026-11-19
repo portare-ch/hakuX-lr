@@ -61,7 +61,7 @@ static void dump_ranges(const char *spec);
 static void dump_guest(const NcVm *vm, const char *what, uint32_t va, unsigned len)
 {
     char buf[512];
-    int n = snprintf(buf, sizeof(buf), "hakuX-native-frontier:   %s %08x:", what, va);
+    int n = snprintf(buf, sizeof(buf), "hakuX-lr-native-frontier:   %s %08x:", what, va);
     for (unsigned i = 0; i < len && n < (int)sizeof(buf) - 4; i++) {
         if (nc_vm_phys(vm, va + i) == UINT32_MAX) {
             n += snprintf(buf + n, sizeof(buf) - (size_t)n, " ..");
@@ -83,7 +83,7 @@ static void report_guest(const mcontext_t *mc, uint32_t eip)
         static const char *const names[8] = {"eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"};
         static const int regs[8] = {4, 7, 5, 6, 8, 9, 10, 11};
         char buf[256];
-        int n = snprintf(buf, sizeof(buf), "hakuX-native-frontier:  ");
+        int n = snprintf(buf, sizeof(buf), "hakuX-lr-native-frontier:  ");
         for (int i = 0; i < 8; i++) {
             n += snprintf(buf + n, sizeof(buf) - (size_t)n, " %s=%08x", names[i], (uint32_t)mc->regs[regs[i]]);
         }
@@ -112,7 +112,7 @@ static void report_host_thread(uintptr_t pc, uintptr_t sp, uintptr_t addr)
         }
         fclose(f);
     }
-    int n = snprintf(buf, sizeof(buf), "hakuX-native-frontier:   thread %d (%s) sp=%llx (main %d)\n", tid, comm,
+    int n = snprintf(buf, sizeof(buf), "hakuX-lr-native-frontier:   thread %d (%s) sp=%llx (main %d)\n", tid, comm,
                      (unsigned long long)sp, (int)getpid());
     write(2, buf, (size_t)n);
     f = fopen("/proc/self/maps", "r");
@@ -129,7 +129,7 @@ static void report_host_thread(uintptr_t pc, uintptr_t sp, uintptr_t addr)
                          : addr >= hi && addr - hi < 0x10000 ? "below addr" : addr < lo && lo - addr < 0x10000 ? "above addr"
                                                                                                                    : NULL;
         if (what) {
-            n = snprintf(buf, sizeof(buf), "hakuX-native-frontier:   map %-10s %s", what, line);
+            n = snprintf(buf, sizeof(buf), "hakuX-lr-native-frontier:   map %-10s %s", what, line);
             write(2, buf, (size_t)n);
         }
     }
@@ -147,7 +147,7 @@ static void fault(int sig, siginfo_t *info, void *ctx)
     uint32_t eip = nc_cpu_guest_eip_at(g_core.cpu, pc);
     char buf[256];
     int n = snprintf(buf, sizeof(buf),
-                     "hakuX-native-frontier: fault sig=%d host_pc=%llx addr=%p guest_addr=%s%llx "
+                     "hakuX-lr-native-frontier: fault sig=%d host_pc=%llx addr=%p guest_addr=%s%llx "
                      "guest_eip=%08x\n",
                      sig, (unsigned long long)pc, info->si_addr,
                      guest == UINT64_MAX ? "host:" : "", (unsigned long long)(guest == UINT64_MAX ? 0 : guest),
@@ -155,18 +155,18 @@ static void fault(int sig, siginfo_t *info, void *ctx)
     write(2, buf, (size_t)n);
     report_host_thread(pc, nc_host_sp(ctx), (uintptr_t)info->si_addr);
     if (eip) {
-        n = snprintf(buf, sizeof(buf), "hakuX-native-frontier:   host insn %08x\n", *(const uint32_t *)pc);
+        n = snprintf(buf, sizeof(buf), "hakuX-lr-native-frontier:   host insn %08x\n", *(const uint32_t *)pc);
         write(2, buf, (size_t)n);
     }
     /* Host code: where in which image (llvm-addr2line on the unstripped build). */
     Dl_info dl;
     if (!eip && dladdr((void *)pc, &dl) && dl.dli_fbase) {
-        n = snprintf(buf, sizeof(buf), "hakuX-native-frontier:   host %s+0x%llx (%s)\n", dl.dli_fname,
+        n = snprintf(buf, sizeof(buf), "hakuX-lr-native-frontier:   host %s+0x%llx (%s)\n", dl.dli_fname,
                      (unsigned long long)(pc - (uintptr_t)dl.dli_fbase),
                      dl.dli_sname ? dl.dli_sname : "?");
         write(2, buf, (size_t)n);
 #if defined(__aarch64__)
-        n = snprintf(buf, sizeof(buf), "hakuX-native-frontier:   host lr +0x%llx\n",
+        n = snprintf(buf, sizeof(buf), "hakuX-lr-native-frontier:   host lr +0x%llx\n",
                      (unsigned long long)((uintptr_t)mc->regs[30] - (uintptr_t)dl.dli_fbase));
         write(2, buf, (size_t)n);
 #endif
@@ -175,7 +175,7 @@ static void fault(int sig, siginfo_t *info, void *ctx)
         /* Inside a kernel function: the guest state is the call's frame. */
         NcFrame *f = g_core.kernel.frame;
         static const char *const names[8] = {"eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"};
-        n = snprintf(buf, sizeof(buf), "hakuX-native-frontier:   in a kernel call; guest");
+        n = snprintf(buf, sizeof(buf), "hakuX-lr-native-frontier:   in a kernel call; guest");
         for (int i = 0; i < 8; i++) {
             n += snprintf(buf + n, sizeof(buf) - (size_t)n, " %s=%08x", names[i], nc_frame_gpr(f, i));
         }
@@ -205,7 +205,7 @@ static void timeout(int sig, siginfo_t *info, void *ctx)
     const uintptr_t pc = nc_host_pc(ctx);
     uint32_t eip = nc_cpu_guest_eip_at(g_core.cpu, pc);
     char buf[160];
-    int n = snprintf(buf, sizeof(buf), "hakuX-native-frontier: timeout after %u s: host_pc=%llx guest_eip=%08x%s\n",
+    int n = snprintf(buf, sizeof(buf), "hakuX-lr-native-frontier: timeout after %u s: host_pc=%llx guest_eip=%08x%s\n",
                      g_timeout, (unsigned long long)pc, eip, eip ? "" : " (not in guest code)");
     write(2, buf, (size_t)n);
     report_guest(mc, eip);
@@ -230,7 +230,7 @@ static void dump_ranges(const char *spec)
         }
         if (out) {
             fclose(out);
-            nc_log("hakuX-native", "dumped %08x+%x to %s", va, len, name);
+            nc_log("hakuX-lr-native", "dumped %08x+%x to %s", va, len, name);
         }
         /* The physical page behind each page of the range (u32 each; ~0: none). */
         snprintf(name, sizeof(name), "dump_%08x.pa", va);
@@ -262,7 +262,7 @@ static void *watchdog(void *arg)
     for (;;) {
         usleep(100 * 1000);
         if (nc_hle_fatal_kind() == NC_FATAL_GPU_LOST) {
-            nc_log("hakuX-native-frontier", "GPU lost: %s", nc_hle_fatal() ? nc_hle_fatal() : "?");
+            nc_log("hakuX-lr-native-frontier", "GPU lost: %s", nc_hle_fatal() ? nc_hle_fatal() : "?");
             _exit(9);
         }
         const uint64_t n = hle_back_swap_count(), now = mono_ms();
@@ -270,7 +270,7 @@ static void *watchdog(void *arg)
             frames = n;
             since = now;
         } else if (g_hang_s && now - since >= g_hang_s * 1000ull) {
-            nc_log("hakuX-native-frontier", "hang: no frame for %u s after frame %llu", g_hang_s,
+            nc_log("hakuX-lr-native-frontier", "hang: no frame for %u s after frame %llu", g_hang_s,
                    (unsigned long long)n);
             report_guest(NULL, 0);
             _exit(6);
@@ -308,10 +308,10 @@ int main(int argc, char **argv)
     setenv("HAKUX_HLE_MODE", render ? "replace" : "off", 1);
     if (render) {
         setenv("NC_CAPTURE_EVERY", "2", 0);
-        nc_log("hakuX-native", "explicit render diagnostics: renderer ON without a display, "
+        nc_log("hakuX-lr-native", "explicit render diagnostics: renderer ON without a display, "
                "frames to %s/frames, paced silent audio", data);
     } else {
-        nc_log("hakuX-native", "explicit headless diagnostics: renderer OFF, paced silent audio");
+        nc_log("hakuX-lr-native", "explicit headless diagnostics: renderer OFF, paced silent audio");
     }
     const char *disc = argv[2];
 #else
@@ -343,7 +343,7 @@ int main(int argc, char **argv)
     sa.sa_sigaction = timeout;
     sigaction(SIGALRM, &sa, NULL);
     g_timeout = getenv("NC_TIMEOUT") ? (unsigned)atoi(getenv("NC_TIMEOUT")) : 30;
-    nc_log("hakuX-native", "xboxrun pid %d", (int)getpid()); /* the HLE layer logs to logcat under this pid */
+    nc_log("hakuX-lr-native", "xboxrun pid %d", (int)getpid()); /* the HLE layer logs to logcat under this pid */
     setenv("HAKUX_HLE_MODE", "replace", 0);     /* the GPU as the app runs it */
 
     NcOptions opt;
@@ -388,10 +388,10 @@ int main(int argc, char **argv)
         }
     }
     nc_options_apply(&opt);
-    nc_log("hakuX-native", "xboxrun: disc %s, hdd %s", disc, nc_io_hdd_root());
+    nc_log("hakuX-lr-native", "xboxrun: disc %s, hdd %s", disc, nc_io_hdd_root());
 
     if (!nc_core_boot(&g_core, fd)) {
-        nc_log("hakuX-native-frontier", "boot failed%s%s", nc_hle_fatal() ? ": " : "",
+        nc_log("hakuX-lr-native-frontier", "boot failed%s%s", nc_hle_fatal() ? ": " : "",
                nc_hle_fatal() ? nc_hle_fatal() : "");
         return nc_hle_fatal_kind() == NC_FATAL_STATE ? 8 : 1;
     }

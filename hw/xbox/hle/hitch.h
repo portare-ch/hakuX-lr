@@ -13,7 +13,7 @@
  *
  * The watchdog reports hangs in progress and samples the vCPU once a window is overdue.
  * Attribution uses activity transitions on the decoder and render threads, GPU progress, disc
- * reads, JIT flushes and thread CPU time. Reports appear under hakuX-hle-hitch in logcat and
+ * reads, JIT flushes and thread CPU time. Reports appear under hakuX-lr-hle-hitch in logcat and
  * in the overlay.
  */
 #ifndef HW_XBOX_HLE_HITCH_H

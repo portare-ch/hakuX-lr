@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — guest RAM in GPU-importable memory (G0.3 strategy (a)).
+ * hakuX-lr HLE GPU — guest RAM in GPU-importable memory (G0.3 strategy (a)).
  */
 #include "hw/xbox/hle/base.h"
 #include "hw/xbox/hle/uma/uma.h"
@@ -31,26 +31,26 @@ static void *uma_alloc_usage(size_t size, uint64_t usage, AHardwareBuffer **out)
     AHardwareBuffer *ahb = NULL;
     void *ptr = NULL;
     if (AHardwareBuffer_allocate(&d, &ahb) != 0) {
-        __android_log_print(ANDROID_LOG_ERROR, "hakuX-hle",
+        __android_log_print(ANDROID_LOG_ERROR, "hakuX-lr-hle",
                             "uma: AHB allocate(%zu) failed", size);
         return NULL;
     }
     if (AHardwareBuffer_lock(ahb, AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN |
                              AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN, -1, NULL,
                              &ptr) != 0 || !ptr) {
-        __android_log_print(ANDROID_LOG_ERROR, "hakuX-hle", "uma: AHB lock failed");
+        __android_log_print(ANDROID_LOG_ERROR, "hakuX-lr-hle", "uma: AHB lock failed");
         AHardwareBuffer_release(ahb);
         return NULL;
     }
     if ((uintptr_t)ptr & (hle_host_page_size() - 1)) {
-        __android_log_print(ANDROID_LOG_ERROR, "hakuX-hle",
+        __android_log_print(ANDROID_LOG_ERROR, "hakuX-lr-hle",
                             "uma: AHB pointer %p not page aligned", ptr);
         AHardwareBuffer_unlock(ahb, NULL);
         AHardwareBuffer_release(ahb);
         return NULL;
     }
     memset(ptr, 0, size);
-    __android_log_print(ANDROID_LOG_INFO, "hakuX-hle",
+    __android_log_print(ANDROID_LOG_INFO, "hakuX-lr-hle",
                         "uma: guest RAM from AHB size=%zu ptr=%p", size, ptr);
     *out = ahb;
     return ptr;   /* lives as long as the VM; intentionally never released */
@@ -61,7 +61,7 @@ struct AHardwareBuffer *hle_uma_ahb(void)
     return g_uma_ahb;
 }
 
-#define UMA_LOG(...) __android_log_print(ANDROID_LOG_INFO, "hakuX-hle", __VA_ARGS__)
+#define UMA_LOG(...) __android_log_print(ANDROID_LOG_INFO, "hakuX-lr-hle", __VA_ARGS__)
 
 static int g_uma_fd = -1;
 static size_t g_uma_size;

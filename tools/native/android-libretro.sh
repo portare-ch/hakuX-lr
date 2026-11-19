@@ -4,7 +4,7 @@
 # The libretro core for RetroArch on Android (arm64-v8a): built with the NDK
 # and packaged with its core info, stripped, with the licences and the
 # revisions it was built from, as
-# build/package/hakux-<version>-android-arm64.zip.
+# build/package/hakux-lr-<version>-android-arm64.zip.
 #
 #   ANDROID_NDK=<ndk> tools/native/android-libretro.sh <version>
 #
@@ -43,13 +43,13 @@ cmake --build "$build" --target hakux_libretro -j "${JOBS:-4}"
 
 bin=$(echo "$ndk"/toolchains/llvm/prebuilt/*/bin)
 out=$repo/build/package
-name=hakux-$version-android-arm64
+name=hakux-lr-$version-android-arm64
 rm -rf "${out:?}/$name" "$out/$name.zip"
 mkdir -p "$out/$name/licenses"
-"$bin/llvm-strip" -o "$out/$name/hakux_libretro_android.so" "$build/hakux_libretro_android.so"
+"$bin/llvm-strip" -o "$out/$name/hakux-lr_libretro_android.so" "$build/hakux-lr_libretro_android.so"
 cp LICENSE COPYING licenses/* "$out/$name/licenses/"
 {
-    echo "hakuX $version for RetroArch on Android"
+    echo "hakuX-lr $version for RetroArch on Android"
     echo "source $(git rev-parse HEAD) (https://github.com/portare-ch/hakuX-lr)"
     echo "compiler $("$bin/clang" --version | head -1) (NDK $(sed -n 's/^Pkg.Revision *= *//p' "$ndk/source.properties"))"
     echo "architecture arm64-v8a, Android 9 (API 28) or newer"
@@ -61,10 +61,10 @@ cp LICENSE COPYING licenses/* "$out/$name/licenses/"
 python3 -I - "$repo" "$out" "$name" "$version" "$(git log -1 --format=%ct)" <<'EOF'
 import hashlib, os, sys, time, zipfile
 repo, out, name, version, stamp = sys.argv[1:]
-info = open(os.path.join(repo, 'native/libretro/hakux_libretro.info')).read().splitlines()
+info = open(os.path.join(repo, 'native/libretro/hakux-lr_libretro.info')).read().splitlines()
 lines = {
     'display_version': version,
-    'description': 'Original Xbox emulator for ARM64 Android. Uses Vulkan graphics and requires no BIOS, '
+    'description': 'hakuX-lr is an original Xbox emulator for ARM64 Android. Uses Vulkan graphics and requires no BIOS, '
                    'MCPX ROM or hard disk image.',
     'notes': "(!) Experimental on Android. Requires an ARM64 device, Vulkan 1.2 (1.3 recommended) and "
              "RetroArch's vulkan video driver.|Game saves and caches are stored in hdd/ and cache/ under "
@@ -76,7 +76,7 @@ for i, l in enumerate(info):
     if key in lines:
         info[i] = '%s = "%s"' % (key, lines.pop(key))
 assert not lines, lines
-with open(os.path.join(out, name, 'hakux_libretro.info'), 'w') as f:
+with open(os.path.join(out, name, 'hakux-lr_libretro.info'), 'w') as f:
     f.write('\n'.join(info) + '\n')
 when = time.gmtime(int(stamp))[:6]
 path = os.path.join(out, name + '.zip')

@@ -1,6 +1,6 @@
 # Testing the hakuX core
 
-The RetroArch core, `hakux_libretro.so`, is tested on the Retroid Pocket
+The RetroArch core, `hakux-lr_libretro.so`, is tested on the Retroid Pocket
 Nova with PortareOS (Snapdragon 8 Gen 2, Adreno 740). The ROCKNIX community
 has also tested the build on other devices.
 
@@ -26,10 +26,10 @@ RetroArch with hakuX.
 
 To try a release before PortareOS ships it:
 
-1. Download `hakux-<version>-aarch64.tar.gz` from the
+1. Download `hakux-lr-<version>-aarch64.tar.gz` from the
    [releases](https://github.com/portare-ch/hakuX-lr/releases), and check it
    against its `.sha256` file.
-2. Copy `lib/libretro/hakux_libretro.so` and `lib/libretro/hakux_libretro.info`
+2. Copy `lib/libretro/hakux-lr_libretro.so` and `lib/libretro/hakux-lr_libretro.info`
    from it into `/storage/cores`.
 3. Restart. These files override the bundled core, including after OS updates.
 
@@ -74,15 +74,15 @@ systemctl start portarelauncher
 
 ### Installing
 
-1. From the release tarball, copy `lib/libretro/hakux_libretro.so` into
+1. From the release tarball, copy `lib/libretro/hakux-lr_libretro.so` into
    RetroArch's cores directory (Settings → Directory → Cores).
-2. Copy `hakux_libretro.info` into its core info directory (Settings →
+2. Copy `hakux-lr_libretro.info` into its core info directory (Settings →
    Directory → Core Info).
 
 Or load it directly:
 
 ```sh
-retroarch -v -L /path/to/hakux_libretro.so "/path/to/game.iso" 2>&1 | tee hakux.log
+retroarch -v -L /path/to/hakux-lr_libretro.so "/path/to/game.iso" 2>&1 | tee hakux-lr.log
 ```
 
 The core stores game saves in `hdd/` and shader/pipeline caches in `cache/`
@@ -248,7 +248,7 @@ Apple's `container` on a Mac can build it but cannot run KVM.
    To build, test and package a clean checkout instead, run
    `sh tools/native/linux-ci-x86_64.sh 0.17.0`. Run
    `build/linux-x86_64/kvm-smoke`; it should end with
-   `PASS: 0 failed`. The core is `build/linux-x86_64/hakux_libretro.so`.
+   `PASS: 0 failed`. The core is `build/linux-x86_64/hakux-lr_libretro.so`.
 
 **Compare like with like:**
 

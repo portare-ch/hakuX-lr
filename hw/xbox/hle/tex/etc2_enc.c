@@ -1,6 +1,6 @@
 /* Copyright (C) 2026-present PortareOS */
 /*
- * hakuX HLE GPU — ETC2 / EAC block encoder (etc2_enc.h).
+ * hakuX-lr HLE GPU — ETC2 / EAC block encoder (etc2_enc.h).
  *
  * ETC1's block: two halves (flip 0: the left and right 2x4 columns, flip 1:
  * the top and bottom 4x2 rows), each a base colour (4 bits a channel, or 5

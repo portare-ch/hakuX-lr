@@ -1,7 +1,7 @@
 /* Copyright (C) 2026-present PortareOS */
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * hakuX native core — CHD disc images through libchdr.
+ * hakuX-lr native core — CHD disc images through libchdr.
  *
  * A CHD holds the image in hunks (a few sectors each), each compressed on its
  * own (LZMA, zlib, zstd, Huffman, FLAC) or a copy of another. A read takes the
@@ -117,7 +117,7 @@ NcChd *nc_chd_open(int fd, bool *is_chd)
     c->fd = fd;
     const chd_error e = chd_open_core_file_callbacks(&k_file, c, CHD_OPEN_READ, NULL, &c->chd);
     if (e != CHDERR_NONE) {
-        nc_log("hakuX-native", "disc: CHD not opened: %s", e == CHDERR_REQUIRES_PARENT
+        nc_log("hakuX-lr-native", "disc: CHD not opened: %s", e == CHDERR_REQUIRES_PARENT
                                                                ? "it's a delta of another CHD (a parent), not supported"
                                                                : chd_error_string(e));
         free(c);
@@ -129,7 +129,7 @@ NcChd *nc_chd_open(int fd, bool *is_chd)
                     : is_cd(c->chd) ? "a CD image (chdman createcd); an Xbox disc is a DVD: chdman createdvd"
                                     : NULL;
     if (why) {
-        nc_log("hakuX-native", "disc: CHD not read: %s", why);
+        nc_log("hakuX-lr-native", "disc: CHD not read: %s", why);
         chd_close(c->chd);
         free(c);
         return NULL;
@@ -142,7 +142,7 @@ NcChd *nc_chd_open(int fd, bool *is_chd)
     c->data = malloc((size_t)c->slots * c->hunk_bytes);
     pthread_mutex_init(&c->lock, NULL);
     char n[4][5];
-    nc_log("hakuX-native", "disc: CHD v%u, %llu bytes in %u hunks of %u (%s, %s, %s, %s)", h->version,
+    nc_log("hakuX-lr-native", "disc: CHD v%u, %llu bytes in %u hunks of %u (%s, %s, %s, %s)", h->version,
            (unsigned long long)c->size, h->totalhunks, c->hunk_bytes, codec_name(h->compression[0], n[0]),
            codec_name(h->compression[1], n[1]), codec_name(h->compression[2], n[2]),
            codec_name(h->compression[3], n[3]));
@@ -161,7 +161,7 @@ static const uint8_t *hunk(NcChd *c, uint32_t i)
     const chd_error e = chd_read(c->chd, i, p);
     if (e != CHDERR_NONE) {
         if (c->errors++ < 8) {
-            nc_log("hakuX-native", "disc: CHD hunk %u: %s", i, chd_error_string(e));
+            nc_log("hakuX-lr-native", "disc: CHD hunk %u: %s", i, chd_error_string(e));
         }
         return NULL;
     }
@@ -217,7 +217,7 @@ NcChd *nc_chd_open(int fd, bool *is_chd)
     char magic[8];
     *is_chd = pread(fd, magic, sizeof(magic), 0) == (ssize_t)sizeof(magic) && !memcmp(magic, "MComprHD", 8);
     if (*is_chd) {
-        nc_log("hakuX-native", "disc: a CHD image, and this build has no libchdr: ISO images only");
+        nc_log("hakuX-lr-native", "disc: a CHD image, and this build has no libchdr: ISO images only");
     }
     return NULL;
 }

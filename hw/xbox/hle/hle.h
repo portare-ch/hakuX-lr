@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — runtime state and the host-facing API.
+ * hakuX-lr HLE GPU — runtime state and the host-facing API.
  */
 #ifndef HW_XBOX_HLE_HLE_H
 #define HW_XBOX_HLE_HLE_H

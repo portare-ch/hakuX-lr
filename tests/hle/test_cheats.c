@@ -1,5 +1,5 @@
 /*
- * hakuX native core — the cheat engine (native/core/cheats.c) over a fake
+ * hakuX-lr native core — the cheat engine (native/core/cheats.c) over a fake
  * guest memory: parsing, writes, conditionals, pointers, once, toggles, a
  * cheat compiled while the game runs, the frontend's cheats.
  */

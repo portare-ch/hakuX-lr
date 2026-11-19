@@ -1,5 +1,5 @@
 /*
- * hakuX native core — library code that waits on emulated hardware.
+ * hakuX-lr native core — library code that waits on emulated hardware.
  *
  * DirectSound hands the APU's GP DSP a command through a mailbox in memory
  * and spins until the DSP takes it:
@@ -84,7 +84,7 @@ void nc_kernel_title_fixups(NcKernel *k, const HleXbeInfo *xbe)
         }
     }
     if (!apu_spin_on()) {
-        nc_log("hakuX-native", "fixups: DirectSound mailbox waits left spinning (debug.hakux.apuspin=0)");
+        nc_log("hakuX-lr-native", "fixups: DirectSound mailbox waits left spinning (debug.hakux.apuspin=0)");
         return;
     }
     unsigned patched = 0;
@@ -105,14 +105,14 @@ void nc_kernel_title_fixups(NcKernel *k, const HleXbeInfo *xbe)
                 memcpy(site + 1, &rel, 4);
                 site[5] = 0x90;
                 patched++;
-                nc_log("hakuX-native", "fixups: DirectSound mailbox wait at %08x (%s) waits on the APU (stub %08x)",
+                nc_log("hakuX-lr-native", "fixups: DirectSound mailbox wait at %08x (%s) waits on the APU (stub %08x)",
                        va, s->name, stub);
             }
             p += sizeof(k_mailbox_wait);
         }
     }
     if (!patched) {
-        nc_log("hakuX-native", "fixups: no DirectSound mailbox wait found");
+        nc_log("hakuX-lr-native", "fixups: no DirectSound mailbox wait found");
     }
 }
 
@@ -209,7 +209,7 @@ static uint32_t xmv_stub(NcKernel *k, uint32_t m)
     }
     const uint32_t stub = nc_kernel_code_alloc(k, XMV_STUB);
     if (!stub) {
-        nc_log("hakuX-native", "fixups: XMV's stream wait at %08x left as it is (no room for its stub)", m);
+        nc_log("hakuX-lr-native", "fixups: XMV's stream wait at %08x left as it is (no room for its stub)", m);
         return 0;
     }
     xmv_stub_bytes(k, m, stub, b);
@@ -259,7 +259,7 @@ static unsigned overrun_copy_fixups(NcKernel *k, uint32_t va, uint32_t len, cons
                 nc_vm_rd32(k->vm, src) == 1 && nc_vm_rd32(k->vm, src + 4) == 0x20000) {
                 ((uint8_t *)nc_vm_host(k->vm, m))[1] = 0x00; /* mov ecx, 0x8000 */
                 patched++;
-                nc_log("hakuX-native", "fixups: the image copy at %08x (%s) stops at its texture's end "
+                nc_log("hakuX-lr-native", "fixups: the image copy at %08x (%s) stops at its texture's end "
                        "(8 bytes past it were the USB controller's)", m, name);
             }
         }
@@ -288,7 +288,7 @@ static unsigned section_fixups(NcKernel *k, uint32_t va, uint32_t len, const cha
                 memcpy(site + 1, &rel, 4);
                 memset(site + 5, 0x90, XMV_DEC - XMV_JE - 5);
                 patched++;
-                nc_log("hakuX-native", "fixups: XMV's stream wait at %08x (%s) runs DirectSoundDoWork for a "
+                nc_log("hakuX-lr-native", "fixups: XMV's stream wait at %08x (%s) runs DirectSoundDoWork for a "
                        "stopped stream too (stub %08x)", m, name, stub);
             }
         }

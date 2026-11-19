@@ -32,7 +32,7 @@ void apu_out_push(const void *frame, int bytes)
 {
     uint64_t head = __atomic_load_n(&g_null.head, __ATOMIC_RELAXED);
     if (bytes < 0 || head + (uint64_t)bytes - __atomic_load_n(&g_null.tail, __ATOMIC_ACQUIRE) > g_null.capacity) {
-        nc_log("hakuX-apu", "diagnostic audio: invalid push or ring overflow");
+        nc_log("hakuX-lr-apu", "diagnostic audio: invalid push or ring overflow");
         abort();
     }
     if (g_null.dump) {          /* flushed every 64 frames: runs end by timeout, without a close */
@@ -66,7 +66,7 @@ static void *drain(void *unused)
             error = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &next, NULL);
         } while (error == EINTR);
         if (error) {
-            nc_log("hakuX-apu", "diagnostic audio sleep failed: %d", error);
+            nc_log("hakuX-lr-apu", "diagnostic audio sleep failed: %d", error);
             abort();
         }
         pthread_mutex_lock(&g_null.lock);
@@ -96,7 +96,7 @@ static void *drain(void *unused)
 int apu_out_open(int capacity_bytes, int samples, pthread_cond_t *wake)
 {
     if (capacity_bytes <= 0 || capacity_bytes % 4 || samples <= 0 || samples > 4096 || !wake || g_null.capacity) {
-        nc_log("hakuX-apu", "diagnostic audio: invalid configuration or duplicate open");
+        nc_log("hakuX-lr-apu", "diagnostic audio: invalid configuration or duplicate open");
         abort();
     }
     g_null.capacity = (uint32_t)capacity_bytes;
@@ -105,16 +105,16 @@ int apu_out_open(int capacity_bytes, int samples, pthread_cond_t *wake)
     g_null.quit = 0;
     int error = pthread_create(&g_null.thread, NULL, drain, NULL);
     if (error) {
-        nc_log("hakuX-apu", "diagnostic audio thread failed: %d", error);
+        nc_log("hakuX-lr-apu", "diagnostic audio thread failed: %d", error);
         abort();
     }
     const char *dump = getenv("NC_AUDIO_DUMP");
     if (dump && *dump && !g_null.dump) {
         g_null.dump = fopen(dump, "wb");
-        nc_log("hakuX-apu", "diagnostic audio: writing the output to %s%s", dump,
+        nc_log("hakuX-lr-apu", "diagnostic audio: writing the output to %s%s", dump,
                g_null.dump ? "" : " failed");
     }
-    nc_log("hakuX-apu", "diagnostic audio: paced silent sink, 48000 Hz stereo, %d samples/callback", samples);
+    nc_log("hakuX-lr-apu", "diagnostic audio: paced silent sink, 48000 Hz stereo, %d samples/callback", samples);
     return samples * 4;
 }
 

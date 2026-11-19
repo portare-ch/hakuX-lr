@@ -1,7 +1,7 @@
 /* Copyright (C) 2026-present PortareOS */
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * hakuX HLE GPU — Kelvin's context DMA objects. Surface, texture, palette
+ * hakuX-lr HLE GPU — Kelvin's context DMA objects. Surface, texture, palette
  * and vertex offsets count from the base of the object their context names.
  * D3D's objects start at 0; nxdk's pbkit points its colour and zeta objects
  * at its buffers and draws at offset 0.

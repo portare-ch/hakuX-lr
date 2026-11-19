@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Core name.** RetroArch lists the core as **Microsoft - Xbox (hakuX-lr)**. Linux and Android downloads are named `hakux-lr-*`. See the [upgrade guide](USER_GUIDE.md#upgrading-from-the-old-core-name) for existing saves, overrides and playlists.
+
 ## linux-v0.34.0 (Linux, aarch64 and x86-64, and Android)
 
 Lower CPU usage on ARM64 and x86-64, easier widescreen and 60 fps patch selection, and a Steam Deck installer.

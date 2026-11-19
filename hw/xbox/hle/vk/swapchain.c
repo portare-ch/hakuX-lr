@@ -441,7 +441,7 @@ static bool init(void)
         g_ps.fs[i] = module(HLE_SHADER_FRAGMENT, k_fs_head, body[i]);
     }
     g_ps.pipe[P_FXAA] = pipeline(g_ps.fs[P_FXAA], VK_FORMAT_R8G8B8A8_UNORM);
-    hle_log("hakuX-hle-back", "present: ready (shaders: bilinear %d, averaging %d, SGSR %d, FXAA %d)",
+    hle_log("hakuX-lr-hle-back", "present: ready (shaders: bilinear %d, averaging %d, SGSR %d, FXAA %d)",
             g_ps.fs[P_BILINEAR] != VK_NULL_HANDLE, g_ps.fs[P_AREA] != VK_NULL_HANDLE,
             g_ps.fs[P_SGSR] != VK_NULL_HANDLE, g_ps.pipe[P_FXAA] != VK_NULL_HANDLE);
     return g_ps.fs[P_BILINEAR] != VK_NULL_HANDLE;
@@ -505,7 +505,7 @@ static bool make_swapchain(uint32_t w, uint32_t h)
     VkBool32 ok = VK_FALSE;
     vkGetPhysicalDeviceSurfaceSupportKHR(g_hvk.phys, g_hvk.qfam, g_ps.surf, &ok);
     if (!ok || vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g_hvk.phys, g_ps.surf, &caps) != VK_SUCCESS) {
-        hle_log("hakuX-hle-back", "present: the window's surface can't be presented to");
+        hle_log("hakuX-lr-hle-back", "present: the window's surface can't be presented to");
         return false;
     }
     VkSurfaceFormatKHR fmts[32];
@@ -583,7 +583,7 @@ static bool make_swapchain(uint32_t w, uint32_t h)
     g_ps.sc = sc;
     if (r != VK_SUCCESS) {
         g_ps.sc = VK_NULL_HANDLE;
-        hle_log("hakuX-hle-back", "present: vkCreateSwapchainKHR %ux%u: %d", w, h, r);
+        hle_log("hakuX-lr-hle-back", "present: vkCreateSwapchainKHR %ux%u: %d", w, h, r);
         return false;
     }
     uint32_t ni = 0;
@@ -593,7 +593,7 @@ static bool make_swapchain(uint32_t w, uint32_t h)
         ri = T.vkGetSwapchainImagesKHR(g_hvk.dev, sc, &ni, imgs);
     }
     if (!imgs || ri != VK_SUCCESS) {
-        hle_log("hakuX-hle-back", "present: the swapchain's %u images: %d", ni, ri);
+        hle_log("hakuX-lr-hle-back", "present: the swapchain's %u images: %d", ni, ri);
         g_free(imgs);
         T.vkDestroySwapchainKHR(g_hvk.dev, sc, NULL);
         g_ps.sc = VK_NULL_HANDLE;
@@ -624,7 +624,7 @@ static bool make_swapchain(uint32_t w, uint32_t h)
         g_ps.pipe_fmt = fmt.format;
     }
     g_ps.fmt = fmt.format;
-    hle_log("hakuX-hle-back", "present: swapchain %ux%u (the window %ux%u, turned %u degrees), %u images, "
+    hle_log("hakuX-lr-hle-back", "present: swapchain %ux%u (the window %ux%u, turned %u degrees), %u images, "
             "format %d", w, h, g_ps.wsize.width, g_ps.wsize.height, turn * 90, ni, fmt.format);
     return g_ps.pipe[P_BILINEAR] != VK_NULL_HANDLE;
 }
@@ -652,7 +652,7 @@ static bool win_surface(HleWindow *win, VkSurfaceKHR *surf)
     return vkCreateAndroidSurfaceKHR(g_hvk.inst, &sci, NULL, surf) == VK_SUCCESS;
 #else
     if (!SDL_Vulkan_CreateSurface(win, g_hvk.inst, NULL, surf)) {
-        hle_log("hakuX-hle-back", "present: SDL_Vulkan_CreateSurface: %s", SDL_GetError());
+        hle_log("hakuX-lr-hle-back", "present: SDL_Vulkan_CreateSurface: %s", SDL_GetError());
         return false;
     }
     return true;
@@ -707,7 +707,7 @@ bool hle_present_begin(HleWindow *win, uint32_t *w, uint32_t *h)
         g_ps.inited = true;
         if (!g_hvk.caps.swapchain || !init()) {
             g_ps.failed = true;
-            hle_log("hakuX-hle-back", "present: %s: nothing shown",
+            hle_log("hakuX-lr-hle-back", "present: %s: nothing shown",
                     g_hvk.caps.swapchain ? "setup failed" : "no Vulkan swapchain on this device");
             return false;
         }
@@ -720,7 +720,7 @@ bool hle_present_begin(HleWindow *win, uint32_t *w, uint32_t *h)
             if (!win_surface(win, &g_ps.surf)) {
                 g_ps.surf = VK_NULL_HANDLE;
                 g_ps.lost_ns = hle_now_ns();
-                hle_log("hakuX-hle-back", "present: no surface for the window");
+                hle_log("hakuX-lr-hle-back", "present: no surface for the window");
             } else {
                 g_ps.win = win;
             }
@@ -759,7 +759,7 @@ bool hle_present_begin(HleWindow *win, uint32_t *w, uint32_t *h)
         return false;                   /* timed out: the next refresh tries again */
     }
     if (g_ps.idx >= g_ps.nimg) {
-        hle_log("hakuX-hle-back", "present: acquired image %u of %u", g_ps.idx, g_ps.nimg);
+        hle_log("hakuX-lr-hle-back", "present: acquired image %u of %u", g_ps.idx, g_ps.nimg);
         g_ps.stale = true;
         return false;
     }
@@ -831,7 +831,7 @@ static bool fxaa_target(uint32_t w, uint32_t h)
     if (mt < 0 || T.vkAllocateMemory(g_hvk.dev, &mai, NULL, &g_ps.fx_mem) != VK_SUCCESS ||
         T.vkBindImageMemory(g_hvk.dev, g_ps.fx_img, g_ps.fx_mem, 0) != VK_SUCCESS ||
         T.vkCreateImageView(g_hvk.dev, &vci, NULL, &g_ps.fx_view) != VK_SUCCESS) {
-        hle_log("hakuX-hle-back", "present: no %ux%u FXAA image: FXAA off", w, h);
+        hle_log("hakuX-lr-hle-back", "present: no %ux%u FXAA image: FXAA off", w, h);
         T.vkDestroyImage(g_hvk.dev, g_ps.fx_img, NULL);
         g_ps.fx_img = VK_NULL_HANDLE;
         g_ps.pipe[P_FXAA] = VK_NULL_HANDLE;
@@ -907,7 +907,7 @@ static void log_path(unsigned p, bool fxaa, uint32_t vw, uint32_t vh)
     s_h = g_ps.f.h;
     s_vw = vw;
     s_vh = vh;
-    hle_log("hakuX-hle-back", "present: %ux%u%s into %ux%u: %s", s_w, s_h, fxaa ? " after FXAA" : "", vw, vh,
+    hle_log("hakuX-lr-hle-back", "present: %ux%u%s into %ux%u: %s", s_w, s_h, fxaa ? " after FXAA" : "", vw, vh,
             p == P_AREA ? "averaged down" : p == P_SGSR ? "scaled up by SGSR" : "bilinear");
 }
 
@@ -1068,7 +1068,7 @@ void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, u
         s_t0 = now;
     } else if (now - s_t0 >= 10000000000ll) {
         const double s = (now - s_t0) / 1e9;
-        hle_log("hakuX-hle-back", "present: the queue's lock waited for %.1f ms/s; the presenter's submits "
+        hle_log("hakuX-lr-hle-back", "present: the queue's lock waited for %.1f ms/s; the presenter's submits "
                 "held it %.1f ms/s, its presents %.1f; it waited %.1f ms/s for its passes (%s), %.1f for images",
                 hle_vk_queue_wait_ns() / 1e6 / s, g_submit_ns / 1e6 / s, g_present_ns / 1e6 / s,
                 g_wait_ns / 1e6 / s,

@@ -1,5 +1,5 @@
 /*
- * hakuX native core — guest memory.
+ * hakuX-lr native core — guest memory.
  *
  * The guest's 4 GiB address space is a host reservation; guest VA x lives at
  * base + x, and the JIT reaches it through its guest memory base register.

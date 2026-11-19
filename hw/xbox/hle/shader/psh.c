@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — Xbox pixel shaders -> GLSL (pure). See psh.h.
+ * hakuX-lr HLE GPU — Xbox pixel shaders -> GLSL (pure). See psh.h.
  *
  * Register combiners (D3DPIXELSHADERDEF, NV_register_combiners on NV2A):
  * - input byte: bits 0-3 register, bit 4 alpha channel (RGB portion: .aaa;

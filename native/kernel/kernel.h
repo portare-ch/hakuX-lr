@@ -1,5 +1,5 @@
 /*
- * hakuX native core — the Xbox kernel (xboxkrnl), reimplemented.
+ * hakuX-lr native core — the Xbox kernel (xboxkrnl), reimplemented.
  *
  * Kernel memory lives at VA 0x80010000 (physical 0x10000), where the real
  * kernel image sits. Each function export has a trampoline there,

@@ -1,7 +1,7 @@
 /* Copyright (C) 2026-present PortareOS */
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * hakuX native core — interlocked lists, port I/O buffers, the debugger's
+ * hakuX-lr native core — interlocked lists, port I/O buffers, the debugger's
  * exports and bug checks.
  *
  * The guest CPU stands still while a kernel call runs, so the interlocked
@@ -215,7 +215,7 @@ static uint64_t WRITE_PORT_BUFFER_ULONG(NcKernel *k, NcFrame *f, const uint32_t 
 /* DbgBreakPointWithStatus(Status): logged, as DbgBreakPoint */
 static uint64_t DbgBreakPointWithStatus(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
-    nc_log("hakuX-native-dbg", "DbgBreakPointWithStatus(%08x) from %08x", a[0], caller(k, f));
+    nc_log("hakuX-lr-native-dbg", "DbgBreakPointWithStatus(%08x) from %08x", a[0], caller(k, f));
     return 0;
 }
 
@@ -230,7 +230,7 @@ static uint64_t DbgImageSymbols(NcKernel *k, NcFrame *f, const uint32_t *a)
 static uint64_t DbgPrompt(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
     char prompt[256];
-    nc_log("hakuX-native-dbg", "DbgPrompt from %08x: %s", caller(k, f),
+    nc_log("hakuX-lr-native-dbg", "DbgPrompt from %08x: %s", caller(k, f),
            nc_kernel_guest_str(k, a[0], prompt, sizeof(prompt)));
     if (a[1] && a[2]) {
         *(uint8_t *)nc_vm_host(k->vm, a[1]) = 0;
@@ -242,7 +242,7 @@ static uint64_t DbgPrompt(NcKernel *k, NcFrame *f, const uint32_t *a)
 static uint64_t RtlAssert(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
     char what[256], file[128], msg[256];
-    nc_log("hakuX-native-dbg", "assertion failed from %08x: %s, %s line %u%s%s", caller(k, f),
+    nc_log("hakuX-lr-native-dbg", "assertion failed from %08x: %s, %s line %u%s%s", caller(k, f),
            nc_kernel_guest_str(k, a[0], what, sizeof(what)), nc_kernel_guest_str(k, a[1], file, sizeof(file)), a[2],
            a[3] ? ": " : "", a[3] ? nc_kernel_guest_str(k, a[3], msg, sizeof(msg)) : "");
     return 0;
@@ -252,7 +252,7 @@ static uint64_t RtlAssert(NcKernel *k, NcFrame *f, const uint32_t *a)
 static uint64_t RtlRip(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
     char api[128], expr[256], msg[256];
-    nc_log("hakuX-native-dbg", "RIP from %08x: %s: %s %s", caller(k, f), nc_kernel_guest_str(k, a[0], api, sizeof(api)),
+    nc_log("hakuX-lr-native-dbg", "RIP from %08x: %s: %s %s", caller(k, f), nc_kernel_guest_str(k, a[0], api, sizeof(api)),
            nc_kernel_guest_str(k, a[1], expr, sizeof(expr)), nc_kernel_guest_str(k, a[2], msg, sizeof(msg)));
     return 0;
 }
@@ -272,7 +272,7 @@ static uint64_t MmDbgAllocateMemory(NcKernel *k, NcFrame *f, const uint32_t *a)
     static bool s_logged;
     if (!s_logged) {
         s_logged = true;
-        nc_log("hakuX-native", "mm: MmDbgAllocateMemory(%u) from %08x: no debugger memory", a[0], caller(k, f));
+        nc_log("hakuX-lr-native", "mm: MmDbgAllocateMemory(%u) from %08x: no debugger memory", a[0], caller(k, f));
     }
     return 0;
 }
@@ -284,7 +284,7 @@ static uint64_t MmDbgFreeMemory(NcKernel *k, NcFrame *f, const uint32_t *a)
     static bool s_logged;
     if (!s_logged) {
         s_logged = true;
-        nc_log("hakuX-native", "mm: MmDbgFreeMemory(%08x, %u) from %08x: no debugger memory", a[0], a[1],
+        nc_log("hakuX-lr-native", "mm: MmDbgFreeMemory(%08x, %u) from %08x: no debugger memory", a[0], a[1],
                caller(k, f));
     }
     return 0;
@@ -297,7 +297,7 @@ static uint64_t MmDbgQueryAvailablePages(NcKernel *k, NcFrame *f, const uint32_t
     static bool s_logged;
     if (!s_logged) {
         s_logged = true;
-        nc_log("hakuX-native", "mm: MmDbgQueryAvailablePages from %08x: no debugger memory", caller(k, f));
+        nc_log("hakuX-lr-native", "mm: MmDbgQueryAvailablePages from %08x: no debugger memory", caller(k, f));
     }
     return 0;
 }

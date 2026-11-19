@@ -470,7 +470,7 @@ static void frame_limit(DSPState *dsp)
     static bool warned;
     if (!warned) {
         warned = true;
-        nc_log("hakuX-apu", "%s DSP reached its frame limit without completing (%s)",
+        nc_log("hakuX-lr-apu", "%s DSP reached its frame limit without completing (%s)",
                dsp->is_gp ? "GP" : "EP", dsp_engine_name(dsp));
     }
 }
@@ -581,7 +581,7 @@ void mcpx_apu_dsp_init(MCPXAPUState *d)
      * use the full audio pipeline or not.
      */
     mcpx_apu_update_dsp_preference(d);
-    nc_log("hakuX-apu", "processing: %s (GP %s, EP %s)",
+    nc_log("hakuX-lr-apu", "processing: %s (GP %s, EP %s)",
            g_apu_config.use_dsp ? "full DSP" : "fast dry mix",
            dsp_engine_name(d->gp.dsp), dsp_engine_name(d->ep.dsp));
     gp_probe_init();

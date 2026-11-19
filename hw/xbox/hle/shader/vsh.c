@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — NV2A vertex program -> GLSL (pure). See vsh.h.
+ * hakuX-lr HLE GPU — NV2A vertex program -> GLSL (pure). See vsh.h.
  *
  * Semantics follow NV_vertex_program1_1 plus the NV2A rules games rely on:
  * - a MAC and an ILU operation in one slot read their operands before

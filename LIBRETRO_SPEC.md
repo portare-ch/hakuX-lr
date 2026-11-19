@@ -1,4 +1,4 @@
-# hakuX libretro core for PortareOS
+# hakuX-lr libretro core for PortareOS
 
 Status: design targets. The initial core and Vulkan handoff merged in PR #10.
 The core stops, unloads and loads again in RetroArch's process (M2); ports
@@ -11,10 +11,10 @@ timed presents and the kernel's LFC).
 
 ## 1. Decision and result
 
-Build hakuX as `hakux_libretro.so` and let RetroArch present, play the sound,
+Build hakuX-lr as `hakux-lr_libretro.so` and let RetroArch present, play the sound,
 read the controllers and provide the menu, hotkeys, remapping and per-game
 overrides. The Xbox emulation, FEX execution, Vulkan renderer and MCPX APU are
-kept as they are: hakuX already plays BLACK and Burnout 3 on PortareOS with
+kept as they are: hakuX-lr already plays BLACK and Burnout 3 on PortareOS with
 good picture and sound. This integrates the working emulator into PortareOS's
 RetroArch path; it is not another port.
 
@@ -23,7 +23,7 @@ PortareOS's existing timed presents, VRR and kernel LFC. No standalone VRR
 work is a prerequisite.
 
 **Frame model (owner's decision, 2026-10-24): phase-locked, not lockstep.**
-`retro_run` is the display's vsync for hakuX's existing vblank lock, and the
+`retro_run` is the display's vsync for hakuX-lr's existing vblank lock, and the
 emulation keeps running on its own threads as it does now. Strict lockstep
 (one `retro_run` runs exactly one emulated period and parks every thread
 that changes guest state) is out of scope: its payoffs are run-ahead, rewind,
@@ -34,8 +34,8 @@ in particular is too much overhead.
 
 | Component | Revision |
 | --- | --- |
-| portare-ch/hakuX `master` | `93bad3d7fe2261e65adc9b3e69602e175d8d7da7` |
-| hakuX's FEX (`external/fex`) | `52018bf46a8279b22bce738548ab3f40db467064` |
+| portare-ch/hakuX-lr `master` | `93bad3d7fe2261e65adc9b3e69602e175d8d7da7` |
+| FEX fork (`external/fex`) | `52018bf46a8279b22bce738548ab3f40db467064` |
 | portare-ch/portareos `next` | `321912638871a90caf8cf517ff4e277b63df422b` (portareos#798) |
 | RetroArch in PortareOS | `11e8931021eb6b7fa69c04f52dd5d385841fdbbe` |
 | `libretro-common/include/libretro_vulkan.h` there | blob `2a47d0ad583d8f14ffbf52bd7adb25faed1361d7`: render interface 5, negotiation interface 2 (`create_instance`, `create_device2`) |
@@ -53,7 +53,7 @@ target supports.
 | `hw/xbox/hle/vk/vkdev.c` creates its own instance and device; `swapchain.c` presents into the window. The Adreno 740 has one graphics queue (family 0; family 1 is sparse binding only). | Negotiated device, offscreen rendering, `set_image`, and RetroArch's queue lock around every submission (section 7). |
 | `native/dev/apu/out_sdl.c` is the APU's output: a ring drained by the device's callback, a timed drain without a device. | A libretro sink, drained by `retro_run` (section 8). |
 | `native/state/save.c` saves to a path and loads into a fresh boot of the state's XBE; `cache.c` keeps cache-drive contents in a `blobs/` folder beside the states. | Save states are their own milestone (section 11). |
-| PortareOS's `retroarch.cfg` ships `run_ahead_enabled = "true"`, `run_ahead_frames = "1"`, `run_ahead_secondary_instance = "true"`, `core_info_savestate_bypass = "false"`, `menu_pause_libretro = "true"`, `pause_nonactive = "true"`. | Run-ahead must be switched off for hakuX (section 10). The menu stops calling `retro_run`. |
+| PortareOS's `retroarch.cfg` ships `run_ahead_enabled = "true"`, `run_ahead_frames = "1"`, `run_ahead_secondary_instance = "true"`, `core_info_savestate_bypass = "false"`, `menu_pause_libretro = "true"`, `pause_nonactive = "true"`. | Run-ahead must be switched off for hakuX-lr (section 10). The menu stops calling `retro_run`. |
 | `runemu.sh`, `setsettings.sh` and RetroArch patches 0014, 0018, 0019 and 0021 implement the launch policy and timed presents. | Route Xbox through them; no display policy in the core. |
 
 Android is outside this work, as in the PortareOS handoff.
@@ -81,9 +81,9 @@ or calls xemu.
 
 | Responsibility | Owner |
 | --- | --- |
-| Xbox CPU, devices, interrupts, guest time, the vblank clock | hakuX |
-| The vblank's phase (locked to `retro_run`), pause, stop, reset and relaunch | hakuX shared core |
-| Rendering, the title's gamma, guest video state | hakuX renderer |
+| Xbox CPU, devices, interrupts, guest time, the vblank clock | hakuX-lr |
+| The vblank's phase (locked to `retro_run`), pause, stop, reset and relaunch | hakuX-lr shared core |
+| Rendering, the title's gamma, guest video state | hakuX-lr renderer |
 | Scaling, aspect, shaders, swapchain, timed presents | RetroArch |
 | Display mode, VRR policy, Mesa's environment, the DRM master | PortareOS's launch path |
 | Refresh repeats | the display driver (kernel LFC) |
@@ -173,7 +173,7 @@ If FEX's context cannot be destroyed and created again reliably, one context
 for the process's lifetime, reused across loads with no thread running, is
 an acceptable fallback; record the evidence.
 
-Signals: handle only faults positively identified as hakuX's (guest RAM
+Signals: handle only faults positively identified as hakuX-lr's (guest RAM
 tracking, MMIO, the JIT); chain any other to the previous handler with its
 flags and mask; install while the core's state is alive, restore only if
 still ours. Test deliberate faults in child processes.
@@ -241,7 +241,7 @@ choice for one run (the tests).
 ## 7. Vulkan
 
 Request `RETRO_HW_CONTEXT_VULKAN` and use the negotiation interface's
-`create_device2`: hakuX creates the device on RetroArch's instance and
+`create_device2`: hakuX-lr creates the device on RetroArch's instance and
 physical device with its required features and extensions, merged with
 RetroArch's through the wrapper; optional features stay optional. A device
 without the required features stops loading with a message.
@@ -341,10 +341,10 @@ Home + Start stays PortareOS's; the core adds no exit chord.
 | `retro_cheat_set`, `retro_cheat_reset` | Memory cheats from `patches/mods/README.md` or `AAAAAAAA VVVVVVVV` codes (joined by `+`, whitespace or newlines) apply from the next vblank and persist through reset/relaunch, but not unload. Invalid codes are logged once and disabled. `xbe-patch-v1` codes instead patch a disc XBE on its next boot when CRC-32 and size match; all runs apply or none, and conflicting patches are ignored. Changes prompt a restart reminder. See `native/core/xbe_patch.h` and `native/README.linux.md`. |
 | memory, special content | unsupported |
 
-Run-ahead stays off for hakuX, now and after section 11:
-`hakux_libretro.info` declares `savestate = "false"` until states work, and
+Run-ahead stays off for hakuX-lr, now and after section 11:
+`hakux-lr_libretro.info` declares `savestate = "false"` until states work, and
 the Xbox system ships a RetroArch override with `run_ahead_enabled =
-"false"`. RetroArch must never load a second hakuX instance into the process.
+"false"`. RetroArch must never load a second hakuX-lr instance into the process.
 
 Options (`options.c`): only what the emulator backs.
 - The render scale (1-4x), and the overscan crop (on by default; off shows
@@ -366,7 +366,7 @@ Options (`options.c`): only what the emulator backs.
   For measurements, `debug.hakux.accuracy` (on Linux the environment
   variable `HAKUX_PROP_DEBUG_HAKUX_ACCURACY`) overrides single settings at
   boot, e.g. `combiners=0,sblend=1,dither=0`, and the renderer's
-  per-second `hakuX-hle-back` line counts the draws that ask for a signed
+  per-second `hakuX-lr-hle-back` line counts the draws that ask for a signed
   blend (`signed_blend=`) and for a dithered blend into a 16-bit target
   (`dither_blend=`), whichever path they get.
 - The console's own settings, as its dashboard keeps them: screen format
@@ -433,7 +433,7 @@ folder. Run-ahead stays off (section 10).
 | Vsync off, no beat between two clocks | No presenter in the core; the vblank locks to RetroArch's ticks, which 0018/0019 time at the core's rate. |
 | `MESA_VK_WSI_DISPLAY_VRR` and its opt-outs | `runemu.sh` with the emulator `retroarch` and the Xbox core registered: its capability check, `vrr=0` and `display_mode`. |
 | Fastest panel mode | `setsettings.sh`; check about 120.198 Hz on the Nova. |
-| Timed presents | RetroArch and Mesa; no second clock in hakuX. |
+| Timed presents | RetroArch and Mesa; no second clock in hakuX-lr. |
 | Integer repeats | The kernel's; check against the actual submissions. |
 | Burnout 3 for minutes without a beat | 10 minutes through the launcher, with step, image, present and flip traces. |
 | `vrr=0` | Fixed refresh, and no `VRR_ENABLED` left behind. |
@@ -455,12 +455,12 @@ flip traces (PORTAREOS_HANDOFF.md, "Issue #8"):
 
 ## 13. Build and PortareOS
 
-`tools/native/linux-build.sh` builds `hakux_libretro.so` with all linked
+`tools/native/linux-build.sh` builds `hakux-lr_libretro.so` with all linked
 libraries as PIC. See the [Linux build and packaging instructions](native/README.linux.md).
 
 The object exports only `retro_*`, needs no SDL, Android or build-tree
 RUNPATH, and embeds no Vulkan loader. PortareOS packages it as `hakux-lr`
-from a release: `/usr/lib/libretro/hakux_libretro.so` and its `.info`
+from a release: `/usr/lib/libretro/hakux-lr_libretro.so` and its `.info`
 (RetroArch loads them from `/tmp/cores`), the SM8550 dependency, and the Xbox
 core registration; check the generated `es_systems.cfg`. The release tarball
 holds only the core since 0.4.0.
@@ -480,7 +480,7 @@ Device checks: Burnout 3 for 10 minutes at full speed with about 119.88 Hz
 doubled scanout; BLACK's 30 fps with its image reused and correct speed and
 sound; `vrr=0` and a pinned mode; 100 pause/resume cycles and a 60 s pause
 with no time jump or stale sound; exit, reset and reload from boot, play and a
-static screen; another Vulkan core (ARMSX2) loaded after hakuX in the same
+static screen; another Vulkan core (ARMSX2) loaded after hakuX-lr in the same
 process; 30 minutes of sound without drift or growing queue; controls,
 remapping and disconnects. Compare with `hakux` (standalone) on the same
 image and segment: a repeatable regression over 5% in frame time is
@@ -489,7 +489,7 @@ investigated, and a full-speed segment that becomes slow blocks promotion.
 ## 15. Done
 
 The playable core is done when RetroArch loads, plays, pauses, stops and loads
-hakuX again in one process, with today's picture and sound, through
+hakuX-lr again in one process, with today's picture and sound, through
 PortareOS's display path. Integration is done when the package, launcher,
 data folder and #8's device checks pass. None of it counts with RetroArch
 forced to exit, a detached core thread left running, the standalone's

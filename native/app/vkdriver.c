@@ -1,5 +1,5 @@
 /*
- * hakuX native core — a custom Vulkan driver for the HLE GPU (Turnip),
+ * hakuX-lr native core — a custom Vulkan driver for the HLE GPU (Turnip),
  * through adrenotools: the app's GPU driver setting ("vkdriver=" from
  * NativeCoreActivity), and xboxrun's.
  */
@@ -74,7 +74,7 @@ void nc_vk_driver_load(const char *spec)
     hle_prop_get("debug.hakux.tu_debug", tu);
     if (tu[0]) {
         setenv("TU_DEBUG", tu, 1);
-        nc_log("hakuX-app", "TU_DEBUG=%s", tu);
+        nc_log("hakuX-lr-app", "TU_DEBUG=%s", tu);
     }
     /* debug.hakux.vkdriver: "system", the system driver for this run; a
      * directory, the driver library of the setting's name from there (another
@@ -83,7 +83,7 @@ void nc_vk_driver_load(const char *spec)
     char sel[PROP_VALUE_MAX] = "";
     hle_prop_get("debug.hakux.vkdriver", sel);
     if (!strcmp(sel, "system")) {
-        nc_log("hakuX-app", "Vulkan driver: the system's (debug.hakux.vkdriver=system)");
+        nc_log("hakuX-lr-app", "Vulkan driver: the system's (debug.hakux.vkdriver=system)");
         return;
     }
     char dir[1024];
@@ -103,14 +103,14 @@ void nc_vk_driver_load(const char *spec)
         if (gipa) {
             nc_hle_set_vk_loader(nc_vk_layers(gipa));
         }
-        nc_log("hakuX-app", "Vulkan driver %s from %s%s: %s", lib, from, from == sel ? " (debug.hakux.vkdriver)" : "",
+        nc_log("hakuX-lr-app", "Vulkan driver %s from %s%s: %s", lib, from, from == sel ? " (debug.hakux.vkdriver)" : "",
                gipa ? "loaded" : "failed, the system driver it is");
         if (gipa && prio > 0) {
             g_kgsl_prio = prio;
-            nc_log("hakuX-app", "its kgsl draw contexts at priority %d (ringbuffer %d of 0-3)", prio, prio / 4);
+            nc_log("hakuX-lr-app", "its kgsl draw contexts at priority %d (ringbuffer %d of 0-3)", prio, prio / 4);
         }
     }
 #else
-    nc_log("hakuX-app", "Vulkan driver requested, but this build has no adrenotools");
+    nc_log("hakuX-lr-app", "Vulkan driver requested, but this build has no adrenotools");
 #endif
 }

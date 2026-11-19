@@ -117,7 +117,7 @@ static bool g_pbmode;
 
 /* debug: NC_NV2A_CENSUS=1 / debug.hakux.nvcensus=1 at boot: the registers the
  * guest reads and writes, by offset: each new one logged as it first comes
- * (the first 512), the busiest once a second (hakuX-native-nv2a). */
+ * (the first 512), the busiest once a second (hakuX-lr-native-nv2a). */
 #define CENSUS_SLOTS 4096u
 static struct {
     bool on;
@@ -157,7 +157,7 @@ static void census(uint32_t off, bool write, uint32_t v)
         if (!g_census.r[i].off) {
             g_census.r[i].off = key + 1;
             if (g_census.nnew++ < 512) {
-                nc_log("hakuX-native-nv2a", "new register %06x: first %s %08x", key,
+                nc_log("hakuX-lr-native-nv2a", "new register %06x: first %s %08x", key,
                        write ? "write" : "read", v);
             }
             break;
@@ -200,7 +200,7 @@ static void census_log(void)
     }
     buf[o < (int)sizeof(buf) ? o : (int)sizeof(buf) - 1] = 0;
     if (o) {
-        nc_log("hakuX-native-nv2a", "registers/s:%s", buf);
+        nc_log("hakuX-lr-native-nv2a", "registers/s:%s", buf);
     }
 }
 
@@ -256,7 +256,7 @@ void hle_host_gpu_trace_dump(const char *why, uint32_t mark)
         return;
     }
     const uint64_t t0 = g_gtr[(end - n) % GTR_N].ns;
-    nc_log("hakuX-native-trace", "%s: %u GPU events, from 150 before the mark", why, n);
+    nc_log("hakuX-lr-native-trace", "%s: %u GPU events, from 150 before the mark", why, n);
     char line[400];
     int o = 0;
     for (uint32_t j = end - n; j != end; j++) {
@@ -265,7 +265,7 @@ void hle_host_gpu_trace_dump(const char *why, uint32_t mark)
         o += snprintf(line + o, sizeof(line) - (size_t)o, " +%.2f %s %x",
                       (g_gtr[i].ns - t0) / 1e6, k_names[k], g_gtr[i].value);
         if (o > 300 || j + 1 == end) {
-            nc_log("hakuX-native-trace", "%s", line);
+            nc_log("hakuX-lr-native-trace", "%s", line);
             o = 0;
         }
     }
@@ -371,7 +371,7 @@ static void ptimer_start(void)
     }
     g_alarm.quit = false;
     g_alarm.started = pthread_create(&g_alarm.th, NULL, ptimer_thread, NULL) == 0;
-    nc_log("hakuX-native", "nv2a: PTIMER alarm in use (alarm %08x, interrupt %s)", ld(NV_PTIMER_ALARM_0),
+    nc_log("hakuX-lr-native", "nv2a: PTIMER alarm in use (alarm %08x, interrupt %s)", ld(NV_PTIMER_ALARM_0),
            ld(NV_PTIMER_INTR_EN_0) & PTIMER_ALARM ? "on" : "off");
 }
 
@@ -514,7 +514,7 @@ static void nv2a_write(void *opaque, uint32_t off, uint64_t value, unsigned size
     if (g_pbmode && size == 4 && (off == NV_PFIFO_CACHE1_DMA_PUT || off == NV_PFIFO_CACHE1_DMA_GET)) {
         static unsigned s_logged_c;             /* debug: the first direct CACHE1 writes */
         if (s_logged_c++ < 16) {
-            nc_log("hakuX-native", "nv2a: CACHE1 %s <- %08x (GET %08x PUT %08x)",
+            nc_log("hakuX-lr-native", "nv2a: CACHE1 %s <- %08x (GET %08x PUT %08x)",
                    off == NV_PFIFO_CACHE1_DMA_PUT ? "PUT" : "GET", (uint32_t)value,
                    ld(NV_PFIFO_CACHE1_DMA_GET), ld(NV_PFIFO_CACHE1_DMA_PUT));
         }
@@ -527,7 +527,7 @@ static void nv2a_write(void *opaque, uint32_t off, uint64_t value, unsigned size
         static unsigned s_logged;               /* debug: the first channel writes */
         if (s_logged < 24 && off != NV_USER_REF) {
             s_logged++;
-            nc_log("hakuX-native", "nv2a: channel %s <- %08x (GET %08x PUT %08x)",
+            nc_log("hakuX-lr-native", "nv2a: channel %s <- %08x (GET %08x PUT %08x)",
                    off == NV_USER_DMA_PUT ? "PUT" : "GET", (uint32_t)value,
                    ld(NV_PFIFO_CACHE1_DMA_GET), ld(NV_PFIFO_CACHE1_DMA_PUT));
         }
@@ -584,7 +584,7 @@ static void nv2a_write(void *opaque, uint32_t off, uint64_t value, unsigned size
                                                   __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE));
             static unsigned s_logged;
             if (s_logged++ < 32) {
-                nc_log("hakuX-native", "nv2a: flip read -> %u (write %u, display %08x)",
+                nc_log("hakuX-lr-native", "nv2a: flip read -> %u (write %u, display %08x)",
                        (n >> 24) & 7, (n >> 20) & 7, ld(NV_PCRTC_START));
             }
             hle_host_gpu_trace(HLE_GTR_INCREMENT, (n >> 24) & 7);
@@ -716,7 +716,7 @@ void nc_dev_nv2a_display_pickup(uint64_t ns)
     __atomic_store_n(&g_pick_off_ns, est, __ATOMIC_RELAXED);
     if (logged < 0 || llabs(wrap_half(est - logged, pd)) > 2000000) {
         logged = est;
-        nc_log("hakuX-native", "nv2a: the presenter picks frames up %.1f ms after the panel's "
+        nc_log("hakuX-lr-native", "nv2a: the presenter picks frames up %.1f ms after the panel's "
                "vsync (period %.2f ms): vblanks %.1f ms after the vsync", est / 1e6, pd / 1e6,
                (double)((est + pd / 2) % pd) / 1e6);
     }
@@ -899,7 +899,7 @@ void nc_dev_nv2a_refresh(unsigned hz)
     __atomic_store_n(&g_frame_rem, num % den, __ATOMIC_RELAXED);
     __atomic_store_n(&g_frame_den, den, __ATOMIC_RELAXED);
     if (__atomic_exchange_n(&g_frame_ns, f, __ATOMIC_RELAXED) != f) {
-        nc_log("hakuX-native", "nv2a: vblank at %u Hz (the video mode%s)", g_mode_hz * g_vblank_mul,
+        nc_log("hakuX-lr-native", "nv2a: vblank at %u Hz (the video mode%s)", g_mode_hz * g_vblank_mul,
                g_vblank_mul > 1 ? ", a mod's rate" : "");
     }
 }
@@ -966,7 +966,7 @@ void hle_host_gpu_irq_update(void)
 void hle_host_pb_mode(bool on)
 {
     __atomic_store_n(&g_pbmode, on, __ATOMIC_RELEASE);
-    nc_log("hakuX-native", "nv2a: push-buffer mode %s", on ? "on" : "off");
+    nc_log("hakuX-lr-native", "nv2a: push-buffer mode %s", on ? "on" : "off");
 }
 
 uint64_t nc_dev_nv2a_vblanks(void)

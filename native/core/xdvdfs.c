@@ -1,5 +1,5 @@
 /*
- * hakuX native core — XDVDFS reader.
+ * hakuX-lr native core — XDVDFS reader.
  *
  * Volume descriptor at sector 32 of the game partition: "MICROSOFT*XBOX*MEDIA",
  * root directory sector and size. A directory is a binary tree of entries:
@@ -67,12 +67,12 @@ bool nc_disc_open(NcDisc *d, int fd)
             d->part_off = off;
             d->root_sector = nc_rd32(vd + 20);
             d->root_size = nc_rd32(vd + 24);
-            nc_log("hakuX-native", "disc: XDVDFS at +0x%llx, root sector %u (%u bytes)",
+            nc_log("hakuX-lr-native", "disc: XDVDFS at +0x%llx, root sector %u (%u bytes)",
                    (unsigned long long)off, d->root_sector, d->root_size);
             return true;
         }
     }
-    nc_log("hakuX-native", "disc: no XDVDFS volume found");
+    nc_log("hakuX-lr-native", "disc: no XDVDFS volume found");
     nc_chd_close(chd);
     return false;
 }
@@ -341,7 +341,7 @@ bool nc_disc_overlay_file(NcDisc *d, const char *path, const char *host)
         if (!disc_find(d, p, &f)) {
             ov_push(o, p, shown);
         } else if (!(f.attr & 0x10)) {
-            nc_log("hakuX-native-mods", "%s: %s is a file on the disc", path, p);
+            nc_log("hakuX-lr-native-mods", "%s: %s is a file on the disc", path, p);
         }
         *s = '\\';
         shown[at] = '\\';
@@ -497,7 +497,7 @@ static bool ov_read(const NcDisc *d, const NcDiscFile *f, uint64_t off, void *bu
     if (fd < 0) {
         int mine = open(e->host, O_RDONLY | O_CLOEXEC), none = -1;
         if (mine < 0) {
-            nc_log("hakuX-native-mods", "%s: can't open %s", e->path, e->host);
+            nc_log("hakuX-lr-native-mods", "%s: can't open %s", e->path, e->host);
             return false;
         }
         if (!__atomic_compare_exchange_n(&e->fd, &none, mine, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {

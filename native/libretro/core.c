@@ -134,14 +134,14 @@ static void message(const char *text, unsigned frames)
 
 void nc_lr_fail(const char *why)
 {
-    nc_log("hakuX-libretro", "failed: %s", why);
+    nc_log("hakuX-lr", "failed: %s", why);
     __atomic_store_n(&g_fail, why, __ATOMIC_RELEASE);
 }
 
 static void *core_thread(void *arg)
 {
     if (!nc_core_boot(&g_core, g_disc_fd)) {
-        nc_log("hakuX-libretro", "core: boot failed");
+        nc_log("hakuX-lr", "core: boot failed");
         __atomic_store_n(&g_core_state, -1, __ATOMIC_RELEASE);
         nc_hle_cpu_leave();
         nc_cpu_thread_done();
@@ -150,7 +150,7 @@ static void *core_thread(void *arg)
     __atomic_store_n(&g_core_state, 2, __ATOMIC_RELEASE);
     nc_core_run(&g_core);
     nc_hle_cpu_leave();
-    nc_log("hakuX-libretro", "core: stopped%s", g_core.kernel.quit ? " (the title left)" : "");
+    nc_log("hakuX-lr", "core: stopped%s", g_core.kernel.quit ? " (the title left)" : "");
     __atomic_store_n(&g_core_state, -1, __ATOMIC_RELEASE);
     nc_cpu_thread_done();
     return NULL;
@@ -195,7 +195,7 @@ static bool data_dirs(char *hdd, char *cache, size_t n)
 {
     const char *root = NULL;
     if (!g_env(RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY, &root) || !root || !*root) {
-        nc_log("hakuX-libretro", "no save directory from the frontend");
+        nc_log("hakuX-lr", "no save directory from the frontend");
         return false;
     }
     snprintf(hdd, n, "%s/hdd", root);
@@ -207,7 +207,7 @@ static bool data_dirs(char *hdd, char *cache, size_t n)
         ok = make_dir(p);
     }
     if (!ok) {
-        nc_log("hakuX-libretro", "data directories under %s: %s", root, strerror(errno));
+        nc_log("hakuX-lr", "data directories under %s: %s", root, strerror(errno));
     }
     return ok;
 }
@@ -284,7 +284,7 @@ RETRO_API void retro_deinit(void)
 RETRO_API void retro_get_system_info(struct retro_system_info *info)
 {
     memset(info, 0, sizeof(*info));
-    info->library_name = "hakuX";
+    info->library_name = "hakuX-lr";
     info->library_version = HAKUX_VERSION;
     info->valid_extensions = "iso|chd";
     info->need_fullpath = true;
@@ -307,7 +307,7 @@ RETRO_API void retro_set_controller_port_device(unsigned port, unsigned device)
 RETRO_API void retro_reset(void)
 {
     if (!g_started || !can_stop()) {
-        nc_log("hakuX-libretro", "reset: not yet, while the renderer runs (M2's next part)");
+        nc_log("hakuX-lr", "reset: not yet, while the renderer runs (M2's next part)");
         return;
     }
     boot_again("reset", false);
@@ -325,7 +325,7 @@ static bool dashboard_installed(void)
     static char text[PATH_MAX + 128];
     snprintf(text, sizeof(text), "The dashboard couldn't be put on the hard disk's C: drive (%s/Partition2)", g_hdd);
     message(text, 600);
-    nc_log("hakuX-libretro", "%s", text);
+    nc_log("hakuX-lr", "%s", text);
     return false;
 }
 
@@ -334,7 +334,7 @@ RETRO_API bool retro_load_game(const struct retro_game_info *game)
     const bool dash = !game || !game->path || !*game->path;     /* Start Core */
     enum retro_pixel_format fmt = RETRO_PIXEL_FORMAT_XRGB8888;
     if (!g_env(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &fmt)) {
-        nc_log("hakuX-libretro", "the frontend has no XRGB8888");
+        nc_log("hakuX-lr", "the frontend has no XRGB8888");
         return false;
     }
     if (!data_dirs(g_hdd, g_cache, sizeof(g_hdd))) {
@@ -348,7 +348,7 @@ RETRO_API bool retro_load_game(const struct retro_game_info *game)
     } else {
         g_disc_fd = open(game->path, O_RDONLY | O_CLOEXEC);
         if (g_disc_fd < 0) {
-            nc_log("hakuX-libretro", "%s: %s", game->path, strerror(errno));
+            nc_log("hakuX-lr", "%s: %s", game->path, strerror(errno));
             return false;
         }
         if (!realpath(game->path, g_game)) {
@@ -372,7 +372,7 @@ RETRO_API bool retro_load_game(const struct retro_game_info *game)
     if (__atomic_load_n(&g_fail, __ATOMIC_ACQUIRE)) {
         return false;
     }
-    nc_log("hakuX-libretro", "loaded %s; data in %s", dash ? "the dashboard (no content)" : game->path, g_hdd);
+    nc_log("hakuX-lr", "loaded %s; data in %s", dash ? "the dashboard (no content)" : game->path, g_hdd);
     return vulkan || nc_lr_start();
 }
 
@@ -396,7 +396,7 @@ bool nc_lr_start(void)
     const int err = pthread_create(&g_core_thread, &attr, core_thread, NULL);
     pthread_attr_destroy(&attr);
     if (err) {
-        nc_log("hakuX-libretro", "core thread: %s", strerror(err));
+        nc_log("hakuX-lr", "core thread: %s", strerror(err));
         __atomic_store_n(&g_core_state, -1, __ATOMIC_RELEASE);
         g_started = false;
         return false;
@@ -490,7 +490,7 @@ static void *wd_thread(void *arg)
     pthread_mutex_lock(&g_wd.mu);
     while (!g_wd.done) {
         if (pthread_cond_timedwait(&g_wd.cv, &g_wd.mu, &until) == ETIMEDOUT && !g_wd.done) {
-            nc_log("hakuX-libretro", "%s: the core did not stop in %u ms (%s): ending the process", g_wd.why,
+            nc_log("hakuX-lr", "%s: the core did not stop in %u ms (%s): ending the process", g_wd.why,
                    g_wd.ms, g_wd.stage);
             fflush(NULL);
             _exit(0);
@@ -519,7 +519,7 @@ static bool wd_start(const char *why, uint64_t t0)
     pthread_condattr_destroy(&ca);
     const int err = pthread_create(&g_wd.th, NULL, wd_thread, NULL);
     if (err) {
-        nc_log("hakuX-libretro", "%s: no watchdog over the stop: %s", why, strerror(err));
+        nc_log("hakuX-lr", "%s: no watchdog over the stop: %s", why, strerror(err));
         pthread_cond_destroy(&g_wd.cv);
         return false;
     }
@@ -588,7 +588,7 @@ static void stop_core(const char *why)
     g_gap.last_run_ns = 0;
     g_gap.paused = false;
     pthread_mutex_unlock(&g_gap.mu);
-    nc_log("hakuX-libretro", "%s: the core stopped in %.0f ms", why, (double)(now_ns() - t0) / 1e6);
+    nc_log("hakuX-lr", "%s: the core stopped in %.0f ms", why, (double)(now_ns() - t0) / 1e6);
 }
 
 /* Stop and reboot the game or dashboard in process for a reset or a
@@ -598,7 +598,7 @@ static bool boot_again(const char *why, bool relaunch)
     stop_core(why);
     g_disc_fd = g_dash ? -1 : open(g_game, O_RDONLY | O_CLOEXEC);
     if (g_disc_fd < 0 && !g_dash) {
-        nc_log("hakuX-libretro", "%s: %s: %s", why, g_game, strerror(errno));
+        nc_log("hakuX-lr", "%s: %s: %s", why, g_game, strerror(errno));
         nc_lr_fail("the game's file can't be opened again");
         return false;
     }
@@ -709,9 +709,9 @@ static void relaunch(void)
         menu_argv[m++] = want;
         menu_argv[m] = NULL;
         start = menu_argv;
-        nc_log("hakuX-libretro", "relaunch: RetroArch starts again with its config and -L %s", want);
+        nc_log("hakuX-lr", "relaunch: RetroArch starts again with its config and -L %s", want);
     } else if (!on_game) {
-        nc_log("hakuX-libretro", "relaunch: RetroArch was not started on the %s; it can't start again for it",
+        nc_log("hakuX-lr", "relaunch: RetroArch was not started on the %s; it can't start again for it",
                g_dash ? "core" : "game");
         return;
     }
@@ -731,14 +731,14 @@ static void relaunch(void)
     }
     snprintf(mark, sizeof(mark), "HAKUX_RELAUNCH=%s", g_dash ? DASH_MARK : g_game);
     envp[m] = mark;
-    nc_log("hakuX-libretro", "relaunch: starting RetroArch again for %s", g_dash ? "the dashboard" : g_game);
+    nc_log("hakuX-lr", "relaunch: starting RetroArch again for %s", g_dash ? "the dashboard" : g_game);
     fflush(NULL);
     close_on_exec();
     sigset_t none;
     sigemptyset(&none);
     pthread_sigmask(SIG_SETMASK, &none, NULL);
     execve("/proc/self/exe", start, envp);
-    nc_log("hakuX-libretro", "relaunch: RetroArch can't start again: %s", strerror(errno));
+    nc_log("hakuX-lr", "relaunch: RetroArch can't start again: %s", strerror(errno));
     free(envp);
 }
 
@@ -755,7 +755,7 @@ void nc_lr_end(const char *why)
     if (state < 0 && g_core.kernel.relaunch) {
         relaunch();
     }
-    nc_log("hakuX-libretro", "%s: the core does not stop (HAKUX_LR_STOP=0); ending the process", why);
+    nc_log("hakuX-lr", "%s: the core does not stop (HAKUX_LR_STOP=0); ending the process", why);
     fflush(NULL);
     _exit(0);
 }
@@ -801,7 +801,7 @@ static void run_stat(uint64_t t0, uint64_t tv, uint64_t t1, bool shown)
     vid_sum += t1 - tv;
     vid_max = t1 - tv > vid_max ? t1 - tv : vid_max;
     if (t1 - start >= 10000000000ull) {
-        nc_log("hakuX-libretro", "stats: %.2f retro_run/s, %.2f frames/s to RetroArch, %.2f ms each (max %.2f), "
+        nc_log("hakuX-lr", "stats: %.2f retro_run/s, %.2f frames/s to RetroArch, %.2f ms each (max %.2f), "
                "video %.2f ms (max %.2f)", (double)n * 1e9 / (double)(t1 - start),
                (double)frames * 1e9 / (double)(t1 - start), (double)run_sum / (double)n / 1e6,
                (double)run_max / 1e6, (double)vid_sum / (double)n / 1e6, (double)vid_max / 1e6);
@@ -854,7 +854,7 @@ RETRO_API void retro_run(void)
      * the XBE its launch data page names, in the process. */
     if (__atomic_load_n(&g_core_state, __ATOMIC_ACQUIRE) < 0 && g_core.kernel.relaunch && can_stop() &&
         !__atomic_load_n(&g_fail, __ATOMIC_ACQUIRE)) {
-        nc_log("hakuX-libretro", "relaunch: the %s boots again in RetroArch's process", g_dash ? "dashboard" : "game");
+        nc_log("hakuX-lr", "relaunch: the %s boots again in RetroArch's process", g_dash ? "dashboard" : "game");
         boot_again("relaunch", true);
         return;
     }
@@ -862,7 +862,7 @@ RETRO_API void retro_run(void)
     why = why ? why : __atomic_load_n(&g_core_state, __ATOMIC_ACQUIRE) < 0 ? "the core stopped" : nc_hle_fatal();
     if (why && !g_shutdown_sent) {
         g_shutdown_sent = true;
-        nc_log("hakuX-libretro", "shutting down: %s", why);
+        nc_log("hakuX-lr", "shutting down: %s", why);
         g_env(RETRO_ENVIRONMENT_SHUTDOWN, NULL);
     }
 }
@@ -941,14 +941,14 @@ RETRO_API void retro_cheat_set(unsigned index, bool enabled, const char *code)
     if (xbe) {
         nc_cheat_front_set(index, false, NULL, NULL, 0);
         if (!nc_xbe_patch_front_set(index, enabled, code, err, sizeof(err)) && !cheat_told(code)) {
-            nc_log("hakuX-libretro", "cheat %u: XBE patch \"%.60s%s\": %s; it stays off", index, code,
+            nc_log("hakuX-lr", "cheat %u: XBE patch \"%.60s%s\": %s; it stays off", index, code,
                    strlen(code) > 60 ? "..." : "", err);
         }
         return;
     }
     nc_xbe_patch_front_set(index, false, NULL, NULL, 0);
     if (!nc_cheat_front_set(index, enabled, code, err, sizeof(err)) && !cheat_told(code)) {
-        nc_log("hakuX-libretro", "cheat %u \"%s\": %s; it stays off (patches/mods/README.md has the codes)", index, code,
+        nc_log("hakuX-lr", "cheat %u \"%s\": %s; it stays off (patches/mods/README.md has the codes)", index, code,
                err);
     }
 }
@@ -959,7 +959,7 @@ static void online_notices(void)
     if (g_front_on && !g_off_told && !nc_online_cheats()) {
         g_off_told = true;
         message("Cheats are off in the core options: RetroArch's cheats and XBE patches are ignored", 360);
-        nc_log("hakuX-libretro", "Cheats are off: RetroArch's cheats and XBE patches are ignored");
+        nc_log("hakuX-lr", "Cheats are off: RetroArch's cheats and XBE patches are ignored");
     }
     const char *what = nc_online_take_notice();
     if (what && nc_net_mode() != NC_NET_OFF) {
@@ -985,7 +985,7 @@ static void xbe_patches_changed(void)
     }
     g_xbe_told = now;
     message("XBE patches changed: restart the game (Quick Menu, Restart) to apply them", 360);
-    nc_log("hakuX-libretro", "XBE patches changed since the boot: they apply at the next restart");
+    nc_log("hakuX-lr", "XBE patches changed since the boot: they apply at the next restart");
 }
 
 RETRO_API void *retro_get_memory_data(unsigned id)

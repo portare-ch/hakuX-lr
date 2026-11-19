@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — depth buffers read as colour (HLE_OP_ZREAD): a texture over
+ * hakuX-lr HLE GPU — depth buffers read as colour (HLE_OP_ZREAD): a texture over
  * a D24S8 target's memory samples the NV2A's 32-bit words there (depth << 8
  * | stencil). A fullscreen pass fetches each texel's depth and stencil and
  * writes the word's bytes as the texture format's channels into the colour
@@ -182,7 +182,7 @@ static bool init(void)
         T.vkCreatePipelineLayout(g_hvk.dev, &pli, NULL, &g_zr.pl) != VK_SUCCESS ||
         T.vkCreateSampler(g_hvk.dev, &sci, NULL, &g_zr.smp) != VK_SUCCESS ||
         T.vkCreateDescriptorPool(g_hvk.dev, &dpi, NULL, &g_zr.pool) != VK_SUCCESS) {
-        hle_log("hakuX-hle-back", "zread: setup failed (depth buffers not read as colour)");
+        hle_log("hakuX-lr-hle-back", "zread: setup failed (depth buffers not read as colour)");
         return false;
     }
     VkDescriptorSetLayout ls[ZR_SLOTS * ZR_PER_SLOT];
@@ -199,12 +199,12 @@ static bool init(void)
     g_zr.fs_zws = module(HLE_SHADER_FRAGMENT, k_fs_zws);
     if (T.vkAllocateDescriptorSets(g_hvk.dev, &dai, &g_zr.set[0][0]) != VK_SUCCESS ||
         !g_zr.vs || !g_zr.fs || !g_zr.fs16 || !g_zr.fs_zw || !g_zr.fs_zws) {
-        hle_log("hakuX-hle-back", "zread: shaders failed (depth buffers not read as colour)");
+        hle_log("hakuX-lr-hle-back", "zread: shaders failed (depth buffers not read as colour)");
         return false;
     }
     g_zr.failed = false;
     g_zr.ready = true;
-    hle_log("hakuX-hle-back", "zread: depth-as-colour pass ready");
+    hle_log("hakuX-lr-hle-back", "zread: depth-as-colour pass ready");
     return true;
 }
 

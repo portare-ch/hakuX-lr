@@ -1,7 +1,7 @@
 /* Copyright (C) 2026-present PortareOS */
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * hakuX native core — in-guest Intel RSQRT for the KVM backend
+ * hakuX-lr native core — in-guest Intel RSQRT for the KVM backend
  * (NC_KVM_RSQRT_INGUEST=0 turns it off): guest machine code, assembled with
  * GNU as (--32, Intel syntax) and kept here as bytes.
  */

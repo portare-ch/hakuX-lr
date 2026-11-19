@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — host-time profile (HAKUX_HLE_PROF=1, debug): nanoseconds
+ * hakuX-lr HLE GPU — host-time profile (HAKUX_HLE_PROF=1, debug): nanoseconds
  * per bucket, logged once a second (hle_prof_diag). Off: one branch.
  */
 #ifndef HW_XBOX_HLE_PROF_H

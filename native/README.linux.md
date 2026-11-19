@@ -1,6 +1,6 @@
 # Linux build
 
-The ARM64 and x86-64 Linux builds provide `hakux_libretro.so` for RetroArch
+The ARM64 and x86-64 Linux builds provide `hakux-lr_libretro.so` for RetroArch
 and the diagnostic tools `xboxrun`, `vulkan-probe` and `kms-grab`. PortareOS uses the
 RetroArch core; the untested standalone app was removed in 0.4.0.
 See [TESTING.md](../TESTING.md) for installation and device testing.
@@ -26,9 +26,9 @@ not needed.
 On macOS with Apple's `container`, build the supplied image and run:
 
 ```sh
-container build --tag hakux-linux --file tools/native/Dockerfile.linux tools/native
+container build --tag hakux-lr-linux --file tools/native/Dockerfile.linux tools/native
 container run --rm --cpus 6 --memory 8g --volume "$PWD:/src" --workdir /src \
-  hakux-linux sh -c 'python3 tools/native/linux-deps.py && sh tools/native/linux-build.sh'
+  hakux-lr-linux sh -c 'python3 tools/native/linux-deps.py && sh tools/native/linux-build.sh'
 ```
 
 Set `HAKUX_BUILD` to use another build directory, `HAKUX_DEPS` to select
@@ -79,7 +79,7 @@ Instructions in functions that nothing refers to are left uncorrected.
 addresses, separated by commas and written in hexadecimal:
 
 ```sh
-NC_KVM_RSQRT_SITES=0x00123456,0x001234AB retroarch -L hakux_libretro.so Game.iso
+NC_KVM_RSQRT_SITES=0x00123456,0x001234AB retroarch -L hakux-lr_libretro.so Game.iso
 ```
 
 Those example addresses are placeholders. Each address must point to the
@@ -187,7 +187,7 @@ modifier without saving an image.
 
 ## The libretro core
 
-Load `hakux_libretro.so` in RetroArch with its Vulkan video driver and open
+Load `hakux-lr_libretro.so` in RetroArch with its Vulkan video driver and open
 an Xbox `.iso` or DVD `.chd` ([TESTING.md](../TESTING.md) has the steps). The
 renderer shares RetroArch's Vulkan device and copies frames on the GPU; the
 diagnostic harness uses CPU readback.
@@ -302,7 +302,7 @@ network keeps (`native/net/lan.c`), and Insignia's DNS server,
 server's address in `insignia-dns.txt` in the save directory, using the same
 format as `lan-peers.txt`. Only the first address is used.
 
-**Load Core → Microsoft - Xbox (hakuX) → Start Core** opens
+**Load Core → Microsoft - Xbox (hakuX-lr) → Start Core** opens
 [hakux-lr-dash](https://github.com/portare-ch/hakux-lr-dash) without a game.
 At boot the core installs it at `C:\xboxdash.xbe` and
 `C:\xodash\xonlinedash.xbe`, replacing any dashboard executables at those
@@ -333,7 +333,7 @@ age and gaps between frames in any frontend.
 Frame Pacing (from rfandango/hakuX#14) holds a game whose GPU work falls
 behind its simulation to the render pace, so frames don't queue up as input
 lag. Each second a game draws, the renderer logs a `frame pace` line
-(`hakuX-hle-pb`), pacing on or off: the frames, how often and how long the
+(`hakuX-lr-hle-pb`), pacing on or off: the frames, how often and how long the
 decoder was held, how many frames the decoder was ahead of the GPU, and the
 time from the decoder's frame to RetroArch taking it (`HAKUX_HLE_HITCH=0`
 leaves that last part out). `HAKUX_PROP_DEBUG_HAKUX_PACE=0`–`3` overrides the
@@ -389,10 +389,10 @@ links against Ubuntu 22.04's runtimes. Without the sysroot, a build may
 require newer host libraries. `BUILD-INFO` records the actual glibc
 requirement from the core's symbol versions.
 
-This writes `build/package/hakux-0.17.0-aarch64.tar.gz` on ARM64 or
-`build/package/hakux-0.17.0-x86_64.tar.gz` on x86-64, and prints its
+This writes `build/package/hakux-lr-0.17.0-aarch64.tar.gz` on ARM64 or
+`build/package/hakux-lr-0.17.0-x86_64.tar.gz` on x86-64, and prints its
 SHA-256. The archive contains the stripped core and info file in
-`lib/libretro/`, licenses in `share/licenses/hakux/`, and `BUILD-INFO` with
+`lib/libretro/`, licenses in `share/licenses/hakux-lr/`, and `BUILD-INFO` with
 the source revision, compiler and dependency manifest. Sorted names, root
 ownership and commit timestamps make packaging reproducible. Set the
 PortareOS package's `PKG_VERSION` and `PKG_SHA256` to match the release.

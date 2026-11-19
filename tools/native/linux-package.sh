@@ -24,16 +24,16 @@ if [ ! -f "$build/CMakeCache.txt" ]; then
 fi
 
 out=$repo/build/package
-name=hakux-$version
+name=hakux-lr-$version
 rm -rf "${out:?}/$name"
-mkdir -p "$out/$name/lib/libretro" "$out/$name/share/licenses/hakux"
-"${STRIP:-llvm-strip-19}" -o "$out/$name/lib/libretro/hakux_libretro.so" "$build/hakux_libretro.so"
-sed "s/^display_version = .*/display_version = \"$version\"/" native/libretro/hakux_libretro.info \
-    > "$out/$name/lib/libretro/hakux_libretro.info"
-cp LICENSE COPYING licenses/* "$out/$name/share/licenses/hakux/"
+mkdir -p "$out/$name/lib/libretro" "$out/$name/share/licenses/hakux-lr"
+"${STRIP:-llvm-strip-19}" -o "$out/$name/lib/libretro/hakux-lr_libretro.so" "$build/hakux-lr_libretro.so"
+sed "s/^display_version = .*/display_version = \"$version\"/" native/libretro/hakux-lr_libretro.info \
+    > "$out/$name/lib/libretro/hakux-lr_libretro.info"
+cp LICENSE COPYING licenses/* "$out/$name/share/licenses/hakux-lr/"
 # Record the glibc requirement from the binary's ELF symbol versions.
 # Host builds may require newer libraries than the release sysroot.
-glibc=$("${READELF:-readelf}" --version-info "$out/$name/lib/libretro/hakux_libretro.so" |
+glibc=$("${READELF:-readelf}" --version-info "$out/$name/lib/libretro/hakux-lr_libretro.so" |
     grep -o 'GLIBC_2\.[0-9.]*' | sort -u -t. -k2,2n -k3,3n | tail -n1)
 glibc=${glibc#GLIBC_}
 if [ -z "$glibc" ]; then
@@ -43,10 +43,10 @@ fi
 dsp_jit=off
 if grep -q '^HAKUX_DSP_JIT:BOOL=ON$' "$build/CMakeCache.txt"; then
     dsp_jit=on
-    cp -R "$build/dsp-jit/licenses" "$out/$name/share/licenses/hakux/dsp-jit"
+    cp -R "$build/dsp-jit/licenses" "$out/$name/share/licenses/hakux-lr/dsp-jit"
 fi
 {
-    echo "hakuX $version"
+    echo "hakuX-lr $version"
     echo "source $(git rev-parse HEAD) (https://github.com/portare-ch/hakuX-lr)"
     echo "compiler $("${CC:-clang}" --version | head -1)"
     echo "architecture $arch"

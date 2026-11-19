@@ -1,5 +1,5 @@
 /*
- * hakuX native core — device MMIO through fault decoding.
+ * hakuX-lr native core — device MMIO through fault decoding.
  *
  * The JIT reaches guest memory with ordinary arm64 loads and stores: [x19,
  * wAddr, uxtw] register-offset forms, or immediate/unscaled forms off a
@@ -303,7 +303,7 @@ bool nc_mmio_fault(const NcVm *vm, const siginfo_t *info, void *ucontext)
         char line[160];
         struct timespec ts;
         clock_gettime(CLOCK_MONOTONIC, &ts);
-        int n = snprintf(line, sizeof(line), "hakuX-native-mmio: trace %ld.%06ld %s %08x %s %0*llx\n", (long)ts.tv_sec,
+        int n = snprintf(line, sizeof(line), "hakuX-lr-native-mmio: trace %ld.%06ld %s %08x %s %0*llx\n", (long)ts.tv_sec,
                          ts.tv_nsec / 1000, dev->name, first, a.store ? "<-" : "->", (int)(2 * (a.bytes > 8 ? 8 : a.bytes)),
                          (unsigned long long)v);
         write(2, line, (size_t)n);
@@ -311,7 +311,7 @@ bool nc_mmio_fault(const NcVm *vm, const siginfo_t *info, void *ucontext)
     if (g_logged < LOG_FIRST) {
         g_logged++;
         char line[160];
-        int n = snprintf(line, sizeof(line), "hakuX-native-mmio: %s %s+%06x %s %0*llx (%u)\n", dev->name,
+        int n = snprintf(line, sizeof(line), "hakuX-lr-native-mmio: %s %s+%06x %s %0*llx (%u)\n", dev->name,
                          a.store ? "w" : "r", first - dev->base, a.store ? "<-" : "->", (int)(2 * (a.bytes > 8 ? 8 : a.bytes)),
                          (unsigned long long)v, a.bytes);
         write(2, line, (size_t)n);
@@ -525,7 +525,7 @@ uint64_t nc_mmio_total(void)
 void nc_mmio_dump_stats(int fd)
 {
     char line[160];
-    int n = snprintf(line, sizeof(line), "hakuX-native-mmio: %llu accesses (%llu at sites not tallied); "
+    int n = snprintf(line, sizeof(line), "hakuX-lr-native-mmio: %llu accesses (%llu at sites not tallied); "
                      "busiest sites:\n", (unsigned long long)g_total, (unsigned long long)g_other);
     nc_dump_line(fd, line, (size_t)n);
     bool shown[MAX_SITES] = {0};
@@ -543,7 +543,7 @@ void nc_mmio_dump_stats(int fd)
         }
         shown[best] = true;
         const NcMmioDev *dev = dev_at(g_sites[best].addr);
-        n = snprintf(line, sizeof(line), "hakuX-native-mmio:   %s %08x %s x%u last %llx\n", dev ? dev->name : "?",
+        n = snprintf(line, sizeof(line), "hakuX-lr-native-mmio:   %s %08x %s x%u last %llx\n", dev ? dev->name : "?",
                      g_sites[best].addr, g_sites[best].write ? "w" : "r", g_sites[best].count,
                      (unsigned long long)g_sites[best].last);
         nc_dump_line(fd, line, (size_t)n);

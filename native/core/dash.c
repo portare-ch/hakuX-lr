@@ -101,13 +101,13 @@ static bool write_xbe(const char *path, const uint8_t *xbe, size_t size, ino_t o
     snprintf(tmp, sizeof(tmp), "%s.XXXXXX", path);
     const int fd = mkstemp(tmp);
     if (fd < 0) {
-        nc_log("hakuX-native", "dash: can't write %s: %s", path, strerror(errno));
+        nc_log("hakuX-lr-native", "dash: can't write %s: %s", path, strerror(errno));
         return false;
     }
     bool ok = fchmod(fd, 0644) == 0 && write_all(fd, xbe, size) && fsync(fd) == 0;
     ok = close(fd) == 0 && ok;
     if (!ok) {
-        nc_log("hakuX-native", "dash: can't write %s: %s", tmp, strerror(errno));
+        nc_log("hakuX-lr-native", "dash: can't write %s: %s", tmp, strerror(errno));
         unlink(tmp);
         return false;
     }
@@ -164,9 +164,9 @@ static void place(const char *dir, const char *name, const uint8_t *xbe, size_t 
     }
     if (write_xbe(host, xbe, size, old)) {
         if (other) {
-            nc_log("hakuX-native", "dash: replaced another dashboard with hakuX-lr's at %s", host);
+            nc_log("hakuX-lr-native", "dash: replaced another dashboard with hakuX-lr's at %s", host);
         } else {
-            nc_log("hakuX-native", "dash: %s hakuX-lr's dashboard as %s", have ? "updated" : "installed", host);
+            nc_log("hakuX-lr-native", "dash: %s hakuX-lr's dashboard as %s", have ? "updated" : "installed", host);
         }
     }
     *ok = stat(host, &st) == 0;             /* Another boot may have published it. */
@@ -200,7 +200,7 @@ bool nc_dash_install(const char *hdd)
     char c_drive[600], online[600];
     snprintf(c_drive, sizeof(c_drive), "%s/Partition2", hdd);
     if (!mkdirs(c_drive)) {
-        nc_log("hakuX-native", "dash: no C: drive at %s: %s", c_drive, strerror(errno));
+        nc_log("hakuX-lr-native", "dash: no C: drive at %s: %s", c_drive, strerror(errno));
         return false;
     }
     bool ok = true;

@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — first-write barrier (spec §4.10; P2 Decision 5): the
+ * hakuX-lr HLE GPU — first-write barrier (spec §4.10; P2 Decision 5): the
  * guest's first store to a page the HLE cleaned waits for the GPU work that
  * reads it.
  */

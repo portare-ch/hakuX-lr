@@ -1,5 +1,5 @@
 /*
- * hakuX native core — boot and run a title.
+ * hakuX-lr native core — boot and run a title.
  */
 #ifndef NATIVE_CORE_CORE_H
 #define NATIVE_CORE_CORE_H

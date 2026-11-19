@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — own Vulkan instance/device (spec §5.1, D7).
+ * hakuX-lr HLE GPU — own Vulkan instance/device (spec §5.1, D7).
  * Include only under CONFIG_VULKAN.
  */
 #ifndef HW_XBOX_HLE_VK_VKDEV_H

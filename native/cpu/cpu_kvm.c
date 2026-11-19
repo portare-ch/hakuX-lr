@@ -176,7 +176,7 @@ static void fatal(NcCpu *cpu, const char *what)
     struct kvm_regs r;
     memset(&r, 0, sizeof(r));
     ioctl(cpu->vcpu, KVM_GET_REGS, &r);
-    nc_log("hakuX-native-kvm", "%s: eip %08llx esp %08llx eflags %08llx eax %08llx (%s)", what,
+    nc_log("hakuX-lr-native-kvm", "%s: eip %08llx esp %08llx eflags %08llx eax %08llx (%s)", what,
            (unsigned long long)r.rip, (unsigned long long)r.rsp, (unsigned long long)r.rflags,
            (unsigned long long)r.rax, strerror(errno));
     abort();
@@ -276,7 +276,7 @@ static void prot_hook(uint32_t va, uint32_t len, int prot)
     if (va < 0x10000u) {
         static unsigned warned;
         if (warned++ < 4) {
-            nc_log("hakuX-native-kvm", "vm: a guest mapping at %08x, over the backend's own pages", va);
+            nc_log("hakuX-lr-native-kvm", "vm: a guest mapping at %08x, over the backend's own pages", va);
         }
     }
     if (pte_update(cpu, va, len) && __atomic_load_n(&cpu->running, __ATOMIC_ACQUIRE) &&
@@ -453,7 +453,7 @@ static void set_tsc_offset(NcCpu *cpu)
     struct kvm_device_attr at = {.group = KVM_VCPU_TSC_CTRL, .attr = KVM_VCPU_TSC_OFFSET,
                                  .addr = (uint64_t)(uintptr_t)&off};
     if (ioctl(cpu->vcpu, KVM_SET_DEVICE_ATTR, &at) < 0) {
-        nc_log("hakuX-native-kvm", "TSC offset: %s", strerror(errno));
+        nc_log("hakuX-lr-native-kvm", "TSC offset: %s", strerror(errno));
     }
 }
 
@@ -461,7 +461,7 @@ static void kick_handler(int sig) {}
 
 static bool refuse(NcCpu *cpu, const char *why)
 {
-    nc_log("hakuX-native-kvm", "no guest CPU: %s%s%s", why, errno ? ": " : "", errno ? strerror(errno) : "");
+    nc_log("hakuX-lr-native-kvm", "no guest CPU: %s%s%s", why, errno ? ": " : "", errno ? strerror(errno) : "");
     nc_cpu_destroy(cpu);
     return false;
 }
@@ -515,12 +515,12 @@ static bool rsqrt_config(NcCpu *cpu)
         free(image);
         if (!scanned || !scan.nsites) {
             if (image && !scanned) {
-                nc_log("hakuX-native-kvm", "Intel RSQRT: the title's code couldn't be scanned, none corrected");
+                nc_log("hakuX-lr-native-kvm", "Intel RSQRT: the title's code couldn't be scanned, none corrected");
             }
             nc_rsqrt_scan_free(&scan);
             return true;
         }
-        nc_log("hakuX-native-kvm", "Intel RSQRT: %u instructions in the title's code (%u more unreached, %u "
+        nc_log("hakuX-lr-native-kvm", "Intel RSQRT: %u instructions in the title's code (%u more unreached, %u "
                "disputed), scanned in %ld ms", scan.nsites, scan.unreached, scan.disputed,
                (long)((t1.tv_sec - t0.tv_sec) * 1000 + (t1.tv_nsec - t0.tv_nsec) / 1000000));
         max = scan.nsites;
@@ -568,7 +568,7 @@ static bool rsqrt_config(NcCpu *cpu)
     cpu->rsqrt_on = true;
     const char *ig = getenv("NC_KVM_RSQRT_INGUEST");
     cpu->rsqrt_inguest = !ig || strcmp(ig, "0");
-    nc_log("hakuX-native-kvm", "Intel RSQRT: %u AMD-only sites (%s), register forms %s",
+    nc_log("hakuX-lr-native-kvm", "Intel RSQRT: %u AMD-only sites (%s), register forms %s",
            cpu->nrsqrt, listed ? "NC_KVM_RSQRT_SITES" : "the title's",
            cpu->rsqrt_inguest ? "corrected in the guest" : "through the host");
     return true;
@@ -577,7 +577,7 @@ static bool rsqrt_config(NcCpu *cpu)
 NcCpu *nc_cpu_create(const NcCpuConfig *cfg, uint32_t fs_base)
 {
     if (!cfg->vm || !cfg->fault || !cfg->mmio || !cfg->port_in || !cfg->port_out || !cfg->cpuid) {
-        nc_log("hakuX-native-kvm", "no guest CPU: the core gave the KVM backend no devices or memory");
+        nc_log("hakuX-lr-native-kvm", "no guest CPU: the core gave the KVM backend no devices or memory");
         return NULL;
     }
     NcCpu *cpu = calloc(1, sizeof(*cpu));
@@ -695,7 +695,7 @@ NcCpu *nc_cpu_create(const NcCpuConfig *cfg, uint32_t fs_base)
     g_cpu = cpu;
     g_prev_hook = nc_vm_prot_hook;
     nc_vm_prot_hook = prot_hook;
-    nc_log("hakuX-native-kvm", "guest CPU: KVM, CPL 3 with IOPL 3, TSC %u kHz on a %u kHz host", GUEST_KHZ,
+    nc_log("hakuX-lr-native-kvm", "guest CPU: KVM, CPL 3 with IOPL 3, TSC %u kHz on a %u kHz host", GUEST_KHZ,
            cpu->host_khz);
     return cpu;
 }
@@ -711,7 +711,7 @@ void nc_cpu_destroy(NcCpu *cpu)
         if (cpu->sys && cpu->sys != MAP_FAILED) {
             memcpy(&guest, lin(cpu, LIN_RSQ_HITS), sizeof(guest));
         }
-        nc_log("hakuX-native-kvm", "RSQRT: %llu instructions corrected in the guest, %llu through the host",
+        nc_log("hakuX-lr-native-kvm", "RSQRT: %llu instructions corrected in the guest, %llu through the host",
                (unsigned long long)guest, (unsigned long long)cpu->rsqrt_hits);
     }
     free(cpu->rsqrt_sites);
@@ -1529,7 +1529,7 @@ static bool rsqrt_trap_site(NcCpu *cpu, uint32_t at)
                     const char *why = NULL;
                     const int fault = cpu->cfg.fault(cpu->cfg.opaque, f, va, false, &why);
                     if (fault != 1 && fault != 2) {
-                        nc_log("hakuX-native-kvm", "RSQRT source at %08x, eip %08x: %s", va, at,
+                        nc_log("hakuX-lr-native-kvm", "RSQRT source at %08x, eip %08x: %s", va, at,
                                why ? why : "not readable guest RAM");
                         abort();
                     }
@@ -1628,7 +1628,7 @@ static void mmio(NcCpu *cpu)
     if (!cpu->cfg.mmio(addr, run->mmio.len, run->mmio.is_write, &v)) {
         static unsigned logged;
         if (logged++ < 8) {
-            nc_log("hakuX-native-kvm", "%s of %u bytes at %08x: no device there", run->mmio.is_write ? "write" : "read",
+            nc_log("hakuX-lr-native-kvm", "%s of %u bytes at %08x: no device there", run->mmio.is_write ? "write" : "read",
                    run->mmio.len, addr);
         }
         v = UINT64_MAX;
@@ -1668,7 +1668,7 @@ static RunState page_fault(NcCpu *cpu, uint32_t err)
     case 2: /* NC_GF_FRAME */
         return RUN_ON;
     default:
-        nc_log("hakuX-native-kvm", "guest fault at %08x (%s), eip %08x: %s", va, write ? "write" : "read",
+        nc_log("hakuX-lr-native-kvm", "guest fault at %08x (%s), eip %08x: %s", va, write ? "write" : "read",
                nc_frame_eip(&cpu->frame), why ? why : "not the guest's");
         abort();
     }
@@ -1701,7 +1701,7 @@ static RunState stub_exit(NcCpu *cpu)
             return RUN_ON;
         }
         if (!sysop(cpu, op, op == NC_SYSOP_OTHER ? 0 : in.len)) {
-            nc_log("hakuX-native-kvm", "system op %d at %08x: nobody took it", (int)op, eip);
+            nc_log("hakuX-lr-native-kvm", "system op %d at %08x: nobody took it", (int)op, eip);
             abort();
         }
         return RUN_ON;
@@ -1711,7 +1711,7 @@ static RunState stub_exit(NcCpu *cpu)
             sysop(cpu, NC_SYSOP_UD2, 2);
             return RUN_ON;
         }
-        nc_log("hakuX-native-kvm", "#UD at %08x", eip);
+        nc_log("hakuX-lr-native-kvm", "#UD at %08x", eip);
         abort();
     case 3: {
         /* EIP is past the INT3 (CC) or INT 3 (CD 03) */
@@ -1760,7 +1760,7 @@ static RunState stub_exit(NcCpu *cpu)
         }
         break;
     }
-    nc_log("hakuX-native-kvm", "exception %u (error %x) at %08x: not one the core takes", vector, err, eip);
+    nc_log("hakuX-lr-native-kvm", "exception %u (error %x) at %08x: not one the core takes", vector, err, eip);
     abort();
 }
 
@@ -1870,16 +1870,16 @@ void nc_cpu_run(NcCpu *cpu, const NcCpuContext *c)
             fatal(cpu, "triple fault (KVM_EXIT_SHUTDOWN)");
             break;
         case KVM_EXIT_FAIL_ENTRY:
-            nc_log("hakuX-native-kvm", "entry failed: hardware reason %llx",
+            nc_log("hakuX-lr-native-kvm", "entry failed: hardware reason %llx",
                    (unsigned long long)cpu->run->fail_entry.hardware_entry_failure_reason);
             fatal(cpu, "KVM_EXIT_FAIL_ENTRY");
             break;
         case KVM_EXIT_INTERNAL_ERROR:
-            nc_log("hakuX-native-kvm", "internal error, suberror %u", cpu->run->internal.suberror);
+            nc_log("hakuX-lr-native-kvm", "internal error, suberror %u", cpu->run->internal.suberror);
             fatal(cpu, "KVM_EXIT_INTERNAL_ERROR");
             break;
         default:
-            nc_log("hakuX-native-kvm", "exit reason %u", cpu->run->exit_reason);
+            nc_log("hakuX-lr-native-kvm", "exit reason %u", cpu->run->exit_reason);
             fatal(cpu, "an exit the backend doesn't take");
         }
     }

@@ -1,6 +1,6 @@
 /* Copyright (C) 2026-present PortareOS */
 /*
- * hakuX HLE GPU — a fast ETC2 / EAC block encoder, for GPUs without BC
+ * hakuX-lr HLE GPU — a fast ETC2 / EAC block encoder, for GPUs without BC
  * (Mali, PowerVR): a DXT texture's blocks are decoded and encoded again as
  * ETC2 of the same size, instead of A8R8G8B8 at four to eight times the
  * bytes (pb/pbres.c). ETC1's modes only (individual and differential base
