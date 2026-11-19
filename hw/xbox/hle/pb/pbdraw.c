@@ -2733,8 +2733,17 @@ bool hle_pbd_blit_images(uint32_t sbase, uint32_t sp, uint32_t dbase, uint32_t d
         rt_cpu_sync(dst);
         return false;
     }
+    const bool full = !ox && !oy && ox + w >= dd->d.w && oy + h >= dd->d.h;
+    uint32_t dlen;
+    if (!full && !dd->written && coh_managed(dd, &dlen)) {
+        /* a new image the copy covers in part: the rest of it is its
+         * memory, which has the pixels of the images over it first (the
+         * target of the other pitch among them), as before a new target's
+         * first draw (rt_first_land) */
+        coh_land_over(dd, dlen);
+    }
     coh_first_write(so, false);
-    coh_first_write(dd, !ox && !oy && ox + w >= dd->d.w && oy + h >= dd->d.h);
+    coh_first_write(dd, full);
     HleCmdCopy *c = begin(HLE_OP_COPY, sizeof(*c));
     c->src = src;
     c->dst = dst;
@@ -3514,6 +3523,7 @@ static void tex_land(void)
             continue;
         }
         uint64_t lv = 0;
+        uint32_t mlen;
         if (!o->d.pitch) {
             /* Write the swizzled image back if it is newer than memory. */
             const uint64_t v = coh_land(o);
@@ -3541,11 +3551,16 @@ static void tex_land(void)
             coh_pend_wait(o->d.pa, o->d.pitch * o->d.h);
             lv = 1;
         } else if ((uint64_t)o->d.pitch * o->d.h > WRITEBACK_MAX &&
-                   (coh_pend_wait(o->d.pa, o->d.pitch * o->d.h), obj_superseded(o) || obj_written(o))) {
+                   (coh_pend_wait(o->d.pa, o->d.pitch * o->d.h),
+                    obj_superseded(o) || (coh_managed(o, &mlen) ? coh_mem_newer(o) : rt_cpu_sync(o->id)))) {
             /* a large one whose memory was written since it was drawn (a
              * copy into it, the title's bytes): the memory is the newer,
-             * and its old image must not go over it. A small one's memory
-             * has had its pixels at its unbind. */
+             * and its old image must not go over it. One the coherence
+             * keeps is judged by its memory's write counts (its pages'
+             * dirty bits are not taken at its uploads, and would report
+             * bytes its image already has); the image has them at its next
+             * draw. Any other takes them now, its dirty bits with them. A
+             * small one's memory has had its pixels at its unbind. */
             lv = 1;
         } else {
             rt_cpu_sync(o->id);
