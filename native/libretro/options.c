@@ -6,6 +6,7 @@
  * frame pacing and frame repeats update live. Other options apply at boot.
  */
 #include "native/libretro/libretro_int.h"
+#include "native/libretro/widescreen_titles.h"
 #include "native/core/core.h"
 #include "native/core/mods.h"
 #include "native/core/online.h"
@@ -72,8 +73,9 @@ static struct retro_core_option_v2_definition g_defs[OPT_COUNT + 1] = {
     [OPT_FORMAT] = {
         "hakux_screen_format", "Screen Format", NULL,
         "Sets the console's screen format. Widescreen uses 16:9; Letterbox fits 16:9 inside 4:3. "
-        "Only games that support these formats use them. Auto uses Widescreen while a widescreen "
-        "patch (Cheats) is applied to the game, Normal otherwise." NEXT,
+        "Only games that support these formats use them. Auto uses Widescreen for games known to "
+        "support it when the display is 16:10 or wider, and while a widescreen patch (Cheats) is "
+        "applied to the game; Normal otherwise." NEXT,
         NULL, NULL,
         {{"auto", "Auto"}, {"normal", "Normal (4:3)"}, {"widescreen", "Widescreen (16:9)"},
          {"letterbox", "Letterbox"}, {NULL, NULL}},
@@ -308,18 +310,72 @@ static void display_update(void)
 }
 
 /* Screen Format's Auto: each XBE boot tells whether a widescreen patch was
- * applied to it (mods.c), before the game reads the console's settings. */
+ * applied to it and which title it is (mods.c), before the game reads the
+ * console's settings. Widescreen with such a patch, as the user set it up;
+ * and for a title known to draw a 16:9 picture (widescreen_titles.h) where
+ * the display is wide. A game doesn't say so itself: in 480p the display
+ * mode it asks for is the same either way (on a standard-definition cable
+ * the mode's bit 28 tells), hence the list. */
 static bool g_format_auto;              /* atomic */
+static int g_display_wide = -2;         /* atomic: the frontend's display is 16:10 or wider; -1 not known
+                                           (-2: not asked yet) */
 
-static void screen_auto(bool widescreen)
+static bool widescreen_title(uint32_t title_id)
+{
+    size_t lo = 0, hi = sizeof(k_widescreen_titles) / sizeof(k_widescreen_titles[0]);
+    while (lo < hi) {
+        const size_t mid = lo + (hi - lo) / 2;
+        if (k_widescreen_titles[mid] == title_id) {
+            return true;
+        }
+        if (k_widescreen_titles[mid] < title_id) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    return false;
+}
+
+/* The display's shape, where the frontend tells (not every one does): a
+ * 16:9 picture on a 4:3 display would only be the smaller for it, so a
+ * display not known is taken as one. */
+static void display_query(void)
+{
+    struct retro_display_metadata m;
+    memset(&m, 0, sizeof(m));
+    m.version = 1;
+    m.size = sizeof(m);
+    int wide = -1;
+    if (nc_lr_env(RETRO_ENVIRONMENT_GET_DISPLAY_METADATA, &m) && m.geo.native_width && m.geo.native_height) {
+        wide = (uint64_t)m.geo.native_width * 10 >= (uint64_t)m.geo.native_height * 16;
+    }
+    if (wide != __atomic_exchange_n(&g_display_wide, wide, __ATOMIC_ACQ_REL)) {
+        if (wide < 0) {
+            nc_log("hakuX-lr", "display: its size isn't known (taken as 4:3 by Screen Format's Auto)");
+        } else {
+            nc_log("hakuX-lr", "display: %u x %u, %s", m.geo.native_width, m.geo.native_height,
+                   wide ? "wide" : "not wide");
+        }
+    }
+}
+
+static void screen_auto(bool patch, uint32_t title_id)
 {
     if (!__atomic_load_n(&g_format_auto, __ATOMIC_ACQUIRE)) {
         return;
     }
+    const bool listed = widescreen_title(title_id);
+    const int wide = __atomic_load_n(&g_display_wide, __ATOMIC_ACQUIRE);
+    const bool widescreen = patch || (listed && wide > 0);
     nc_kernel_set_video(NC_VIDEO_480P | NC_VIDEO_PAL60 | (widescreen ? NC_VIDEO_WIDESCREEN : 0), NC_AV_PACK_HDTV);
     nc_lr_video_set_widescreen(widescreen);
-    nc_log("hakuX-lr", "screen format auto: %s", widescreen ? "widescreen (a widescreen patch is applied)"
-                                                                    : "normal");
+    nc_log("hakuX-lr", "screen format auto: %s (title %08X: %s)", widescreen ? "widescreen" : "normal", title_id,
+           patch              ? "a widescreen patch is applied"
+           : !listed          ? "not a known widescreen title"
+           : wide > 0         ? "a widescreen title, the display is wide"
+           : wide == 0        ? "a widescreen title, but the display is not wide"
+                              : "a widescreen title, but the display's size isn't known");
 }
 
 void nc_lr_options_apply(void)
@@ -347,7 +403,8 @@ void nc_lr_options_apply(void)
                                                                             : 0);
     nc_kernel_set_video(flags, NC_AV_PACK_HDTV);
     nc_lr_video_set_widescreen(flags & NC_VIDEO_WIDESCREEN);
-    /* Auto: normal until the booting XBE's patch says widescreen (screen_auto) */
+    /* Auto: normal until the booting XBE says widescreen (screen_auto) */
+    display_query();
     __atomic_store_n(&g_format_auto, !strcmp(format, "auto"), __ATOMIC_RELEASE);
     nc_mods_set_screen_hook(screen_auto);
 

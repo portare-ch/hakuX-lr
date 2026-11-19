@@ -319,11 +319,40 @@ uint64_t nc_mods_xbe_patches_booted(void)
     return __atomic_load_n(&g_xbe_patch_booted, __ATOMIC_ACQUIRE);
 }
 
-static void (*g_screen_hook)(bool widescreen);
+static void (*g_screen_hook)(bool widescreen, uint32_t title_id);
 
-void nc_mods_set_screen_hook(void (*hook)(bool widescreen))
+void nc_mods_set_screen_hook(void (*hook)(bool widescreen, uint32_t title_id))
 {
     g_screen_hook = hook;
+}
+
+/* The booting XBE's path on the disc, NULL for one that isn't there. */
+static const char *disc_rel(const char *xbe_path)
+{
+    static const char cd[] = "\\Device\\CdRom0\\";
+    return !strncasecmp(xbe_path, cd, sizeof(cd) - 1)                     ? xbe_path + sizeof(cd) - 1
+           : xbe_path[0] == '\\' && strncasecmp(xbe_path, "\\Device\\", 8) ? xbe_path + 1
+                                                                          : NULL;
+}
+
+/* The title booting: the XBE's own ID where it is on the disc (a disc of
+ * several games has one for each), else the disc's (a title update on the
+ * hard disk is its game's). */
+static uint32_t boot_title_id(NcDisc *disc, const char *xbe_path)
+{
+    HleXbeInfo x;
+    const char *rel = disc_rel(xbe_path);
+    if (disc && ((rel && xbe_info(disc, rel, &x)) || xbe_info(disc, "default.xbe", &x))) {
+        return x.title_id;
+    }
+    return 0;
+}
+
+void nc_mods_boot_title(NcDisc *disc, const char *xbe_path)
+{
+    if (g_screen_hook) {
+        g_screen_hook(false, boot_title_id(disc, xbe_path));
+    }
 }
 
 static bool xbe_patches(NcDisc *disc, const char *xbe_path);
@@ -334,7 +363,7 @@ void nc_mods_xbe_patches(NcDisc *disc, const char *xbe_path)
      * one turned off since, leaves the screen as it is set */
     const bool widescreen = xbe_patches(disc, xbe_path);
     if (g_screen_hook) {
-        g_screen_hook(widescreen);
+        g_screen_hook(widescreen, boot_title_id(disc, xbe_path));
     }
 }
 
@@ -342,7 +371,6 @@ void nc_mods_xbe_patches(NcDisc *disc, const char *xbe_path)
  * widescreen picture (screen=widescreen). */
 static bool xbe_patches(NcDisc *disc, const char *xbe_path)
 {
-    static const char cd[] = "\\Device\\CdRom0\\";
     char on[160];
     const unsigned n = nc_xbe_patch_front_list(on, sizeof(on));
     if (!n) {
@@ -354,9 +382,7 @@ static bool xbe_patches(NcDisc *disc, const char *xbe_path)
         nc_log("hakuX-lr-native-mods", "XBE patches (%s): Cheats are off: none applied", on);
         return false;
     }
-    const char *rel = !strncasecmp(xbe_path, cd, sizeof(cd) - 1)                     ? xbe_path + sizeof(cd) - 1
-                      : xbe_path[0] == '\\' && strncasecmp(xbe_path, "\\Device\\", 8) ? xbe_path + 1
-                                                                                     : NULL;
+    const char *rel = disc_rel(xbe_path);
     NcDiscFile f;
     if (!disc || !rel || !nc_disc_find(disc, rel, &f) || (f.attr & 0x10)) {
         __atomic_store_n(&g_xbe_patch_booted, nc_xbe_patch_front_hash(), __ATOMIC_RELEASE);

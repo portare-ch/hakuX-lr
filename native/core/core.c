@@ -239,6 +239,8 @@ bool nc_core_boot(NcCore *c, int disc_fd)
     /* Patch new XBE boots; savestates already contain executable code. */
     if (!g_loadstate[0]) {
         nc_mods_xbe_patches(disc_fd >= 0 ? &c->disc : NULL, xbe_path);
+    } else {
+        nc_mods_boot_title(disc_fd >= 0 ? &c->disc : NULL, xbe_path);
     }
     if (!nc_xbe_load(&c->vm, &c->disc, xbe_path, &c->kernel, &c->xbe)) {
         char why[256], host[512];
