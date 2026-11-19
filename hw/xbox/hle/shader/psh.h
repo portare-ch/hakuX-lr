@@ -116,11 +116,14 @@ typedef struct HlePshKey {
     uint16_t sgn_ob, sgn_raw;
     uint8_t dither;                     /* SET_DITHER_ENABLE into a 16-bit target: 1
                                            R5G6B5, 2 1555 (ordered, 4 x 4 by guest
-                                           pixel) */
-    /* Blended, dithered draws (fbfetch): the shader blends with the target's
-     * pixel by fb_src / fb_dst (D3D's blend factors) and fb_op (the blend
-     * equation; fb_const the BLENDCOLOR where a factor takes it), then
-     * dithers the result, as the NV2A dithers what the blend leaves. */
+                                           pixel). Not dithered, where the shader
+                                           blends (fblend): 3 R5G6B5, 4 1555, the
+                                           top bits of the 8-bit result */
+    /* Blended draws into a 16-bit target (fbfetch): the shader blends with
+     * the target's pixel by fb_src / fb_dst (D3D's blend factors) and fb_op
+     * (the blend equation; fb_const the BLENDCOLOR where a factor takes it),
+     * then dithers the result, as the NV2A dithers what the blend leaves, or
+     * keeps its top bits (dither). */
     uint8_t fblend;
     uint16_t fb_src, fb_dst, fb_op;
     uint8_t precise;                    /* Reuse padding; keep the shader key size stable. */
