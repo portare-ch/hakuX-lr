@@ -3802,14 +3802,20 @@ static uint32_t texture(unsigned s, bool *unset, bool *lin)
     }
     /* colour sign: the signed 8-bit channels uploaded offset binary, an
      * object apart from the texture read unsigned */
-    const uint32_t sign = R(NV097_SET_TEXTURE_FILTER + b) >> 28;
+    const uint32_t addr = R(NV097_SET_TEXTURE_ADDRESS + b);
+    const bool border = (addr & 0xF) == 4 || ((addr >> 8) & 0xF) == 4 || ((addr >> 16) & 0xF) == 4;
+    uint32_t sign = R(NV097_SET_TEXTURE_FILTER + b) >> 28;
+    if (border && (code == HLE_XFMT_V16U16 || code == HLE_XFMT_LIN_V16U16)) {
+        /* an R16B16's signed half needs its border at 16 bits, offset
+         * binary too, and a sampler's border colour has eight a channel:
+         * sampled with a border it stays unsigned */
+        sign = 0;
+    }
     const uint32_t sxor = hle_fmt_sign_xor(code, sign) | hle_fmt_sign_wide(code, sign);
     /* Convert formats whose channel mapping would alter the border colour
      * (address mode 4). Also preserve linear pitches the header cannot encode. */
-    const uint32_t addr = R(NV097_SET_TEXTURE_ADDRESS + b);
     uint32_t def = 0;
-    if (((addr & 0xF) == 4 || ((addr >> 8) & 0xF) == 4 || ((addr >> 16) & 0xF) == 4) &&
-        hle_tex_border_conv(code) && !sxor) {
+    if (border && hle_tex_border_conv(code) && !sxor) {
         def |= HLE_TEXDEF_BORDER;
     }
     if (*lin) {

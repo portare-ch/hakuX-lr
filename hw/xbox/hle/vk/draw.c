@@ -4365,8 +4365,15 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
             HleVkTex *tx = tex_find(c->tex[st]);
             HleVkSurf *sf = tx ? NULL : hle_surf_get(c->tex[st]);
             const uint32_t gx = tx ? tx->gfmt : sf ? sf->d.xfmt : 0;
-            const uint32_t want = tx || sf ? hle_fmt_sign_rgba(gx, sign) : 0;     /* rgba */
-            const uint32_t ob = tx ? tx->sgn : 0, raw = want & ~ob;
+            uint32_t want = tx || sf ? hle_fmt_sign_rgba(gx, sign) : 0;     /* rgba */
+            const uint32_t ob = tx ? tx->sgn : 0;
+            if (gx == HLE_XFMT_V16U16 || gx == HLE_XFMT_LIN_V16U16) {
+                /* an R16B16's halves are signed only as uploaded (16 bits,
+                 * offset binary): one converted to bytes (no 16-bit format
+                 * here), sampled with a border, or a surface stays unsigned */
+                want = ob;
+            }
+            const uint32_t raw = want & ~ob;
             k.pk.sgn_ob |= (uint16_t)(ob << (4 * st));
             k.pk.sgn_raw |= (uint16_t)(raw << (4 * st));
             static unsigned s_logged;
