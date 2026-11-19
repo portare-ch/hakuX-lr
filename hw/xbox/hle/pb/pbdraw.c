@@ -141,6 +141,8 @@ typedef struct PbObj {
     bool x_zero;                        /* X8R8G8B8's unused byte: 0 for Z8, 0xFF for O8. */
     uint64_t written;                   /* g_pd.wseq at its last draw, clear or copy */
     uint64_t wb_written;                /* last image update copied back to guest memory */
+    uint64_t up_written;                /* written as rt_upload left it: the image's last
+                                           change was its memory's rows, nothing drawn since */
     uint64_t wb_v;                      /* ... that copy's value (landed once completed) */
     uint64_t edge_hash[2];              /* its bytes on its first and last page (rt_cpu_sync) */
     bool cpu_used;                      /* the CPU wrote its memory (writeback) */
@@ -1095,6 +1097,7 @@ static void rt_upload(PbObj *o, uint32_t id, bool used)
     const int32_t pt[1][2] = { { 0, 0 } };
     hle_res_upload(id, o->d.pa, o->d.pitch, 1, &r, pt);
     o->written = ++g_pd.wseq;
+    o->up_written = o->written;
     o->cpu_used |= used;
     g_pd.rt_uploads++;
     if (rtlog_on()) {
@@ -2708,10 +2711,22 @@ bool hle_pbd_blit_images(uint32_t sbase, uint32_t sp, uint32_t dbase, uint32_t d
         hle_log("hakuX-lr-hle-pb", "blit %08x/%u -> %08x/%u bpp %u %ux%u from %u,%u to %u,%u objects %u -> %u",
                 sbase, sp, dbase, dp, bpp, w, h, ix, iy, ox, oy, src, dst);
     }
-    if (so && so->d.pitch && !dd && dp) {
+    /* No target at the destination, or one of another pitch: the copy goes
+     * into an image of its own layout. Into the other's image its rows were
+     * not that target's rows: the copy sat in its left part beside whatever
+     * it held (nxdk_pgraph_tests' FBToTexture after its Antialiasing tests
+     * left a 1280 x 480 target where the 640 x 480 copy goes), and the
+     * texture there sampled that image and showed the copy all the same, one
+     * wrong layout read back as it was written. The new image is the latest
+     * at the address: a texture there is it (tex_target). */
+    const bool other = dd && dd->d.pitch && dd->d.pitch != dp;
+    if (so && so->d.pitch && (!dd || other) && dp) {
         dst = object(dbase, so->d.xfmt, dp, MAX(dp / bpp, ox + w), oy + h);
         so = obj_of(src);                   /* (a slot may have gone to it) */
         dd = obj_of(dst);
+        if (dd && other) {
+            dd->bound = ++g_pd.binds;
+        }
     }
     if (!so || !so->d.pitch || !dd || !dd->d.pitch || dst == src) {
         rt_cpu_sync(src);
@@ -2751,6 +2766,16 @@ void hle_pbd_blit(uint32_t dbase, uint32_t dp, uint32_t ox, uint32_t oy, uint32_
     PbObj *dd = obj_of(dst);
     if (!dd || !dd->d.pitch) {
         return;                             /* a swizzled target: its memory is the newer */
+    }
+    if (dd->d.pitch != dp) {
+        /* a target of another pitch at the address: the copy's rows are not
+         * its rows, and its memory is the newer. Taken into its image as
+         * rows of its own, they were the copy in its left part and whatever
+         * it held beside (nxdk_pgraph_tests' FBToTexture after its
+         * Antialiasing tests left a 1280 x 480 target where the 640 x 480
+         * copy goes); the texture sampled that image and showed the copy
+         * all the same, one wrong layout read back as it was written. */
+        return;
     }
     uint32_t len;
     const bool kept = coh_managed(dd, &len);
@@ -3437,12 +3462,20 @@ static bool tex_other_layout(const PbObj *o, const HleFmtInfo *fi, uint32_t fmt,
         if (!o->d.pitch) {
             return oi->bpp == fi->bpp && o->swz_bound;
         }
-        /* A small linear target of another pitch, or smaller than the
-         * texture: its rows are not the texture's (a 256 x 256 texture, 1024
-         * bytes a row, over an old 32 x 64 target of 128). Small: one written
-         * back at its unbind, whose memory holds its pixels; a larger one is
-         * the coherence's to judge (tex_target). */
-        return oi->bpp == fi->bpp && pitch && (uint64_t)o->d.pitch * o->d.h <= WRITEBACK_MAX &&
+        /* A linear target of another pitch, or smaller than the texture:
+         * its rows are not the texture's (a 256 x 256 texture, 1024 bytes a
+         * row, over an old 32 x 64 target of 128). Whatever its size: a
+         * large one's image is no more the texture's rows than a small
+         * one's, also while it holds what the memory does. That was left to
+         * the coherence (tex_target: the image unless the memory is newer),
+         * which is a matter of when the title's bytes arrive.
+         * nxdk_pgraph_tests' CPUWriteIgnoresSurfaceConfig binds a 512 x 256
+         * target over texture memory, draws nothing into it and writes a
+         * 256 x 256 texture there: written before the decoder reached the
+         * draw, the bytes went into the target's image with its first
+         * upload, the memory was not the newer, and the texture was read
+         * from the image, two rows to one. */
+        return oi->bpp == fi->bpp && pitch &&
                (o->d.pitch != pitch || o->d.w < (rect >> 16) || o->d.h < (rect & 0xFFFF));
     }
     /* A swizzled 2D texture of another size than the target at its address
@@ -3499,6 +3532,21 @@ static void tex_land(void)
                 coh_adopt();
             }
             lv = o->wb_v ? o->wb_v : 1;
+        } else if ((o->synced && o->written <= o->synced) || o->written == o->up_written) {
+            /* its memory holds its image (uploaded from it, or landed, and
+             * not drawn into since): nothing to write back, and writing it
+             * back would put the image over what the title writes there
+             * meanwhile. A copy queued into the memory lands before the
+             * texture is read from it. */
+            coh_pend_wait(o->d.pa, o->d.pitch * o->d.h);
+            lv = 1;
+        } else if ((uint64_t)o->d.pitch * o->d.h > WRITEBACK_MAX &&
+                   (coh_pend_wait(o->d.pa, o->d.pitch * o->d.h), obj_superseded(o) || obj_written(o))) {
+            /* a large one whose memory was written since it was drawn (a
+             * copy into it, the title's bytes): the memory is the newer,
+             * and its old image must not go over it. A small one's memory
+             * has had its pixels at its unbind. */
+            lv = 1;
         } else {
             rt_cpu_sync(o->id);
             if (!o->fb_wb_v || o->fb_wb_w != o->written) {
