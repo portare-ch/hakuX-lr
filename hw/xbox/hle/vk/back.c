@@ -2091,7 +2091,8 @@ static bool readback_packed(const HleCmdReadback *c, VkBuffer buf, VkDeviceSize 
     VkImage img = o->img;
     VkImageLayout il = o->general ? VK_IMAGE_LAYOUT_GENERAL : o->layout;
     if (o->scale > 1) {                         /* the guest gets guest-size texels */
-        img = hle_surf_down(cb, o, il, level, layer, c->w, c->h, false);
+        /* each texel's own sample, as the linear readback's (below) */
+        img = hle_surf_down(cb, o, il, level, layer, c->w, c->h, true);
         if (!img) {
             return false;
         }

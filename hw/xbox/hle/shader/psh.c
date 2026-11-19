@@ -638,9 +638,13 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "  if (spt) {\n"
             "    float sc = float(pc.flags >> 24), rs = float(max((pc.flags >> 16) & 255u, 1u));\n"
             "    vec2 fj = mod(floor(gl_FragCoord.xy), rs);\n"
-            "    vec2 uv0 = uv - dFdx(uv) * fj.x - dFdy(uv) * fj.y;\n"
+            /* (the lookup's gradients are the coordinates' own: the texel's
+             * coordinates step from block to block) */
+            "    vec2 gx = dFdx(uv), gy = dFdy(uv);\n"
+            "    vec2 uv0 = uv - gx * fj.x - gy * fj.y;\n"
             "    vec2 q = floor(uv0 * sz / sc + 0.000244140625);\n"
             "    uv = (q * sc + 0.5) / sz + (uv - uv0);\n"
+            "    return textureGrad(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), %s, gx, gy);\n"
             "  } else if ((pc.flags & (256u << s)) != 0u) {\n"
             "    uv -= (0.5 * float(pc.flags >> 24) - 0.5) / sz;\n"
             "  }\n"
@@ -717,6 +721,7 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "    if (r != 0u && s == ((r >> 28 & 1u) | (r >> 30 & 2u)))\n"
             "      uv = nvrect(uv, (pc.flags & (256u << s)) != 0u ? 0.5 / float(pc.flags >> 24) : 0.5); }\n"
             : "",
+        gl ? "glc2(s, uv)" : "uv",
         bsnap,
         gl ? "GLT2(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), s, uv)"
            : "texture(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), uv)",
