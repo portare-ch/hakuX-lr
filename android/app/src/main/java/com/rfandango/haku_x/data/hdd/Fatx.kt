@@ -6,13 +6,13 @@ import java.util.Calendar
 import java.util.TimeZone
 
 /**
- * FATX, the Xbox hard disk's file system: a 4 KiB superblock ("FATX",
- * volume id, sectors per cluster, root cluster), the FAT (16-bit entries
- * below 65 520 clusters, else 32-bit; entry 0 the media byte), then the
- * clusters (numbered from 1). A directory is clusters of 64-byte entries:
- * name length (0x00 / 0xFF ends the list, 0xE5 a deleted entry), attributes,
- * the name (42 bytes), first cluster, size, then write, creation and access
- * times (FAT time and date words, years from 2000).
+ * FATX starts with a 4 KiB superblock containing the FATX magic, volume ID, sectors per
+ * cluster and root cluster. The FAT uses 16-bit entries below 65,520 clusters and 32-bit
+ * entries otherwise. Entry zero holds the media byte. Data clusters start at 1.
+ *
+ * Each directory entry is 64 bytes. It holds the name length, attributes, 42 name bytes,
+ * first cluster, size and FAT timestamps with a 2000 epoch. A length of 0x00 or 0xFF marks
+ * the end and 0xE5 marks a deleted entry.
  */
 object Fatx {
   const val SUPERBLOCK = 0x1000L
@@ -134,11 +134,10 @@ object Fatx {
   }
 
   /**
-   * A FATX volume laid out from a tree of files (Writer.Node): every file
-   * and directory gets its clusters in order (a directory's own first), so
-   * the image is produced as a function of offset (readAt) without holding
-   * it: the superblock, the FAT as it follows from the allocation, the
-   * directory clusters and the files' bytes (their source), zeros elsewhere.
+   * Lay out the Writer.Node tree as a virtual FATX image. Allocate files and directories in
+   * order, with a directory's own clusters before its children. readAt generates the
+   * requested superblock, FAT, directory or file bytes on demand and returns zeros for unused
+   * space.
    */
   class Writer(val layout: Layout, private val volumeId: Int, root: Node) {
     /** A file (data from source, `size` bytes) or a directory (children). */

@@ -164,11 +164,9 @@ class NativeCoreActivity : SDLActivity(), InputManager.InputDeviceListener {
   }
 
   /**
-   * Another console on the network has this one's identity (the app's hard
-   * disk copied from one device to the other: the same serial number and MAC
-   * address), and neither sees the other's system link games. Said once a
-   * run, with the way out: a new identity for this console (its HD key kept,
-   * so its saves stay valid), from the game's start, at once.
+   * If two consoles share a copied disk's serial number and MAC address, system link cannot
+   * distinguish them. Warn once per run and offer to create a new identity and restart the
+   * game. Keep the HDD key so existing saves still work.
    */
   private var twinShown = false
 
@@ -1002,13 +1000,8 @@ class NativeCoreActivity : SDLActivity(), InputManager.InputDeviceListener {
   override fun onBackPressed() = onBack()
 
   /*
-   * The system's back (the navigation button, the back swipe, a keyboard's
-   * key, a handheld's Back key: the RP5's is its built-in controller's) arrives
-   * as KEYCODE_BACK before any callback: SDL took it, and its native side's
-   * manualBackButton called Activity.onBackPressed past ours, closing the game.
-   * It opens the menu here first. A controller's back key its mapping binds
-   * stays the game's (the Xbox Back button of a controller whose select sends
-   * it: Controllers.defaults).
+   * Handle KEYCODE_BACK before SDL can close the activity. Open the game menu for system
+   * navigation and Back keys. A controller key mapped to Xbox Back goes to the game instead.
    */
   override fun dispatchKeyEvent(event: KeyEvent): Boolean {
     if (event.keyCode == KeyEvent.KEYCODE_BACK && router?.bindsKey(event) != true) {

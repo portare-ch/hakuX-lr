@@ -6,13 +6,12 @@ import android.provider.OpenableColumns
 import java.io.File
 
 /**
- * What the previous release (0.3.x, on xemu's core) left in the app's storage, for the first start after
- * the update (the migration screen). Its games folder (gamesFolderUri) and its GPU driver (files/gpu_driver)
- * are this version's too. Its Xbox hard disk image comes into the native core's disk, the saves re-signed
- * with the keys of the BIOS and EEPROM it ran, which stay as the console files.
+ * Migrate files from hakuX 0.3.x, which used xemu. Reuse the games folder and GPU driver.
+ * Import the Xbox disk into the native core and re-sign its saves using source keys from the
+ * old setup. Keep its BIOS and EEPROM as console files.
  *
- * Its files are where its xemu.toml says ([sys.files]), else where its setup copied them (x1box/: the
- * paths in mcpxPath, flashPath, hddPath), else the hard disk the setup was given as a document (hddUri).
+ * Look for paths in xemu.toml's [sys.files], then the old x1box/ setup paths (mcpxPath,
+ * flashPath, hddPath). The disk can also come from the saved hddUri document.
  */
 class PreviousVersion(private val context: Context) {
   /** A disk image: one of the app's files, or a document. */

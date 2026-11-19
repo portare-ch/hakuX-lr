@@ -543,7 +543,7 @@ static void monitor_init(MCPXAPUState *d)
 
 void mcpx_apu_reset(MCPXAPUState *d)
 {
-    pthread_mutex_lock(&d->lock); // FIXME: Can fail if thread is pegged, add flag
+    pthread_mutex_lock(&d->lock); // FIXME: Avoid an unbounded wait if the APU thread is stuck.
     memset(d->regs, 0, sizeof(d->regs));
 
     mcpx_apu_vp_reset(d);
@@ -568,21 +568,13 @@ void mcpx_apu_post_load(MCPXAPUState *d)
     mcpx_apu_vp_refresh_ssl_cache(d, d->regs[NV_PAPU_VPSSLADDR]);
     mcpx_apu_vp_restore_hrtf(d);
 
-    /* Snapshot restore re-notify guard.
+    /* Suppress the first APU interrupt after loading a save state. A voice saved at
+     * completion can report the same end or loop event again before the guest has
+     * re-registered its callback. Dispatching that event through a freed callback can cause
+     * BugCheck 0xA.
      *
-     * If the save was taken with a voice AT completion (CBO>=EBO / SSL end /
-     * voice-off), the frame thread re-detects that completion on its very
-     * first se_frame and re-emits the voice's end/loop notification + FE
-     * interrupt within microseconds of the resume — before the guest has
-     * resumed far enough to free + re-register that voice's callback. The
-     * guest then dispatches the already-serviced-and-freed callback object
-     * -> wild indirect CALL -> Xbox BugCheck 0xA.
-     *
-     * Clear the stale notify-interrupt bits, deassert the line, and arm a
-     * one-shot guard so the frame thread drops exactly the FIRST post-restore
-     * IRQ assert. This only DELAYS the notification by one frame: the next
-     * se_frame re-detects the still-completed voice and delivers it after the
-     * guest has settled. */
+     * Clear pending notify bits and deassert the interrupt line. The next se_frame can report
+     * the completed voice again, one frame later. */
     apu_and(&d->regs[NV_PAPU_ISTS],
             ~(NV_PAPU_ISTS_FEVINTSTS | NV_PAPU_ISTS_FENINTSTS));
     apu_st(&d->set_irq, false);

@@ -10,11 +10,11 @@
 
 #include <stdint.h>
 
-/* The #BP handler, linked at 0x7000 (ring 0, an interrupt gate: IF clear).
- * The site table at 0xC000 holds a count, then {eip, u16 routine, u16
- * length} per armed register-form site, ascending; any other INT3 or INT 3
- * goes to vector 3's exit stub at 0x4030 with the stack as on entry. The
- * corrections are counted in the 64 bits at 0xFFF8, the table's page's end.
+/* Ring-0 #BP handler at 0x7000 with IF clear. The site table at 0xC000
+ * starts with a count, followed by sorted {eip, u16 routine, u16 length}
+ * entries for armed register forms. Forward other INT3 and INT 3 traps to
+ * the vector 3 stub at 0x4030 with the original stack. Count corrections
+ * in the 64-bit word at 0xFFF8.
  *
  *  push eax
  *  push ecx

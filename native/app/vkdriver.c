@@ -45,18 +45,11 @@ static bool driver_is_mesa(const char *dir)
     return v && !strncasecmp(v + 1, "mesa\"", 5);
 }
 
-/* Turnip leaves its kgsl draw contexts at the kernel's default priority (8:
- * the third of four ringbuffers, priority / 4), below SurfaceFlinger's
- * GPU composition (the second on the RP5): while the screen is composited
- * on the GPU (Developer options' "Disable HW overlays", or a layer the
- * display hardware can't take), its work preempts ours some 100 times a
- * second, and a Turnip sysmem pass on Adreno 6xx preempted with its draws
- * in flight hangs the GPU (PGR2's race: 4-9 hangs in 6 minutes,
- * VK_ERROR_DEVICE_LOST). On the compositor's ringbuffer nothing of it
- * preempts them (0 in 12 minutes); at its lowest priority there, 7, the
- * dispatcher still runs the compositor's work first (2 late frames in 6
- * minutes; priority 1, the first ringbuffer, preempts the compositor: 433).
- * debug.hakux.kgslprio: another priority (1..15), 0 for the driver's own. */
+/* On the RP5, Turnip's default KGSL priority 8 puts it in a lower ring than SurfaceFlinger.
+ * Android can preempt it during GPU composition, and preempting a sysmem pass on Adreno 6xx
+ * can cause VK_ERROR_DEVICE_LOST. Moving to priority 7 avoided the observed PGR2 hangs and
+ * still let the compositor run first. Priority 1 preempted the compositor and caused many
+ * late frames. debug.hakux.kgslprio accepts 1–15, or 0 for the driver's default. */
 static int kgsl_priority(const char *dir)
 {
     /* KGSL only: the pack's vendor says "Mesa" for Turnip and for Mesa's

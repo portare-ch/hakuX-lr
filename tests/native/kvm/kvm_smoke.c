@@ -1,20 +1,18 @@
 /* Copyright (C) 2026-present PortareOS */
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * The KVM backend's first milestone (#56): each thing the backend does,
- * with guest code written for it and a system-op callback that records
- * what came out. Needs /dev/kvm (an x86-64 Linux host; CI's runner).
+ * Exercise the KVM backend with small guest programs and a system-operation recorder.
+ * Requires an x86-64 Linux host with /dev/kvm.
  *
- * - privilege: CPL 3, IOPL 3, IF; SIDT, SGDT and SMSW answered as FEX does;
- * - every exit a title makes, trapped and resumed (INT, INT3, UD2, WBINVD,
- *   RDMSR, MOV from CR0, IN, OUT, MMIO, a page fault, HLT);
- * - a thread switch inside a trapped kernel call, registers and SSE state
- *   each thread's own;
- * - an interrupt delivered at IF=1, and held through CLI until STI;
- * - RDTSC at 733 MHz, and continuous across a pause the guest leaves out;
- * - a hooked address, its system op and the title's instruction after it;
- * - a 16-byte MMIO store, which KVM splits; x87 state through a savestate's
- *   export and import mid-calculation; the kick signal's handler given back.
+ * - Check CPL 3, IOPL 3 and IF, and compare SIDT, SGDT and SMSW handling with FEX.
+ * - Resume from INT, INT3, UD2, WBINVD, RDMSR, CR0 reads, port I/O, MMIO, page faults and
+ * HLT.
+ * - Switch threads inside a trapped kernel call and check per-thread registers and SSE state.
+ * - Deliver an interrupt with IF set, or defer it from CLI until STI.
+ * - Check the 733 MHz RDTSC and continuity across a guest-clock pause.
+ * - Check hook dispatch and execution of the following guest instruction.
+ * - Verify split 16-byte MMIO stores, x87 state round trips and restoration of the kick
+ * signal handler.
  */
 #include "native/core/core.h"
 #include "native/core/mmio.h"
@@ -299,11 +297,9 @@ int main(void)
     check(reports[8] == 0xDEADBEEFu && mmio_reg == 0xDEADBEEFu, "MMIO: a write, then a read of it");
     check(reports[9] == 0 && late_faults == 1, "a page fault: mapped by the fault path, the access run again");
 
-    /* MMX and SSE registers loaded while the vCPU's saved FPU state is in
-     * its initial configuration (no guest code above used them): through
-     * KVM_SET_FPU they were dropped at the next entry, the XSAVE header
-     * saying x87 and SSE were initial, and the guest read zeros (Burnout 3's
-     * XMV decoder lost its alpha mask so after a thread switch). */
+    /* Load MMX and SSE registers into a vCPU whose saved FPU state is still initial.
+     * KVM_SET_FPU alone used to leave the XSAVE header unchanged, so the next entry read
+     * zeros. Burnout 3 lost its XMV alpha mask this way after a thread switch. */
     const uint8_t fpregs[] = {
         0x0F, 0x7E, 0xF8, 0xCD, 0x42,       /* movd eax, mm7; int 42h */
         0x66, 0x0F, 0x7E, 0xC8, 0xCD, 0x42, /* movd eax, xmm1; int 42h */

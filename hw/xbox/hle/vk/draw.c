@@ -1570,15 +1570,14 @@ void hle_draw_rs_brief(uint32_t out[9])
 }
 
 /*
- * EQUAL passes that do not write (eq_tol in hle_draw_cmd_draw) test
- * LESSEQUAL a step toward the eye, which also passes every fragment in front
- * of the stored depth. Chaos Theory draws its foliage's depth alpha-tested,
- * then its colour over it EQUAL with the alpha test off: the whole cards
- * passed over the sky and terrain behind the leaves, grey quads. Their
- * shaders read the stored depth (an input attachment) and discard what is
- * more than a few steps in front of it. Programs and FF draws on D24 / D16
- * buffers without W-buffering or a polygon offset (gl_FragCoord.z is the
- * depth without them); debug.hakux.eqtol=1 leaves the one-sided test.
+ * EQUAL passes with depth writes off can use a one-step LESSEQUAL tolerance (eq_tol in
+ * hle_draw_cmd_draw). Reject fragments several steps in front of the stored depth with an
+ * input attachment. Otherwise Chaos Theory's colour pass draws entire foliage quads over the
+ * alpha-tested depth pass.
+ *
+ * Use this for program and fixed-function draws on D24/D16 without W-buffering or polygon
+ * offset. gl_FragCoord.z does not include those adjustments. debug.hakux.eqtol=1 leaves the
+ * one-sided test.
  */
 /* debug.hakux.eqtol=0: EQUAL depth tests exact; 1: one-sided (LESSEQUAL a step
  * toward the eye, no shader test) */
@@ -2041,18 +2040,14 @@ static uint32_t sampler_index(const uint32_t *tss, uint32_t lod_down, uint16_t s
                  f[0] + f[1] + f[2] < 1.5f ? VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK :
                                              VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
     }
-    /* A view whose component mapping isn't the identity (L8's (l, l, l, 1),
-     * L16's (1, h, l, 1), X8R8G8B8's alpha 1, the two-channel formats'
-     * repeats): an opaque black or custom border is replaced before the
-     * mapping, as a texel is (Vulkan's order, and xemu's; the NV2A's is
-     * unconfirmed), and Vulkan defines that only with border colour swizzle:
-     * the mapping taken from the view (bcs_image: sw is 0 here), else a
-     * sampler told it, for views of that mapping alone (the key's sw).
-     * Without it, not an undefined texel: whichever of transparent black and
-     * opaque white is nearest through the mapping, exact for the usual
-     * colours (opaque black through an alpha-1 mapping is transparent
-     * black's texel). Sampling the mapping in the shader, or converting
-     * those formats at upload, would cost every draw or texture of them. */
+    /* Apply the image-view component mapping to opaque black and custom border colours. With
+     * border colour swizzle, read the mapping from the view when bcs_image is available, or
+     * include it in the sampler key for matching views. Vulkan and xemu apply mapping in this
+     * order. The NV2A order is unconfirmed.
+     *
+     * Without the extension, choose whichever of transparent black and opaque white produces
+     * the closest mapped colour. For an alpha-one mapping, transparent black gives the exact
+     * opaque black result. */
     const void *next = border == VK_BORDER_COLOR_FLOAT_CUSTOM_EXT ? &cbc : NULL;
     VkSamplerBorderColorComponentMappingCreateInfoEXT bcm = {
         .sType = VK_STRUCTURE_TYPE_SAMPLER_BORDER_COLOR_COMPONENT_MAPPING_CREATE_INFO_EXT,
@@ -2319,16 +2314,13 @@ static void pipe_add(uint64_t h, VkPipeline p, uint8_t state)
 static HlePbResult pipeline_build(const void *key, const uint32_t *tok, uint32_t nslots,
                                   bool cache_only, VkPipeline *out);
 
-/* The table full: every pipeline retired (destroyed once the submissions
- * that may use them completed: those of the open recording, parked, get its
- * submission's value at submit, hle_draw_tex_stamp; hle_draw_tex_reap), the
- * table started again, keys built again as draws use them. Full, a new key's
- * draws were dropped for the rest of the session: nxdk_pgraph_tests' full
- * run makes over 8192 pipelines and lost the draws of its last suites
- * (ZMinMaxControl on). The keys that were made are kept (pipe_gone): built
- * in place when used again, not by the workers with their draws skipped, as
- * they drew before. A worker's build for a key dropped here is destroyed
- * when taken (pipe_collect). */
+/* When the pipeline table fills, retire its entries and rebuild on demand. Destroy each
+ * pipeline after its last GPU use. Entries used by the open recording receive its value at
+ * submit (hle_draw_tex_stamp and hle_draw_tex_reap). This keeps draws working after the
+ * 8192-entry limit in the full nxdk_pgraph_tests suite.
+ *
+ * Remember retired keys in pipe_gone and rebuild them synchronously on reuse. Discard late
+ * worker results for keys that were removed (pipe_collect). */
 #define PIPE_GONE 32768                 /* 4 x HLE_MAX_PIPES, a power of two */
 static uint64_t g_pipe_gone[PIPE_GONE]; /* hashes (| 1: never 0), across trims */
 static unsigned g_ngone;
@@ -2968,13 +2960,9 @@ static uint32_t fvf_attrs(uint32_t fvf, VkVertexInputAttributeDescription2EXT *a
     return n;
 }
 
-/* A render-target surface sampled into a target of a lower resolution scale:
- * its texels are denser than the guest's by the ratio, so the GPU would pick
- * a level that much coarser than the NV2A does. The sampler takes it back
- * (log2 of the ratio, in 1/16ths; 0 otherwise). Fable's lock-on halo blurs a
- * silhouette from a 128 x 128 mipmapped target (scaled, its levels made from
- * an earlier pass) into a single-level 128 x 128 one (guest resolution): the
- * blur read level 1, still the earlier pass's noise, and the halo showed it. */
+/* When a render target is sampled at a lower render scale, bias the sampler toward finer mip
+ * levels by log2 of the scale ratio, in sixteenths. Otherwise Fable's lock-on blur samples a
+ * stale mip instead of the current silhouette. */
 static uint32_t stage_lod_down(const HleCmdDraw *c, unsigned st, uint32_t rt_id)
 {
     HleVkSurf *ts = tex_surface(c->tex[st], rt_id);
@@ -3007,22 +2995,13 @@ static const uint32_t *stage_tss(const HleCmdState *s, const HleCmdDraw *c, unsi
 static uint8_t g_rt_seen[8192 / 8];
 static unsigned g_rt_told;
 
-/* Image slot of the texture bound to stage st (0 = the white texture);
- * *flags gets the stage's linear (texel coordinate) bit. A target's image
- * is addressed as the stage's format says, as the NV2A does, not as the
- * target is laid out: a linear and a swizzled target over the same memory
- * share one object (object_view). Fable draws a lock-on's silhouette into
- * a swizzled 256 x 256 target through its linear view and blurs it from
- * there with a linear texture, by texel; addressed normalized, as the
- * swizzled object, every tap clamped to the corner and the halo was gone.
- * A linear surface's texel coordinates are divided by the surface's own
- * scale, so the bit that has the shaders divide (8 + st) is set for a
- * surface at the resolution scale only: a small target renders at 1x
- * (surf_scale), and divided by the device's scale its texel coordinates
- * were multiplied by it: at 2x the whole target came in a quarter of the
- * area it was drawn over, the rest read past its edges as the stage
- * addresses them (reported for Sega GT 2002's car skins, twelve 64 x 64
- * targets a frame, read by texel). */
+/* Return the image slot for texture stage st, with slot zero reserved for white. Set the
+ * linear-coordinate flag from the stage's declared format. Linear and swizzled targets can
+ * share a slot, but Fable's lock-on blur still needs texel coordinates for a linear view.
+ *
+ * Set bit 8 + st only for a surface at the global render scale so the shader adjusts
+ * coordinates for that scale. Small targets at 1x, such as Sega GT 2002's 64 x 64 car skins,
+ * already use guest texel coordinates. */
 static uint32_t stage_slot(const HleCmdDraw *c, unsigned st, uint32_t rt_id, uint32_t *flags)
 {
     HleVkTex *tx = tex_find(c->tex[st]);
@@ -4622,16 +4601,11 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         k.dst = k.dst == 0x304 ? 1 : k.dst == 0x305 || k.dst == 0x308 ? 0 : k.dst;
     }
     k.op = s->rs[RS_BLENDOP];
-    /* The NV2A's signed equations, ADDSIGNED (0xF006) and REVSUBTRACTSIGNED
-     * (0xF005), add the source to the target's byte, or subtract it, as a
-     * two's-complement byte, and keep the result in 0 .. 255; the blend
-     * factors play no part (nxdk_pgraph_tests' Blend tests, every source
-     * and destination factor: 0x33 + 0xDD is 0x10, 0 + 0xDD is 0, 0xFF +
-     * 0x7F is 0xFF). Midnight Club 3 counts its headlight volumes' front
-     * and back faces into the alpha of a cleared light mask, 0xFF for -1
-     * (an unsigned add of it lights everything in front of the volume).
-     * The shader does the equation on the target's pixel (fbfetch), the
-     * blend is off. */
+    /* ADDSIGNED and REVSUBTRACTSIGNED treat the source channel as a signed byte, combine it
+     * with the destination and clamp to [0, 255]. Blend factors have no effect. For example,
+     * 0x33 + 0xDD gives 0x10. Midnight Club 3 adds -1 as 0xFF when counting headlight volume
+     * faces into alpha. Compute the result in the shader using framebuffer fetch with
+     * hardware blending disabled. */
     /* On 16-bit targets, shader blending normally precedes dithering.
      * Smooth-line coverage is applied after the shader, so those draws
      * dither first and use fixed-function blending instead.
@@ -4801,15 +4775,11 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         zofs = (bias ? zofs : 0.0f) + (s->rs[RS_ZFUNC] == 0x203 ? -1.0f : 1.0f);
         bias = true;
     }
-    /* EQUAL passes that do not write need that depth bit for bit (Halo's
-     * lighting passes over its base pass). Turnip gives two programs with
-     * the same invariant position math a step apart when they run in
-     * different command buffers (a mid-frame kick between them; the stock
-     * Adreno driver does not), and the pass then misses whole triangles,
-     * which flash unlit. LESSEQUAL one step toward the eye passes a step
-     * either way and still fails hidden surfaces; the shader discards what
-     * is further in front (hle_draw_zeq, bound by back.c). Only on the drivers
-     * with HLE_QUIRK_EQ_DEPTH_STEP; debug.hakux.eqtol=0 turns it off (live). */
+    /* Turnip can produce a one-step depth difference across command buffers even with
+     * invariant position math. This makes Halo's EQUAL lighting pass miss triangles. For
+     * drivers with HLE_QUIRK_EQ_DEPTH_STEP, use LESSEQUAL biased one step toward the eye and
+     * let the shader reject fragments too far in front (hle_draw_zeq). debug.hakux.eqtol=0
+     * disables the workaround live. */
     bool eq_tol = zt && tris && !(dbgf & 4) && !s->rs[RS_ZWRITEENABLE] &&
                   s->rs[RS_ZFUNC] == 0x202 && hle_quirk(HLE_QUIRK_EQ_DEPTH_STEP) && !g_eqtol_off;
     if (eq_tol) {

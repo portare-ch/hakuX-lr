@@ -1,17 +1,9 @@
 /* Copyright (C) 2026-present PortareOS */
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/* The VP's own mix (MON_VP, the default without the DSP) through the real
- * voice processing: voices set up and started by the PIO methods
- * DirectSound sends (mcpx_apu_vp_write), their PCM read from guest RAM
- * through the scatter-gather table, a frame mixed by mcpx_apu_vp_frame and
- * read from the monitor's output. 2D and 3D voices are mixed by the
- * stereo downmix of their speaker and 3D sends (vp/stereo_route.h), their
- * LFE and effect sends left out; multipass groups and voices sending only to
- * the LFE or effect bins keep the monitor's mix; the full-DSP monitor leaves the
- * monitor's output alone and fills the mix bins. A voice reused for a new
- * sound starts its HRTF filter from silence. One worker and several give
- * the same output. No guest executable or sound device: the frame thread
- * stays parked (SECTL off) and this test runs the frames. */
+/* Test the voice processor's stereo output with real PIO setup and PCM from guest RAM. Keep
+ * the APU thread parked and step frames directly. Check 2D and 3D speaker routing, monitor
+ * fallback for effect-only and multipass voices, and full-DSP output to the mix bins. Check
+ * that voice reuse resets HRTF history and that one worker matches multiple workers. */
 #include "apu_fixture.h"
 #include "native/dev/apu/vp/stereo_route.h"
 #include "native/state/lock.h"
@@ -180,11 +172,9 @@ static void test_2d_downmix(void)
     apu_down();
 }
 
-/* A 2D voice keeps its sound's route as its volumes change: a dry send
- * fading to mute beside a reverb send fades the voice out (not to the
- * reverb send's level, centred), a dry send fading in beside one stays in
- * the monitor's mix (no step), a sound starting muted takes its route at
- * its first audible frame, and a new sound (VOICE_ON) chooses again */
+/* Check that an audible voice keeps its route through changes in send gain. A dry send fades
+ * out beside reverb and fades in without moving a voice already in monitor mix. A muted voice
+ * chooses its route on its first audible frame. VOICE_ON starts a new choice. */
 static void test_2d_route_kept(void)
 {
     apu_up(false, true, 1);
@@ -328,14 +318,10 @@ static void test_lfo_saved(void)
  * and back right (bins 6, 8, 7, 9) */
 #define DS_HRTF_SUBMIXES (6 | 8 << 8 | 7 << 16 | 9 << 24)
 
-/* A 3D voice through DirectSound's 3D bins (its HRTF submixes, crosstalk
- * front left, back left, front right, back right): its ears by its sends,
- * the left ear the first two and the right ear the last two, the front
- * pair at 0 dB, the back pair at -3 dB, as the guest DSP image puts them on
- * a stereo console; the HRTF filter off, or on with an entry that passes
- * its input (tap 0 both ears, 7Fh: 31/32); without an entry its HRTF
- * sends silent, and at their bins' headroom, not the HRTF headroom
- * (measured on hardware: xemu #3105) */
+/* Check HRTF routing through DirectSound's front-left, back-left, front-right and back-right
+ * bins. The first two sends carry the left ear and the last two carry the right. Front gains
+ * are 0 dB and back gains -3 dB. Test with HRTF disabled, with a pass-through tap of 0x7F
+ * (31/32), and without an entry. Hardware uses the destination bins' headroom (xemu #3105). */
 static void test_3d(void)
 {
     const float k = 0.70710678f;

@@ -1,14 +1,9 @@
 /*
- * Host test of the native USB stack (native/dev/ohci.c, usb.c, usb_hub.c,
- * xid.c): a small host driver enumerates the front panel hub, a controller's
- * hub and its gamepad through OHCI EDs and TDs in fake guest RAM, then reads
- * a report and sends rumble. Then the controllers on the root ports, as
- * nc_dev_ohci_init makes them: plugged in before the boot and while the
- * console runs (nc_pad_plug), pulled out, and enumerated again. Then an Xbox
- * Live Communicator in player 1's controller (xblc.c): its isochronous
- * endpoints through chained isochronous TDs, a TD whose frames went by, one
- * for a later frame, isochronous processing switched off (HcControl.IE),
- * and the microphone's noise gate.
+ * Exercise the native USB stack with OHCI descriptors in fake guest RAM.
+ * Enumerate the front-panel hub, controller hub and gamepad, then read
+ * input and send rumble. Check root-port hotplug and re-enumeration.
+ * Test the Communicator's chained isochronous transfers, overdue and
+ * future frames, disabled isochronous processing and microphone gate.
  *
  *   cc -O1 -I. tests/native/usb/usb_test.c native/dev/usb.c native/dev/usb_hub.c native/dev/xid.c \
  *      native/dev/xblc.c -lpthread -lm

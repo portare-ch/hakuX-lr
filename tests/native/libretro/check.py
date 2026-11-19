@@ -121,13 +121,10 @@ def cycles(command, env, n, expect=None):
     if left or len(caught) != n:
         raise SystemExit(f'FAIL: {n} cycles of {command[2]} left signal handlers behind: SigCgt '
                          f'{before[0] if before else "?"} before the core, {left} after a cycle')
-    # Mappings as VmSize without the heap, whose size is its high-water mark
-    # (glibc trims only its top): on RADV it grew ~5.8 MiB once, at the
-    # first, second or third cycle as the driver's threads and glslang's
-    # symbol tables happened to interleave, then stayed. What malloc holds
-    # (mallinfo2, -1 without it) stands for the heap.
-    # lavapipe retains a 10 MiB executable pool after each driver unload.
-    # Exclude matching pool growth from this leak check.
+    # Measure mappings as VmSize minus the heap's high-water mark. Use mallinfo2 for live
+    # allocations, or -1 if unavailable. RADV can add a one-time mapping of about 5.8 MiB
+    # during early cycles. Exclude lavapipe's matching 10 MiB executable pool retention after
+    # unload from the leak check.
     first, last = rows[1], rows[-1]
     mapped = last[2] - last[4] - (first[2] - first[4])
     pools = last[6] - first[6]
@@ -514,14 +511,11 @@ def main():
         cycles([args.harness, args.core, root / 'halt.iso', 60, root / 'saves'],
                dict(os.environ, NC_NET='net=lan lanport=43075 lanbcast=127.0.0.1', NC_BOOT_FAIL_AT='disc'),
                5, 'boot: failing after disc')
-        # The Network option, the console's cable: on by default. On, the
-        # NAT and the LAN behind one switch (native/net/all.c): Insignia's
-        # DNS server, or the first address insignia-dns.txt in the save
-        # directory names (an insigniaDNS server; NAT gives the console
-        # one), never a word that isn't one; the LAN on the local network's
-        # broadcast, with the consoles lan-peers.txt names (comments, commas,
-        # spaces and lines). The NAT's stack and port forward start with the
-        # console's first frame, which spin.iso never sends (nat-smoke does).
+        # Check that Network defaults to the combined NAT and LAN backend. NAT uses Insignia
+        # DNS or the first valid address in insignia-dns.txt. LAN uses local broadcast and
+        # parses peers separated by commas, spaces or newlines, ignoring comments. spin.iso
+        # sends no Ethernet frames. nat-smoke covers startup of the NAT stack and port
+        # forward.
         run([args.harness, args.core, root / 'spin.iso', 30, root / 'saves'], 0,
             ('network on', 'network: on (Xbox Live through Insignia and system link)', 'ran 30 frames'),
             dict(os.environ, HARNESS_OPTIONS='', NC_NET=NAT_TEST))

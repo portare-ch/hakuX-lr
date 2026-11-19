@@ -92,12 +92,10 @@ static bool prot_mirrored(const NcVm *vm)
     return seen == (1u << 20) && !bad;
 }
 
-/* Another thread protecting a page the guest keeps storing to: once
- * hle_host_mem_test_and_clear() returns, the guest's next store must fault
- * and be seen (dirty), as mprotect guarantees under FEX; a backend with its
- * own page tables (KVM) must take the old entry from the guest's TLB first.
- * A store seen as a changed counter on a page still clean went through a
- * stale entry. */
+/* Protect a page while the guest repeatedly stores to it. After hle_host_mem_test_and_clear
+ * returns, the next guest write must fault and mark the page dirty. KVM must invalidate any
+ * cached writable mapping, as mprotect does for FEX. A changed counter on a clean page
+ * exposes a stale TLB entry. */
 #define RACE_ROUNDS 1000
 static uint32_t race_pa, race_stop_pa;
 static unsigned race_unseen, race_rounds;

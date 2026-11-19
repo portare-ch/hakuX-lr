@@ -1,15 +1,11 @@
 /* Copyright (C) 2026-present PortareOS */
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/* The voices' resamplers (vp/resample.h) through the real voice processing,
- * linear and sinc (the hakux_audio_resampler option, NC_APU_RESAMPLER):
- * a looping 22.05 kHz voice's levels and its seamless loop, the pitch
- * changing every frame, a voice's end (all of it heard before the voice
- * goes off; how far its guest-visible position runs ahead of what is
- * heard), short one-shot sounds heard whole, a reused voice, a persistent
- * stream starved and fed again, and an ADPCM voice's loop. `apu-resample-smoke bench`: throughput, the worst frame and
- * allocations at 32 to 256 voices (not a test; a host figure, not the
- * Nova's). Allocations are counted by wrapping malloc, calloc and realloc
- * (linked with --wrap). */
+/* Exercise linear and sinc resampling through real voice processing. Check looping levels,
+ * pitch changes, end-of-stream timing, short sounds, voice reuse, starvation recovery and
+ * ADPCM loops. Compare audible timing with the guest-visible position.
+ *
+ * apu-resample-smoke bench reports throughput, worst frame time and allocations for 32 to 256
+ * voices on the host. Count allocations by wrapping malloc, calloc and realloc. */
 #include "apu_fixture.h"
 
 static unsigned long g_allocs, g_alloc_bytes;
@@ -180,12 +176,9 @@ static void test_end(int q, int *end_frame, long *heard, long *lead)
           *end_frame <= *heard / NUM_SAMPLES_PER_FRAME + 2, what);
 }
 
-/* Short one-shot sounds, their decoder at the end in their first frame or
- * two: all of each heard, then the voice off. 64 frames at 22.05 kHz (139
- * output frames) and 128 at 96 kHz (64: the stretched filter), at half
- * scale: the output frames at half that level or more, less the first
- * frame's first half (a new voice fades in across its first frame,
- * measured). */
+/* Verify that short sounds drain through the filter before turning off. At half scale, 64
+ * frames at 22.05 kHz produce 139 output frames and 128 frames at 96 kHz produce 64. Count
+ * samples reaching half that level, allowing for the first frame's fade-in. */
 static void test_short(int q)
 {
     static const struct {

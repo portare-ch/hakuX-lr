@@ -9,14 +9,9 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * The physical controllers: which controller plays as which of the Xbox's
- * four players, and each controller's mapping onto the Xbox controller (the
- * Duke). The core's activity routes every controller's events through its
- * mapping to its player (NativeCoreActivity); the settings edit them.
- *
- * Stored in one JSON file both processes read afresh (the game runs in its
- * own process; shared preferences would serve each its cached copy), written
- * whole and renamed into place.
+ * Map physical controllers to Xbox player ports and inputs. NativeCoreActivity reads these
+ * mappings and the settings screen edits them. Both processes read a shared JSON file afresh.
+ * Replace it atomically to avoid stale SharedPreferences caches.
  */
 
 /** The Duke's inputs, as a mapping binds them. */
@@ -236,14 +231,11 @@ object Controllers {
   fun unitKey(d: InputDevice) = "u:${d.descriptor}"
 
   /**
-   * A controller's mapping when none is saved: Android's standard gamepad
-   * keys, and the axes the device has. The right stick is Z / RZ on most
-   * Android controllers (the RP5's own), RX / RY on others; the triggers
-   * LTRIGGER / RTRIGGER, else BRAKE / GAS; the d-pad a hat or keys. As the
-   * SDL gamepad the core read before: the shoulders are white and black.
-   * Back is the select button, and the back key only on a controller without
-   * one (whose select sends it): a controller with both (the RP5's own Back,
-   * beside its select) keeps its back key for the menu (NativeCoreActivity).
+   * Use Android's standard gamepad buttons when a controller has no saved mapping. Prefer
+   * Z/RZ for the right stick and LTRIGGER/RTRIGGER for triggers, falling back to RX/RY and
+   * BRAKE/GAS. Use a hat or keys for the D-pad. Shoulder buttons map to White and Black.
+   * Select maps to Xbox Back. On controllers where Select sends the Back key, use that key
+   * too. A separate Back key opens the menu.
    */
   fun defaults(d: InputDevice?): PadProfile {
     fun has(axis: Int) = d?.getMotionRange(axis) != null

@@ -317,18 +317,12 @@ void nc_ps_schedule(NcKernel *k, NcFrame *f)
         nc_frame_save(f, &cur->ctx);
         cur->exception_list = nc_vm_rd32(k->vm, k->kpcr_va + PCR_EXCEPTION_LIST);
     }
-    /* Threads of one priority take turns in the order they became ready, as
-     * the NT scheduler's queues have them. Round-robin by slot after the
-     * thread that switched out, the threads in the slots between two
-     * periodic threads and a spinning one never ran: Splinter Cell Chaos
-     * Theory's DirectSound thread polls at the main thread's priority, three
-     * timer threads woke every few milliseconds, and each wait handed the CPU
-     * back to the poller (the slots after them), which got a new quantum
-     * every time; the main thread, ready in an earlier slot, starved and the
-     * load stalled behind its loading picture. A thread switched out while
-     * running keeps its place and the rest of its quantum; one whose quantum
-     * ran out goes to the back with a new one; one that waits gets a new one
-     * and its place when it is ready again. */
+    /* Schedule equal-priority threads in ready-queue order. A preempted thread keeps its
+     * place and remaining quantum. An exhausted quantum moves the thread to the back with a
+     * fresh one. A blocked thread takes a new place and quantum when it becomes ready.
+     *
+     * Scheduling by slot let Chaos Theory's timer threads keep waking a same-priority
+     * DirectSound poller, starving the main thread during loading. */
     const uint64_t now = nc_ke_now_ns();
     if (cur && cur->state == NC_T_RUNNING) {
         if (cur->slice_expired) {

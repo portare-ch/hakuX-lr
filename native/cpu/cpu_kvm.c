@@ -1,30 +1,19 @@
 /* Copyright (C) 2026-present PortareOS */
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * hakuX native core — the guest CPU on x86-64 Linux through KVM (#56).
+ * Run the Xbox guest CPU through KVM on x86-64 Linux. Guest code runs at CPL 3 with IOPL 3
+ * for Xbox-style CLI, STI, PUSHFD, POPFD and port I/O. Privileged instructions such as SIDT
+ * under UMIP trap to a ring-0 stub that exits through HLT. Report system operations to the
+ * kernel in the same frame format as FEX.
  *
- * The title's code runs on the host CPU in a KVM guest, at CPL 3 with IOPL 3
- * so that cli, sti, pushfd, popfd, in and out behave as on the Xbox; every
- * other system instruction faults (#GP, UMIP's for SIDT and the like) into
- * a ring-0 stub, and the stub's HLT brings it here. The kernel sees what
- * FEX's backend gives it: system ops on a frame.
+ * Use one RAM memslot backed by vm->phys. Device windows have no memslot, so accesses exit as
+ * KVM_EXIT_MMIO. Mirror vm.c's page mappings and protections through nc_vm_prot_hook. The
+ * GDT, IDT, TSS and stubs use supervisor-only pages at 0x1000–0x6FFF.
  *
- * Memory: guest RAM is one memslot over the host's view of it (vm->phys,
- * never protected); device windows have none, so their accesses exit as
- * KVM_EXIT_MMIO, decoded. The guest runs with paging on, on page tables
- * kept here as a mirror of vm.c's mappings and protections
- * (nc_vm_prot_hook): KVM can't tell a guest access to a page the host has
- * protected from any other failure. GDT, IDT, TSS and stubs are guest
- * pages too, supervisor-only, at 0x1000-0x6FFF, below anything a title
- * maps.
- *
- * An exit: device work first (port and MMIO handlers fill a read's data),
- * then the access completed (KVM_RUN with immediate_exit), and only then
- * the frame built and the kernel called, so nothing KVM completes lands on
- * a frame the kernel replaced (a thread switch). A stub's frame is the
- * title's: GPRs as the stub left them (it clobbers none), EIP, EFLAGS and
- * ESP from the exception frame on the ring-0 stack, written back there for
- * the stub's IRET.
+ * Emulate port and MMIO accesses, then complete them with KVM_RUN using immediate_exit before
+ * invoking the kernel. Otherwise KVM could finish the access on a frame already replaced by a
+ * thread switch. Stubs preserve general registers. Read and write EIP, EFLAGS and ESP through
+ * the ring-0 exception frame for IRET.
  */
 #include "native/cpu/cpu.h"
 #include "native/core/vm.h"
@@ -835,15 +824,10 @@ void nc_context_import(NcCpuContext *c, const NcCpuState *s)
 
 /* ------------------------------------------------------------ the FPU */
 
-/* The vCPU's x87, MMX and SSE registers, through its XSAVE area. KVM_GET_FPU
- * and KVM_SET_FPU copy only the area's legacy part and leave its header as
- * the last save made it: after a guest thread whose x87 or SSE state was in
- * its initial configuration (XSTATE_BV's bit clear), the state set for the
- * next thread was dropped at the next entry, its registers initialized
- * (zero), and the state read back stale. Burnout 3's XMV decoder lost the
- * MMX register holding its alpha mask so mid-frame: the rest of the movie
- * frame alpha 0, drawn transparent over black. Here the header says both
- * are set, so the next entry loads them. */
+/* Use XSAVE for x87, MMX and SSE state. KVM_GET_FPU and KVM_SET_FPU only copy the legacy
+ * area. An old XSTATE_BV header can tell KVM to initialize registers instead of loading the
+ * next thread's values. This dropped the MMX alpha mask in Burnout 3's XMV decoder. Mark both
+ * x87 and SSE state present so the new values load on entry. */
 enum { XS_FCW = 0, XS_FSW = 2, XS_FTW = 4, XS_FOP = 6, XS_FIP = 8, XS_FDP = 16, XS_MXCSR = 24,
        XS_ST = 32, XS_XMM = 160, XS_BV = 512 };
 #define XFEATURE_X87_SSE 3u

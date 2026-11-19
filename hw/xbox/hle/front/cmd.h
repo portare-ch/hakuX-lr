@@ -34,14 +34,13 @@ enum HleOp {
     HLE_OP_ZWRITE = 26,         /* HleCmdZWrite: a colour surface's words as depth */
 };
 
-/* Colour surface dst gets depth-stencil surface src (same size) as the
- * NV2A's memory holds it, one 32-bit word per pixel (D24S8: depth << 8 |
- * stencil): channel c (r, g, b, a) of dst is byte map[c] of the word, or 1
- * for map[c] = 4. A texture over a depth buffer's memory samples dst.
- * map[0] = HLE_ZREAD_HALVES: dst is twice src's width in 16-bit texels, one
- * a half word (the even texel the low half), as 16-bit luminance.
- * map[0] = HLE_ZREAD_D16: src is a D16 buffer, dst (same size) its 16-bit
- * words, as 16-bit luminance. */
+/* Copy the packed depth and stencil words from src into a same-sized colour surface dst. For
+ * D24S8, the word is (depth << 8) | stencil. Give RGBA channel c byte map[c], or 1 when
+ * map[c] is 4. A texture that aliases the depth buffer samples dst.
+ *
+ * HLE_ZREAD_HALVES in map[0] splits each word into two 16-bit luminance texels, low half
+ * first, doubling the width. HLE_ZREAD_D16 copies a D16 surface as 16-bit luminance at the
+ * same size. */
 #define HLE_ZREAD_HALVES 5
 #define HLE_ZREAD_D16    6
 /* A float depth buffer: its words are the depth as the NV2A's 24-bit or
@@ -237,14 +236,13 @@ typedef struct HleCmdFence {
 typedef struct HleCmdReadback {
     uint64_t value;                 /* 0: no submission of its own */
     uint32_t surf, pa, pitch;
-    /* arena_off != HLE_RB_DIRECT: the subresource (level, face of a texture
-     * image; a level / face surface names its own) is copied tightly packed
-     * into the arena at arena_off, w x h texels; the front end swizzles it
-     * into guest memory. Else linear rows go straight to guest RAM at pa,
-     * the image filtered down to w x h first when those are set; with guest
-     * RAM the GPU can't write (not imported: the native core's), to the
-     * arena at fb - 1 instead (fb_len bytes), landed at pa when the GPU
-     * reaches the value (hle_tl_land). */
+    /* For an arena readback, pack w x h texels of the selected mip level and face at
+     * arena_off. The front end swizzles them into guest RAM. A surface view already selects
+     * its own level and face.
+     *
+     * For HLE_RB_DIRECT, copy linear rows to pa, downsampling to w x h if requested. If guest
+     * RAM is not GPU-writable, copy fb_len bytes into the arena at fb - 1 and transfer them
+     * to pa at timeline completion (hle_tl_land). */
     uint32_t arena_off, level, face, w, h;
     uint32_t fb, fb_len;            /* fb 0: none */
     uint32_t nearest;               /* packed depth/stencil: keep one whole sample */

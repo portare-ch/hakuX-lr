@@ -1,22 +1,18 @@
 /* Copyright (C) 2026-present PortareOS */
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * hakuX native core — the voices' band-limited resampler (resample.h's
- * sinc): a Kaiser-windowed sinc interpolator in float, its taps through
- * NEON on AArch64; on x86-64 through AVX2 + FMA (NEON's sums, bit for bit),
- * SSE2 or scalar code, by the CPU (simd.h). A quality setting, not a claim
- * about the Xbox's undocumented interpolation.
+ * Kaiser-windowed sinc resampler. AArch64 uses NEON. x86-64 selects AVX2 with FMA, SSE2 or
+ * scalar code. AVX2 matches NEON's sums bit for bit. This is the sinc quality setting.
  *
- * At a ratio of 1 or more (a voice at or below the output's 48 kHz) the
- * filter is 32 taps, its cutoff at the input's Nyquist frequency, from a
- * table of 128 phases interpolated between: a 22.05 kHz voice keeps 10 kHz
- * within 1 dB, and at phase 0 the output is the input sample itself (unity
- * passes exactly). Below 1 (a voice pitched past 48 kHz) the filter is
- * stretched to the output's Nyquist, 32 / ratio taps, the ratio rounded
- * down to 1/128ths, at most 8 times (256 taps); past that a pitch-up
- * aliases, its rate still the one asked for (the VP's go to 1/512). The input is kept planar with 131 frames of history and read
- * 16 frames ahead of the output (up to 132 for the stretched filter), its
- * buffer 4 KB a channel pair; nothing is allocated after vp_sinc_new.
+ * For output/input ratios at least 1, use 32 taps and interpolate between 128 phases at the
+ * input Nyquist frequency. Phase zero returns the original sample. For ratios below 1, lower
+ * the cutoff to the output Nyquist frequency and expand the filter to 32 / ratio taps,
+ * quantizing the ratio down to 1/128. Stop expanding at 256 taps. Higher pitch shifts can
+ * alias but still advance at the requested rate.
+ *
+ * Use planar input with 131 frames of history and look ahead 16 frames, or up to 132 for the
+ * stretched filter. A channel pair needs 4 KB and processing allocates nothing after
+ * vp_sinc_new.
  */
 #include <math.h>
 #include <pthread.h>

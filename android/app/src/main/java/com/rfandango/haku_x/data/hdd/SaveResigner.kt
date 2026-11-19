@@ -4,22 +4,19 @@ import java.io.File
 import java.io.RandomAccessFile
 
 /**
- * Re-signs a console's or xemu's saves for hakuX. Games sign with XAPI's XCalculateSignature (as
- * feudalnate's port of it reads): roamable = HMAC-SHA1(title key, data), the title key being
- * HMAC-SHA1(certificate key, the certificate's signature key)[0:16]; locked to the console =
- * HMAC-SHA1(HD key, roamable). Downloaded content's ContentMeta.xbx: HMAC-SHA1(HMAC-SHA1(HD key, title
- * id), its header). hakuX's kernel signs as a console whose title keys are zero and whose HD key is
- * its EEPROM's bytes 0x36-0x45 (nativeHd: native/kernel/ex.c nc_kernel_set_hd_key).
+ * Re-sign console and xemu saves for hakuX. XAPI's XCalculateSignature derives a title key
+ * from the first 16 bytes of HMAC-SHA1(certificate key, certificate signature key), as in
+ * feudalnate's port. A roamable signature is HMAC-SHA1(title key, data). A console-locked
+ * signature is HMAC-SHA1(HD key, roamable signature). ContentMeta.xbx uses
+ * HMAC-SHA1(HMAC-SHA1(HD key, title ID), header).
  *
- * Transfers between hakuX consoles need only the HDD keys because both use zero title keys.
+ * hakuX uses zero title keys and EEPROM bytes 0x36–0x45 as its HD key (native/kernel/ex.c).
+ * Transfers between hakuX consoles only need their HD keys.
  *
- * A game puts the signature where it likes. The places XSavSig's resign.ini lists for most games are
- * tried (the signature at the start, at 4, or at the end, the end also before padding, over the bytes
- * around it, or in a .sig file of its own), and a signature is replaced only when it checks with the
- * source keys: a file whose signature isn't found is left as it is. A folder's signatures are all
- * found before any is written:
- * a .sig file may sign itself too, over the others' signatures (Forza's CarIcons.sig), and its own
- * comes after theirs.
+ * Try signature locations from XSavSig's resign.ini, including padding and separate .sig
+ * files. Replace only signatures verified with the source keys. Find all signatures in a
+ * folder before writing any of them. Forza's CarIcons.sig signs the other signatures too, so
+ * write its own signature last.
  */
 class SaveResigner(private val certKey: ByteArray?, private val hdKey: ByteArray, private val nativeHd: ByteArray) {
   class Report(

@@ -698,14 +698,10 @@ static void close_pass_why(unsigned why)
 }
 #define close_pass() close_pass_why(PE_OTHER)
 
-/* Fence and kick boundaries close the recording lazily: back-to-back ones
- * (Riddick kicks for every visibility result it polls) share one submit,
- * made when the ring runs dry, after 16 of them or once the first has waited
- * HLE_PEND_NS (checked as commands are dispatched, render_thread). Its
- * timeline value is the latest, which completes the earlier ones too. A lone
- * fence must not wait for the next one: Blinx inserts one a frame and blocks
- * on it a frame later, so a fence held back until the ring ran dry put the
- * guest, the recording and the GPU in series. */
+/* Batch consecutive fence and kick boundaries into one submit. Use the latest timeline value
+ * to complete all earlier ones. Submit when the command ring empties, after 16 boundaries, or
+ * once the oldest has waited HLE_PEND_NS. This lets Riddick batch visibility-result kicks
+ * while keeping a lone Blinx fence from waiting for another boundary. */
 #define HLE_PEND_NS 1000000
 static struct {
     uint64_t value;

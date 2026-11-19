@@ -10,21 +10,19 @@
 
 #include "hw/xbox/hle/front/cmd.h"
 
-/* The part of area (render-target pixels, [x1, x2) x [y1, y2): the surface
- * clip's) the window clip lets the NV2A draw into, as disjoint rectangles in
- * out (HLE_CMD_MAX_CLIP of them at most, which no clip needs more than).
- * horiz and vert: SET_WINDOW_CLIP_HORIZONTAL and _VERTICAL's 8 words (min
- * 11:0, max 27:16, both included, in logical pixels: scaled by the
- * antialiasing's ax x ay). Inclusive: inside the union of the rectangles;
- * exclusive: outside all of them. count: the rectangles in use, the first
- * so many: the NV2A takes those up to the one written last, whatever the
- * others hold (nxdk_pgraph_tests' Window clip: with rectangles 2 to 7 left
- * over the whole screen, an inclusive clip is rectangles 0 and 1 alone, and
- * rectangle 0 alone when it was written after 1; a rectangle of two zero
- * words is the pixel at 0, 0). 0: not known (none written since the state
- * was made): those with a word that isn't 0. Returns how many; 0: nothing
- * is drawn; -1: no clip (no rectangle used, or the clip leaves the whole
- * area). */
+/* Intersect the surface clip area with the NV2A window clip and write up to HLE_CMD_MAX_CLIP
+ * disjoint rectangles to out. The surface area uses exclusive right and bottom edges in
+ * render-target pixels. The eight horizontal and vertical register pairs use inclusive min
+ * (bits 11:0) and max (27:16) in logical pixels. Scale each axis by its antialiasing factor
+ * (ax or ay).
+ *
+ * Inclusive mode keeps the union of the clip rectangles. Exclusive mode keeps the area
+ * outside all of them. The hardware uses rectangles through the most recently written index,
+ * even if registers at higher indices still contain old values. A pair of zero words covers
+ * pixel (0, 0). When count is unknown (zero), use only pairs with at least one nonzero word.
+ *
+ * Return the number of output rectangles, 0 if everything is clipped or -1 if the whole
+ * surface area can be drawn without clipping. */
 int hle_pb_window_clip(const uint32_t *horiz, const uint32_t *vert, unsigned count, bool exclusive,
                        uint32_t ax, uint32_t ay, const HleRect *area, HleRect *out);
 

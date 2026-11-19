@@ -1,16 +1,11 @@
 /*
- * hakuX HLE GPU — asynchronous pipeline builds, the per-title pipeline
- * record and its prebuild (pipeasync.h).
+ * Build pipelines on WORKERS lower-priority threads. Jobs own copies of their keys and vertex
+ * programs. The render thread takes completed jobs through hle_pipe_take.
  *
- * Workers: WORKERS threads below normal priority, so the guest's CPU and the
- * render thread keep the big cores; jobs carry copies of their key and
- * vertex program, results go back to the render thread (hle_pipe_take).
- *
- * The record: a header (magic, version, key size), then records appended as
- * the session makes pipelines: a vertex program (once per file), a pipeline
- * (its key, its program's hash, when it was last used) and a touch (a
- * prebuilt pipeline used again). Read at the title's start, it is written
- * back compact: each pipeline once with its latest use, the newest REC_KEEP.
+ * The per-title record starts with the magic, version and key size. It appends vertex
+ * programs, pipeline keys with program hashes and last-use times, and touches of prebuilt
+ * pipelines. At startup, read the record and retain one entry per pipeline with its latest
+ * use, keeping the newest REC_KEEP entries.
  */
 #include "hw/xbox/hle/base.h"
 #include "hw/xbox/hle/hle.h"

@@ -1,25 +1,20 @@
 /*
- * hakuX HLE GPU — stutter / hang monitor.
+ * GPU stutter and hang monitor.
  *
- * Stutters are what the screen shows: each frame's timeline (the decoder's
- * swap, the guest's flip, render-thread write, GPU done, front at a vblank,
- * picked up by the UI) is stamped, and a frame reaching the front more than
- * half a vblank after the title's cadence, or frames never shown (dropped),
- * is a stutter, attributed to the stage that made it late. The decoder's
- * flips and display starts close the frame windows (hle_hitch_pb_swap); one
- * running past the frame interval (the cadence the screen shows: there is
- * no presentation interval to go by) is explained (where the time went) for
- * that attribution, and one of 500 ms or more is a hang. Without the display
- * path a window of 2 frame intervals (at least 50 ms) counts as a stutter.
- * HAKUX_HLE_HITCH_MS / HAKUX_HLE_HANG_MS override the thresholds,
- * HAKUX_HLE_HITCH=0 turns the monitor off. A watchdog thread reports a
- * hang while it lasts and samples the vCPU (EIP, halted) once a window is
- * overdue. The reason comes from where the window's time went: activity
- * spans the decoder and the render thread mark at their rare transitions
- * (the flip, the guest's interrupt handler, the command ring, the arena,
- * the GPU, compiles, submits, sleeps; never per draw), GPU progress, disc
- * reads, JIT flushes and thread CPU time. Events go to logcat
- * (hakuX-hle-hitch) and to the overlay.
+ * The monitor timestamps each frame from the decoder's swap through the guest's flip,
+ * rendering, GPU completion, vblank and UI pickup. It attributes dropped frames and frames
+ * shown more than half a vblank past the title's cadence to the stage that delayed them.
+ *
+ * Guest flips and display starts close the decoder's frame windows (hle_hitch_pb_swap). A
+ * window over the display's frame interval is diagnosed, and one lasting at least 500 ms
+ * counts as a hang. Without display timing, the stutter threshold is two frame intervals with
+ * a 50 ms minimum. HAKUX_HLE_HITCH_MS and HAKUX_HLE_HANG_MS override the thresholds.
+ * HAKUX_HLE_HITCH=0 disables monitoring.
+ *
+ * The watchdog reports hangs in progress and samples the vCPU once a window is overdue.
+ * Attribution uses activity transitions on the decoder and render threads, GPU progress, disc
+ * reads, JIT flushes and thread CPU time. Reports appear under hakuX-hle-hitch in logcat and
+ * in the overlay.
  */
 #ifndef HW_XBOX_HLE_HITCH_H
 #define HW_XBOX_HLE_HITCH_H
@@ -117,12 +112,11 @@ void hle_hitch_pickup_lag(uint64_t *n, uint64_t *sum_us, int64_t *max_us);
 /* overlay text (lines separated by '\n'); false = nothing to show */
 bool hle_hitch_overlay(char *buf, size_t n);
 
-/* The vCPU's PC for the samplers (stalls here, the perf capture in hle.c),
- * from a front end whose vCPU state is not first_cpu's env (the native core:
- * env only changes at hooks and kernel calls). True with *pc the guest EIP,
- * or HLE_PC_HOST | (host offset >> 4) while the vCPU runs host code, with
- * HLE_PC_SYSOP in a kernel call or hook (else FEX: the JIT compiler, the
- * dispatcher); false when no sample came. NULL: env. */
+/* Sample the vCPU PC for the hang monitor and hle.c's performance capture. A front end can
+ * supply this callback when first_cpu's env is updated only at hooks and kernel calls. On
+ * success, *pc holds the guest EIP or HLE_PC_HOST | (host offset >> 4). Kernel calls and
+ * hooks add HLE_PC_SYSOP to distinguish them from FEX host code. Return false if the PC is
+ * unavailable. A NULL callback uses env. */
 #define HLE_PC_HOST 0xF0000000u
 #define HLE_PC_SYSOP 0x08000000u    /* host code of a kernel call or hook (else FEX) */
 #define HLE_PC_IDLE 0xFFFFFFFFu     /* the vCPU waits for an interrupt (halted) */

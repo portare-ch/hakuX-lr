@@ -15,7 +15,7 @@ endif()
 
 enable_testing()
 
-# Pure modules under test. P1a appends to this list.
+# Build the pure HLE modules into the host test library.
 set(HLE_PURE_SOURCES
   ${REPO_ROOT}/hw/xbox/hle/core/xbe.c
   ${REPO_ROOT}/hw/xbox/hle/tex/xdk_res.c
@@ -85,9 +85,8 @@ target_compile_definitions(test_batch_wrap PRIVATE
 target_include_directories(test_vkcompat PRIVATE ${NC_DEPS}/SDL3/src/video/khronos)
 target_compile_definitions(test_vkcompat PRIVATE VK_NO_PROTOTYPES)
 
-# The audio's pure parts, each with only its own sources (no hle_pure): the
-# HRTF filter, the VP's stereo routing (header-only), and the libretro
-# output's ring (native/libretro/audio.c, its frontend and log stood in).
+# Link each audio test only with the modules it exercises. The libretro ring test supplies
+# its own frontend and log callbacks.
 function(audio_test name)
   add_executable(${name} ${name}.c ${ARGN})
   target_link_libraries(${name} Threads::Threads)

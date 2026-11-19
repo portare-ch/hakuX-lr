@@ -217,12 +217,10 @@ class OnScreenController @JvmOverloads constructor(
   private val hint by lazy { context.getString(R.string.overlay_editor_hint) }
 
   /*
-   * Playing: each control in its own display list and GPU layer, recorded
-   * again only when it looks different (its state, its place), its opacity
-   * applied as the layer is composited. Drawn whole at every touch event,
-   * each through an offscreen layer with its gradients made anew, the
-   * controls took the Galaxy Tab S9's render thread ~80% of a core while a
-   * stick was held.
+   * During play, record each control in its own display list and GPU layer. Re-record only
+   * when appearance or position changes, and apply opacity during compositing. Rebuilding
+   * gradients and layers for each touch event took about 80% of one core on a Galaxy Tab S9
+   * while a stick was held.
    */
   private data class Look(
     val cx: Float, val cy: Float, val r: Float,

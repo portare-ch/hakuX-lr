@@ -1,11 +1,8 @@
 /*
- * hakuX HLE GPU — push-buffer mode's drawing: Kelvin (class 0x97) methods
- * into the back end's commands (front/cmd.h), on the decode thread. So
- * far: the render targets (SET_SURFACE_*), CLEAR_SURFACE, the frame
- * presented at each FLIP_INCREMENT_WRITE (the colour target just
- * finished), and draws with the stages' textures: from the vertex arrays
- * (indexed and DRAW_ARRAYS), inline arrays and immediate vertices, through
- * the vertex program or the fixed-function stage (shader/ffhw.h).
+ * Translate NV2A Kelvin methods (class 0x97) into back-end commands on the decoder thread.
+ * This includes render target binding, clears and presentation at FLIP_INCREMENT_WRITE. Draws
+ * use indexed or non-indexed vertex arrays, inline arrays or immediate vertices, with either
+ * a vertex program or the fixed-function stage (shader/ffhw.h).
  */
 #ifndef HW_XBOX_HLE_PB_PBDRAW_H
 #define HW_XBOX_HLE_PB_PBDRAW_H
@@ -72,23 +69,19 @@ void hle_pbd_trap(void);
 void hle_pbd_counts(uint64_t *clears, uint64_t *swaps, unsigned *objects,
                     uint64_t *rt_uploads);
 /* draws: all of them; ff: of those, fixed function */
-/* A 2D blit (surfaces at sbase / dbase, pitches sp / dp, bpp bytes a pixel;
- * w x h from (ix, iy) to (ox, oy)), decode thread: true if it was a copy
- * of render targets' images (a linear one's into another, or into memory
- * with none: the GPU's, at their scale, the memory left alone); false: the
- * caller copies the memory (hle_pbd_copy_begin, _done), then the images
- * follow (hle_pbd_blit). */
+/* Blit w x h pixels from (ix, iy) to (ox, oy) using sp and dp as pitches and bpp as bytes per
+ * pixel. Run on the decoder thread. Return true when the GPU copied the render-target images
+ * at their render scale without touching guest RAM. Otherwise the caller copies guest memory
+ * using hle_pbd_copy_begin and hle_pbd_copy_done, then updates the images with hle_pbd_blit. */
 bool hle_pbd_blit_images(uint32_t sbase, uint32_t sp, uint32_t dbase, uint32_t dp, uint32_t bpp,
                          uint32_t ix, uint32_t iy, uint32_t ox, uint32_t oy, uint32_t w, uint32_t h);
-/* A copy of guest memory by the 2D engine (a blit, M2MF: rows of row bytes
- * from slo into dlo, sp / dp apart, which may be negative) (decode thread):
- * hle_pbd_copy_begin, 0 if the caller makes it now, else the value it was
- * queued at on the timeline (vk/timeline.c hle_tl_land_copy: behind the
- * landings of the targets over the source whose images are newer, and the
- * copies queued over either range before it; dbase: a blit's destination
- * surface, 0 for M2MF); then hle_pbd_copy_done: a queued one's destination
- * closed to the guest till it lands, the targets over it with their memory
- * newer than their images. */
+/* Copy guest memory for a 2D blit or M2MF transfer on the decoder thread. The sp and dp row
+ * pitches may be negative. Pass the blit destination surface as dbase, or zero for M2MF.
+ *
+ * hle_pbd_copy_begin returns zero for an immediate copy by the caller, or the queued timeline
+ * value. The queued copy follows overlapping copies and readbacks from source targets with
+ * newer images. hle_pbd_copy_done protects a queued destination until the copy completes and
+ * marks guest memory newer than any images over it. */
 uint64_t hle_pbd_copy_begin(uint32_t slo, uint32_t sp, uint32_t dlo, uint32_t dp, uint32_t row,
                             uint32_t rows, uint32_t dbase);
 void hle_pbd_copy_done(uint32_t dlo, uint32_t dp, uint32_t row, uint32_t rows, uint64_t dep);
@@ -128,16 +121,13 @@ void hle_pbd_pace_stats(int *depth, uint64_t *ahead_sum, uint64_t *ahead_n, unsi
 /* Any thread: nothing presented for a while (the title isn't flipping), so
  * the display's memory is worth a look (hle_pbd_scanout). */
 bool hle_pbd_scan_due(void);
-/* Decode thread: the frame on screen, if the CPU wrote its memory or the
- * GPU drew into it since and the title doesn't flip, presented again (the
- * NV2A scans the memory out: a loading prompt or screen drawn into the front
- * buffer shows); first, a swap its flip came before, if no flip followed. */
+/* On the decoder thread, process a swap left pending by a flip, then present the current
+ * scanout again if its memory or image changed without another flip. This shows loading
+ * prompts and other updates drawn directly into the front buffer. */
 void hle_pbd_scanout(void);
-/* Decode thread: the frame buffer AvSetDisplayMode gave, when the title has
- * no GPU device (it draws its frames with the CPU: nxdk homebrew such as
- * Insignia's Setup Assistant), shown as the memory holds it; the scanout
- * shows it again as the CPU writes it. A title with a device keeps its own
- * flips. */
+/* On the decoder thread, present the frame buffer set by AvSetDisplayMode when the title
+ * draws with the CPU and has no GPU device. Present it again after CPU writes. Titles with a
+ * device use their own flips. */
 void hle_pbd_cpu_display(uint32_t pa);
 /* Any thread: guest memory [pa, pa + len) is kept for the next title (a quick
  * reboot): the decode thread writes the images over it back into it when it

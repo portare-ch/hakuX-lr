@@ -1,32 +1,19 @@
 /* Copyright (C) 2026-present PortareOS */
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * hakuX native core, libretro front end (hakux_libretro.so): RetroArch runs
- * the game (LIBRETRO_SPEC.md).
+ * Libretro front end for RetroArch (LIBRETRO_SPEC.md).
  *
- * Frames are phase-locked, not stepped: the emulation keeps its own threads
- * (the CPU, the renderer, the APU), and each retro_run is the display's vsync
- * for the NV2A's vblank clock (nc_dev_nv2a_display_vsync), which locks to it
- * as it does to Android's Choreographer. retro_run hands over the newest
- * frame and one period's samples; it never waits for the guest.
+ * The CPU, renderer and APU run on their own threads. Each retro_run drives the NV2A vblank
+ * clock and returns the latest frame and one period of audio without waiting for the guest.
+ * After three periods without retro_run, park the emulation and pause guest time. Resume on
+ * the next call.
  *
- * When RetroArch stops calling (its menu, a stall), the emulation pauses
- * after three periods (nc_pause_set: the CPU parks at its next kernel entry,
- * the devices hold off, the guest's time leaves the pause out), and the next
- * retro_run resumes it.
+ * Starting without content boots the dashboard from C: with the tray empty. The dashboard
+ * handles Insignia account creation.
  *
- * Started with no content (RetroArch's Start Core), the core boots the Xbox
- * dashboard from the console disk's C: drive with the tray empty, as the
- * app's Dashboard does. Insignia accounts are created there.
- *
- * Unloading, a reset, a title's relaunch or RetroArch letting its Vulkan
- * context go stops the core in RetroArch's process (stop_core, M2): the
- * guest, its devices, then all of it freed and reset, so that another game,
- * the reset or the relaunch boots afresh. In PortareOS's build
- * (HAKUX_LR_END_PROCESS) a stop that hangs ends RetroArch's process (the
- * watchdog, wd_start), and HAKUX_LR_STOP=0 (can_stop) brings back the way
- * before M2: the process ends when the game closes (nc_lr_end), and a
- * title's relaunch starts RetroArch again in its place (relaunch).
+ * Unload, reset, title relaunch and Vulkan context loss stop and reset the core in process.
+ * PortareOS builds can exit RetroArch if stop hangs (HAKUX_LR_END_PROCESS). Setting
+ * HAKUX_LR_STOP=0 exits on close and re-execs RetroArch for a title relaunch.
  */
 #include "native/libretro/libretro_int.h"
 #include "native/core/cheats.h"
@@ -670,16 +657,11 @@ static unsigned kept_option(char *const *argv, unsigned i, unsigned argc)
     return 0;
 }
 
-/* A title's XLaunchNewImage (kernel.relaunch; the launch data page is in
- * relaunch.bin, beside the console disk): the core cannot boot again in this
- * process, so RetroArch starts again in its place, on the same command line,
- * with HAKUX_RELAUNCH naming the game. For the dashboard, use DASH_MARK and
- * always rebuild the command line: keep only kept_option's options, then
- * add -L and this core. This handles menu-loaded cores and removes --menu,
- * which would reopen RetroArch's menu without starting the core. Loading
- * boots the XBE named by the page, as Android's activity does with
- * "relaunch". The PID stays the same for the parent (runemu.sh), so the
- * launcher does not reopen. Returns if RetroArch cannot restart. */
+/* Re-exec RetroArch for XLaunchNewImage when in-process shutdown is disabled. HAKUX_RELAUNCH
+ * identifies the game or DASH_MARK. The next boot takes the XBE and launch data from
+ * relaunch.bin. For dashboard sessions, rebuild argv from kept_option and add -L for this
+ * core so a menu launch starts content. execve preserves the PID watched by runemu.sh. Return
+ * if restarting fails. */
 static void relaunch(void)
 {
     static char cmd[64 * 1024];

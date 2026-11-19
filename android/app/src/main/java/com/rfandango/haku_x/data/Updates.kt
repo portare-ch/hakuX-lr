@@ -26,10 +26,9 @@ import java.net.URL
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * hakuX's releases on GitHub (rfandango/hakuX): the latest one, when it is newer than this app, with
- * its notes and its APK. A check runs once as the app's screens start, and on demand in the settings;
- * the APK is downloaded into the cache, checked to be this app signed as this app, and handed to the
- * system installer, which asks the user (UpdateInstallReceiver).
+ * Check rfandango/hakuX releases at startup and on demand in settings. If a newer APK is
+ * available, show its notes, download it to the cache, verify its package and signer, then
+ * let the Android installer prompt the user.
  */
 object Updates {
   private const val TAG = "hakuX-update"

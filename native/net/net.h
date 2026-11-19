@@ -61,18 +61,15 @@ void nc_net_send(const uint8_t *frame, size_t len);
  * nc_net_mac: it, copied to mac; false while the guest hasn't set one. */
 void nc_net_set_mac(const uint8_t mac[6]);
 bool nc_net_mac(uint8_t mac[6]);
-/* The NIC's thread: the oldest frame received, copied to buf (cap bytes);
- * its length, 0 when none. nc_net_peek gives the next one's length without
- * taking it (a frame the guest has no buffer for yet stays queued). */
+/* On the NIC thread, take the oldest received frame and return its length, or zero if none.
+ * nc_net_peek reports the next length so a frame can stay queued until the guest has room. */
 size_t nc_net_recv(uint8_t *buf, size_t cap);
 size_t nc_net_peek(void);
 /* The NIC's thread waits for a received frame, at most timeout_ns. */
 void nc_net_wait_rx(uint64_t timeout_ns);
 
-/* A console with this one's MAC (its EEPROM a copy of this one's, the app's
- * hard disk copied from device to device), heard at ip (network order): the
- * two can't see each other. nc_net_take_twin, for the app: its address, once
- * each console; false when no new one. */
+/* Track peers that use our MAC address, typically from a cloned disk or EEPROM. ip is in
+ * network byte order. nc_net_take_twin reports each newly detected peer to the app once. */
 void nc_net_twin(uint32_t ip);
 bool nc_net_take_twin(char *addr, size_t len);
 
@@ -107,12 +104,9 @@ void nc_net_nat_shared(bool shared);
 /* nat.c: the address the console is leased (network order), 0 before. */
 uint32_t nc_net_nat_lease(void);
 
-/* lan.c, beside the NAT (net=on), mac the console's (if the NIC hasn't
- * said yet): the address the NAT is about to lease or has leased (leased),
- * which the hellos claim; whether another console keeps ip against this
- * one (heard within the stations' TTL: it uses ip, by its frames or a
- * leased claim; it isn't hakuX's, so can't move; or it is about to lease
- * ip too with a lower MAC); and an ARP probe for ip. */
+/* Share the console MAC and candidate or leased IP with the LAN backend before the NIC
+ * reports them. Hellos advertise the claim. A recently seen peer keeps the IP if it uses it,
+ * cannot move, or probes with a lower MAC. This interface also sends ARP probes. */
 void nc_net_lan_claim(const uint8_t mac[6], uint32_t ip, bool leased);
 bool nc_net_lan_taken(const uint8_t mac[6], uint32_t ip);
 void nc_net_lan_probe(uint32_t ip);

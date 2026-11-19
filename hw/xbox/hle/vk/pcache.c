@@ -1,23 +1,15 @@
 /*
- * hakuX HLE GPU — on-disk shader and pipeline caches (P3 Task 13).
- * - SPIR-V: <base>/hle_spirv/<fnv64 of the GLSL>-<stage>.spv, a header with
- *   the source length and a second hash so a collision reads as a miss
- *   (hle_spirv-vk11/: SPIR-V 1.3, for a device below Vulkan 1.3).
- * - Pipelines: <base>/hle_pipeline_cache/<title id>.bin, the title's
- *   VkPipelineCache blob (the driver rejects a blob from another device or
- *   driver version), written by a worker thread: the blob is megabytes and
- *   the write syncs to flash (~110 ms), which on the render thread stalled a
- *   frame every 5 s. The cache is internally synchronized: the worker reads
- *   it while the render thread creates pipelines. Written when pipelines
- *   were compiled since (hle_pcache_compiled), at most once a minute, from a
- *   copy: the driver holds its cache's lock while it serializes, and a write
- *   of the live cache kept the render thread's pipeline lookups out for
- *   0.2-0.8 s at a time (NGB froze, then dropped the frames it caught up
- *   with). A pipeline compiled since the last write and lost with the
- *   process is built again by the next start's prebuild (its record,
- *   pipeasync.c, is written apart). One cache for every title (until
- *   1.0.0's) grew to 515 MB on the RP5 over 45 titles: each game held all of
- *   it in memory and wrote all of it back.
+ * On-disk shader and pipeline caches.
+ *
+ * SPIR-V files use an FNV64 hash of the GLSL and the shader stage as the key. The header
+ * verifies the source length and a second hash. Use hle_spirv-vk11 for SPIR-V 1.3 on
+ * pre-Vulkan 1.3 devices.
+ *
+ * Store the driver-specific VkPipelineCache blob per title in hle_pipeline_cache. A worker
+ * writes the cache after new compilations, at most once a minute. Serialize a copy so the
+ * driver's cache lock cannot stall render-thread pipeline lookups. The separate pipeline
+ * record in pipeasync.c lets the next session rebuild pipelines compiled since the last cache
+ * write.
  */
 #include "hw/xbox/hle/base.h"
 #include <pthread.h>

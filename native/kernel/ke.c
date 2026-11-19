@@ -67,15 +67,10 @@ static uint64_t g_boot_ns;
 static uint64_t g_time_offset;
 static int64_t g_clock_ms;      /* nc_kernel_set_clock */
 
-/* One clock read per kernel entry. On the RP5 a read traps to the host
- * kernel, which emulates the counter (~160 ns, CLOCK_MONOTONIC and
- * cntvct_el0 alike: a coarse read is 8 ns), and an entry made about a dozen
- * (timers, the slice, DPC and IRQ bookkeeping): a fifth of Crimson Sea's
- * guest thread in push-buffer mode. Within nc_kernel_sysop, on the guest's
- * thread, the first read is kept for the entry; a wait that blocked drops it
- * (nc_ke_update_time follows each), and so does a tick of the coarse clock,
- * which bounds a blocking wait this misses to one tick (4 ms). Other threads
- * read the clock. */
+/* Cache one host clock sample per nc_kernel_sysop on the guest thread. On RP5, each
+ * fine-clock read costs about 160 ns and the kernel used to take about a dozen per entry.
+ * Drop the sample after a blocking wait (nc_ke_update_time) or a tick of the coarse clock,
+ * which limits stale samples to one tick (4 ms). Other threads read the clock directly. */
 static pthread_t g_entry_thread;
 static bool g_entry;
 static uint64_t g_entry_ns, g_entry_coarse;
@@ -103,10 +98,8 @@ static uint64_t raw_ns(void)
     return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
 }
 
-/* The time's state, read whole with the host's time: whether it stands
- * still (or will), from when (host ns), the time left out so far. The
- * host's time read inside, so that a reader late across a whole hold
- * doesn't take the time from before it for now. */
+/* Read the hold start, accumulated paused time and host clock as one snapshot. Sampling the
+ * clock inside the read prevents mixing a pre-hold time with state from after the hold. */
 static bool time_read(uint64_t *still_raw, uint64_t *off, uint64_t *raw)
 {
     for (;;) {

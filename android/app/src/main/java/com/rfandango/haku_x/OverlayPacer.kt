@@ -6,23 +6,13 @@ import android.os.SystemClock
 import android.view.View
 
 /**
- * The window's overlays (the on-screen controls, the FPS counter) and the
- * game's GPU work. The window is drawn on a GPU queue below the game's
- * (Turnip's kgsl contexts are at priority 7: native/app/vkdriver.c), which
- * only runs when the game's work runs out, and the compositor shows the
- * game's frames behind the window's (a process's frames in order): a window
- * frame drawn while the game kept the GPU busy held the picture until the
- * GPU had a break, over a second at a time (PGR2 at 3x on an Adreno 650).
+ * Keep overlay updates from delaying game presentation. With Turnip's raised KGSL priority,
+ * an overlay frame on the lower-priority window queue can wait for a GPU gap and hold up game
+ * frames behind it. PGR2 at 3x on Adreno 650 could stall presentation for over a second.
  *
- * So the overlays wait to redraw while the GPU has been busy BUSY_MS without
- * a break (mayDraw), CAP_MS at most; and a window frame drawn while the GPU
- * was busy, still without a break STUCK_MS later, gets one: the render
- * thread lets the GPU run out of work for a moment (nativeGpuGap). An overlay
- * may come late; the game's frames don't wait for it.
- *
- * Only where the game's GPU queue is above the window's (Turnip's raised kgsl
- * priority): elsewhere the window's frames take turns with the game's, and
- * nativeGpuBusyMs reports 0, so nothing here waits or asks for a gap.
+ * After BUSY_MS without a gap, defer an overlay redraw for at most CAP_MS. If an overlay
+ * frame is still waiting after STUCK_MS, call nativeGpuGap to let it run. Drivers with equal
+ * queue priority report zero busy time and follow their normal pacing.
  */
 class OverlayPacer(private val busyMs: () -> Int, private val gap: () -> Unit) {
   private val handler = Handler(Looper.getMainLooper())

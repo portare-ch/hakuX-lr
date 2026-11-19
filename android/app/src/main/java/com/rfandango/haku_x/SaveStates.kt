@@ -20,12 +20,9 @@ import java.text.DateFormat
 import java.util.Date
 
 /**
- * The running game's savestates (push-buffer mode, native/state): the
- * menu's Save state and Load state over the game's ten slots
- * (SaveStateStore). Saving goes through the core (nativeSaveState, off the
- * UI thread: about a frame and the write); loading starts the core again
- * into the state (RelaunchActivity with the state's path), its frame held
- * meanwhile. Load state's list deletes states too.
+ * Manage ten save-state slots for the running game. Save through nativeSaveState off the UI
+ * thread. To load, pass the state path to RelaunchActivity and hold the frame until the new
+ * core starts. The load menu can also delete slots.
  */
 class SaveStates(
   private val activity: NativeCoreActivity,

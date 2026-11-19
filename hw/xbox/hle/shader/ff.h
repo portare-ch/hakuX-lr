@@ -215,24 +215,17 @@ typedef struct HleFfPush {
 /* The block in a storage buffer (set by the back end before any shader is made) */
 extern bool g_hle_push_ssbo;
 
-/* A linear texture is addressed by texel within its own size (its image
- * rect), clamped, bordered or wrapped at its edges. One sampled from a larger
- * surface (a target's top-left part: Munch's Oddysee samples the top 128 rows
- * of its 128 x 2048 shadow target as a 128 x 128 texture, clamped) has its
- * texel coordinates kept inside that size first, as the stage's address mode
- * says: else the sampler's edges are the surface's, and the rows past the
- * texture's (black) drew a box over the ground. The push block's fog.w (bits,
- * vk/draw.c lin_rect; one stage a draw): width - 1 in 0-11, height - 1 in
- * 12-23 (the NV2A's are 4096 at most), U's and V's mode in 24-25 and 26-27 (0
- * clamp, 1 border, 2 wrap, 3 mirror), the stage's low bit in 28 and high bit
- * in 31, bit 29 set and 30 clear: as a float always a normal, finite number
- * (a driver may flush a denormal or quiet a NaN on its way through a float),
- * never 0. A coordinate outside the rect in border mode goes far outside the
- * image, to the sampler's border colour; every mode ends kept half a texel of
- * the image (e: 0.5 over the resolution scale for a scaled surface) inside the
- * edges, so filtering never reaches a texel past them (a wrap's seam blends
- * with its edge texel instead of the opposite one). Emitted only for the keys
- * that ask (HlePshKey.vol's HLE_PSH_RECT). */
+/* Apply the stage's address modes within the linear texture's own extent before sampling a
+ * larger image. Munch's Oddysee uses the top 128 rows of a 128 x 2048 shadow target as a 128
+ * x 128 texture. Clamping at the image edge sampled the black rows below it.
+ *
+ * For the one affected stage, vk/draw.c packs width - 1 in fog.w bits 0–11 and height - 1 in
+ * 12–23. U and V modes use 24–25 and 26–27 (clamp, border, wrap, mirror). Bits 28 and 31
+ * encode the stage. Bit 29 is set and bit 30 clear so the float stays normal and finite.
+ *
+ * Border coordinates outside the extent are sent outside the image. Clamp in-range samples to
+ * half an image texel inside the extent to keep filtering within it. This makes a wrap seam
+ * blend with its edge texel. Emit this code for HLE_PSH_RECT keys only. */
 #define HLE_NVRECT_GLSL \
     "float nvaxis(float u, float n, uint m, float e) {\n" \
     "  if (m == 1u && (u < 0.0 || u > n)) return -65536.0;\n" \
@@ -284,16 +277,11 @@ static inline const char *hle_push_glsl(void)
 /* (the keys' wbuf 2: not w but the program's screen z, linear on screen: a
  * float depth buffer that holds the depth itself, vk/draw.c) */
 #define HLE_ZLIN_IN_GLSL "layout(location = 9) noperspective in float vW;\n"
-/* Screen-space depth z (0 .. the buffer's maximum, 2^n - 1) to [0, 1] as
- * `out`: pc.zscale is 2^-n for the integer formats (pbdraw.c), and
- * z 2^-n + z 2^-2n is z / (2^n - 1) to float precision, both products exact
- * and summed once ("precise": not folded into one product, whose scale
- * float32 can't hold). The float nearest 1 / (2^24 - 1) is above it: a
- * vertex a step in front of the far plane (2^24 - 2) came out at 1.0, and
- * Super Monkey Ball Deluxe's movies, drawn there over a depth buffer cleared
- * to the far plane, failed their LESS test (black, the subtitles over it
- * drawn). Any other scale (a float depth buffer's, pbdraw.c zfloat_scale)
- * is the plain product. */
+/* Normalize integer depth z from [0, 2^n - 1] to [0, 1]. With pc.zscale = 2^-n, compute z *
+ * 2^-n + z * 2^-2n. Both products are exact and the sum gives the quotient to float
+ * precision. GLSL precise prevents folding them into one product. The nearest float to 1 /
+ * (2^24 - 1) is too large, so it can round depth 2^24 - 2 to 1.0 and make Super Monkey Ball
+ * Deluxe's movie fail LESS. Float depth buffers use their scale as a single product. */
 #define HLE_ZNORM_GLSL(z, out) \
     "  precise float " out " = " z " * pc.zscale + " z " * (pc.zscale == uintBitsToFloat(0x33800000u) ||\n" \
     "      pc.zscale == uintBitsToFloat(0x37800000u) ? pc.zscale * pc.zscale : 0.0);\n"
@@ -357,45 +345,26 @@ static inline const char *hle_push_glsl(void)
     "  return clamp(t.xyz * iq, -1.0e7, 1.0e7);\n" \
     "}\n"
 
-/* Screen positions v (D3D screen pixels) to where the NV2A rasterizer puts
- * them. It truncates them to 1/16 pixel, and D3D's screen-space offset
- * (0.53125: half a pixel and 1/32, the truncation's rounding bias) lands the
- * positions it gives on pixel centres, which the edge rules then decide.
- * Here every position moves by that 1/32 alone: the same place for D3D's
- * positions, and every vertex by the same amount. Truncating each vertex
- * moved them apart by up to 1/16 pixel: a decal's quad and the surface under
- * it (other vertices) tilted against each other by up to 1/16 of the depth
- * slope per pixel, at a grazing angle more than the decal stands off, and it
- * flickered out as the camera moved (Burnout 3's road stains and manhole
- * covers, Dead or Alive 2's eaves shadows). A coordinate already on the
- * 1/16 grid stays where it is, as the truncation leaves it: moved, its
- * depth at every pixel was that of a point 1/32 pixel away, 1/32 of the
- * slope per pixel off (nxdk_pgraph_tests' Depth buffer, whose vertices are
- * whole pixels: 437 of 2^24 on its large quad). A position D3D gives is
- * never on the grid (its offset ends in 1/32).
- * The truncation itself (HLE_SNAP_TRUNC_FLAG) where a polygon offset is
- * exact (vk/draw.c snap_trunc): the decals' offsets hold there, and the
- * depths are the NV2A's (nxdk_pgraph_tests' W buffering, the fixed-function
- * floor: 25 of 2^24 off with the uniform shift). Not a coordinate too large
- * to have sixteenths (times 16 it may not be a float at all). */
+/* Match the NV2A screen-space offset. D3D adds 0.53125 to screen positions, which the NV2A
+ * truncates to 1/16-pixel steps. Subtracting 1/32 gives the same pixel centres for D3D and
+ * preserves the relative position of other vertices. Per-vertex truncation can change a
+ * decal's slope relative to the surface under it, causing flicker in Burnout 3 and DOA2. Keep
+ * coordinates already on the hardware grid to preserve their interpolated depth.
+ *
+ * Use exact truncation for HLE_SNAP_TRUNC_FLAG when polygon offset is accurate (vk/draw.c
+ * snap_trunc). This also matches the fixed-function floor in nxdk_pgraph_tests' W buffering.
+ * Skip truncation for coordinates too large to have sixteenths. */
 #define HLE_SNAP_TRUNC_FLAG 8192u
 #define HLE_SUBPIXEL_GLSL(v) \
     "  " v " = (pc.flags & 8192u) != 0u ?\n" \
     "      mix(" v ", trunc(" v " * 16.0) / 16.0, lessThan(abs(" v "), vec2(8388608.0))) :\n" \
     "      " v " - 0.03125 * vec2(notEqual(fract(" v " * 16.0), vec2(0.0)));\n"
 
-/* Screen positions v (D3D screen pixels, after HLE_SUBPIXEL_GLSL) at a
- * resolution scale s > 1 (HleFfPush.flags bits 16-23; bit 12: the NV2A's
- * antialiasing, whose texels are its samples: not then). The NV2A covers a
- * texel an edge's line passes through the centre of when it is a left or
- * top edge and not when right or bottom; scaled, such an edge crosses the
- * middle of the texel's s x s image pixels and covers about half of them.
- * D3D's full-target quads start on the first texel's centre (its 0.53125
- * offset, to 0.5): scaled they left the image's first column and
- * row as an earlier pass left them, and Splinter Cell Chaos Theory's bloom
- * blurred the blue its EMF vision had left there into a band along the
- * frame's left and top. Positions on a texel's centre move to its first
- * image pixel's: the texel is covered, or not, whole. */
+/* At render scales above 1x, move an edge on a logical texel centre to the centre of that
+ * texel's first image pixel. The whole texel then follows the NV2A's top-left fill rule.
+ * Without alignment, a full-target quad left the first image row and column from the previous
+ * pass, causing a blue border in Chaos Theory. Skip this for NV2A antialiasing (flags bit
+ * 12), whose texels are samples. Bits 16–23 hold the render scale. */
 #define HLE_TEXEL_EDGE_FLAG 4096u
 #define HLE_TEXEL_EDGE_GLSL(v) \
     "  { uint rsc = (pc.flags >> 16) & 255u;\n" \
