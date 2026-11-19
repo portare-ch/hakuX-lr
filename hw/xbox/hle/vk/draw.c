@@ -4241,6 +4241,9 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         /* fixed-function shadow buffers: not yet (white, as before) */
         uint32_t slot = shadow_fmt(c->tex[st]) ? 0 : stage_slot(c, st, rt_id, &lin);
         pc.flags |= (lin >> st & 1) << ki | (lin >> (st + 8) & 1) << (ki + 8);
+        if ((t[TSS_MAGFILTER] & 7) == 1 && (t[TSS_MINFILTER] & 7) == 1) {
+            pc.flags |= 16u << ki;          /* point sampled (ff_gen.c: a scaled surface's texel) */
+        }
         fs->texture = c->tex[st] ? (uint8_t)(1u | gl_clamp_axes(t) << 1) : 0;
         fs->unset = c->tex_unset >> st & 1;
         fs->alpha_kill = fs->texture && t[TSS_ALPHAKILL] != 0;

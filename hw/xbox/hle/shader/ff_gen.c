@@ -545,20 +545,35 @@ size_t hle_ff_ps_glsl(const HleFfPsKey *k, char *buf, size_t cap)
                 put(&b, "  vec2 uv%u = nvproj(vTex%u).xy;\n"
                         "  if ((pc.flags & %uu) != 0u) uv%u /= vec2(textureSize(sampler2D("
                         "uTex2D[nonuniformEXT(pc.tex[%u] & 0xFFFFu)], uSmp[0]), 0)) /\n"
-                        "      ((pc.flags & %uu) != 0u ? float(pc.flags >> 24) : 1.0);\n",
-                    s, s, 1u << s, s, s, 256u << s);
+                        "      ((pc.flags & %uu) != 0u ? float(pc.flags >> 24) : 1.0);\n"
+                        /* the lookup's gradients are the coordinates' own, whatever is
+                         * done to them below */
+                        "  vec2 g%ux = dFdx(uv%u), g%uy = dFdy(uv%u);\n"
+                        /* a scaled surface holds a texel's own sample in its block's
+                         * first pixel (ff.h HLE_TEXEL_EDGE_GLSL): a filtered lookup's
+                         * coordinates follow it there, a point-sampled one takes the
+                         * texel the console's pixel would (psh.c samp) */
+                        "  if ((pc.flags & %uu) != 0u) {\n"
+                        "    vec2 sz = vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(pc.tex[%u] & 0xFFFFu)], uSmp[0]), 0));\n"
+                        "    float sc = float(pc.flags >> 24), rs = float(max((pc.flags >> 16) & 255u, 1u));\n"
+                        "    if ((pc.flags & %uu) != 0u) {\n"
+                        "      vec2 fj = mod(floor(gl_FragCoord.xy), rs);\n"
+                        "      vec2 u0 = uv%u - g%ux * fj.x - g%uy * fj.y;\n"
+                        "      uv%u = (floor(u0 * sz / sc + 0.000244140625) * sc + 0.5) / sz + (uv%u - u0);\n"
+                        "    } else {\n"
+                        "      uv%u -= (0.5 * sc - 0.5) / sz;\n"
+                        "    }\n"
+                        "  }\n",
+                    s, s, 1u << s, s, s, 256u << s, s, s, s, s, 256u << s, s, 16u << s, s, s, s, s, s, s);
             }
             /* Use unclamped gradients for LOD and keep nearest samples inside the texture. */
-            if (st->texture & 6) {
-                put(&b, "  vec2 g%ux = dFdx(uv%u), g%uy = dFdy(uv%u);\n", s, s, s, s);
-            }
             if (st->texture & 2) {
                 put(&b, "  uv%u.x = clamp(uv%u.x, 0.0, 0.99999994);\n", s, s);
             }
             if (st->texture & 4) {
                 put(&b, "  uv%u.y = clamp(uv%u.y, 0.0, 0.99999994);\n", s, s);
             }
-            if (st->texture & 6) {
+            if (!(s == 0 && k->point_sprite)) {
                 put(&b, "  vec4 t%u = textureGrad(sampler2D(uTex2D[nonuniformEXT(pc.tex[%u] & 0xFFFFu)], "
                         "uSmp[nonuniformEXT(pc.tex[%u] >> 16)]), uv%u, g%ux, g%uy);\n",
                     s, s, s, s, s, s);

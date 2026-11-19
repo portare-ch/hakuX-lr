@@ -268,6 +268,8 @@ static const char k_conv_glsl[] =
     "  float sc = (pc.flags & (256u << s)) != 0u ? float(pc.flags >> 24) : 1.0;\n"
     "  if ((pc.flags & (1u << s)) != 0u)\n"
     "    uv /= sz / sc;\n"
+    /* a scaled surface holds a texel's own sample in its block's first pixel (ff.h HLE_TEXEL_EDGE_GLSL) */
+    "  if ((pc.flags & (256u << s)) != 0u) uv -= (0.5 * float(pc.flags >> 24) - 0.5) / sz;\n"
     "  vec2 gx = dFdx(uv), gy = dFdy(uv);\n"
     "  float lod = textureQueryLod(sampler2D(uTex2D[nonuniformEXT(ti)], "
     "uSmp[nonuniformEXT(si)]), uv).y;\n"
@@ -295,6 +297,8 @@ static const char k_conv_glc_glsl[] =
     "  float sc = (pc.flags & (256u << s)) != 0u ? float(pc.flags >> 24) : 1.0;\n"
     "  if ((pc.flags & (1u << s)) != 0u)\n"
     "    uv /= sz / sc;\n"
+    /* a scaled surface holds a texel's own sample in its block's first pixel (ff.h HLE_TEXEL_EDGE_GLSL) */
+    "  if ((pc.flags & (256u << s)) != 0u) uv -= (0.5 * float(pc.flags >> 24) - 0.5) / sz;\n"
     "  vec2 gx = dFdx(uv), gy = dFdy(uv);\n"
     "  float lod = textureQueryLod(sampler2D(uTex2D[nonuniformEXT(ti)], "
     "uSmp[nonuniformEXT(si)]), uv).y;\n"
@@ -398,9 +402,10 @@ static void shadow_sample(Buf *b, const HlePshKey *k, unsigned s, bool project3d
            "    if ((pc.flags & (1u << %uu)) != 0u)\n"
            /* a scaled surface's texel coordinates: sz / the resolution scale */
            "      uv /= sz / ((pc.flags & (256u << %uu)) != 0u ? float(pc.flags >> 24) : 1.0);\n"
+           "    if ((pc.flags & (256u << %uu)) != 0u) uv -= (0.5 * float(pc.flags >> 24) - 0.5) / sz;\n"
            "%s"
            "    float m = %s, r = %s;\n",
-        s, s, s, s, s, s, s, s, s, glcl, k_max[fmt], r);
+        s, s, s, s, s, s, s, s, s, s, glcl, k_max[fmt], r);
     if ((k->shadow_point >> s) & 1) {
         /* Point filtering compares one texel without weighting. */
         put(b, "    vec4 d = vec4(texture(sampler2D(uTex2D[nonuniformEXT(ti)], "
@@ -621,6 +626,28 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "  vec2 sz = vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[0]), 0));\n"
             "  if ((pc.flags & (1u << s)) != 0u)\n"
             "    uv /= sz / ((pc.flags & (256u << s)) != 0u ? float(pc.flags >> 24) : 1.0);\n"
+            /* a scaled surface holds a texel's own sample in its block's first pixel
+             * (ff.h HLE_TEXEL_EDGE_GLSL): a filtered lookup's coordinates follow it
+             * there. A point-sampled one takes the texel the console's pixel would:
+             * the one its coordinate names at the guest pixel's own sample (the
+             * first fragment of the target's block, found back along the
+             * derivatives; on a texel's edge the texel after it, as below), and in
+             * that texel's block the pixel as far from its first as this fragment is
+             * from its block's. */
+            "  bool spt = (pc.flags & (256u << s)) != 0u && (pc.flags & (16u << s)) != 0u;\n"
+            "  if (spt) {\n"
+            "    float sc = float(pc.flags >> 24), rs = float(max((pc.flags >> 16) & 255u, 1u));\n"
+            "    vec2 fj = mod(floor(gl_FragCoord.xy), rs);\n"
+            /* (the lookup's gradients are the coordinates' own: the texel's
+             * coordinates step from block to block) */
+            "    vec2 gx = dFdx(uv), gy = dFdy(uv);\n"
+            "    vec2 uv0 = uv - gx * fj.x - gy * fj.y;\n"
+            "    vec2 q = floor(uv0 * sz / sc + 0.000244140625);\n"
+            "    uv = (q * sc + 0.5) / sz + (uv - uv0);\n"
+            "    return textureGrad(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), %s, gx, gy);\n"
+            "  } else if ((pc.flags & (256u << s)) != 0u) {\n"
+            "    uv -= (0.5 * float(pc.flags >> 24) - 0.5) / sz;\n"
+            "  }\n"
             "%s"
             /* Point sampling, a coordinate on a texel's edge: the texel after
              * it. The NV2A's plane equations land such a coordinate on the
@@ -628,7 +655,7 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
              * texels over 640 pixels: every column and most rows at an
              * edge); interpolated here it falls a few units in the last place
              * to either side, by the triangle. 1/4096 texel settles it. */
-            "  if ((pc.flags & (16u << s)) != 0u)\n"
+            "  if ((pc.flags & (16u << s)) != 0u && !spt)\n"
             "    uv += 0.000244140625 / sz;\n"
             "  return %s;\n"
             "}\n"
@@ -694,6 +721,7 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "    if (r != 0u && s == ((r >> 28 & 1u) | (r >> 30 & 2u)))\n"
             "      uv = nvrect(uv, (pc.flags & (256u << s)) != 0u ? 0.5 / float(pc.flags >> 24) : 0.5); }\n"
             : "",
+        gl ? "glc2(s, uv)" : "uv",
         bsnap,
         gl ? "GLT2(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), s, uv)"
            : "texture(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), uv)",

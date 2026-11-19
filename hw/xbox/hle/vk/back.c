@@ -2091,7 +2091,8 @@ static bool readback_packed(const HleCmdReadback *c, VkBuffer buf, VkDeviceSize 
     VkImage img = o->img;
     VkImageLayout il = o->general ? VK_IMAGE_LAYOUT_GENERAL : o->layout;
     if (o->scale > 1) {                         /* the guest gets guest-size texels */
-        img = hle_surf_down(cb, o, il, level, layer, c->w, c->h, false);
+        /* each texel's own sample, as the linear readback's (below) */
+        img = hle_surf_down(cb, o, il, level, layer, c->w, c->h, true);
         if (!img) {
             return false;
         }
@@ -2166,10 +2167,9 @@ static void cmd_readback(const HleCmdReadback *c)
              * scaled target at its own size, one host pixel of each guest
              * pixel's block, not the block's blend: across an edge the
              * blend is a colour between the two sides, which no pixel of
-             * the console's has (nxdk_pgraph_tests at 2x: 291 pictures
-             * more match their captures). The pixel a nearest blit takes
-             * is the block's centre at an odd scale and the one below and
-             * right of it at an even one, where none is at the centre. */
+             * the console's has. The block's first, where the guest
+             * pixel's own sample is drawn (shader/ff.h
+             * HLE_TEXEL_EDGE_GLSL). */
             const bool one = c->nearest || (s->scale > 1 && w == s->d.w && h == s->d.h);
             img = hle_surf_down(cb, s, il, 0, 0, w, h, one);
             il = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
