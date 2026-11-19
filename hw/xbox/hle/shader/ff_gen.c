@@ -545,8 +545,12 @@ size_t hle_ff_ps_glsl(const HleFfPsKey *k, char *buf, size_t cap)
                 put(&b, "  vec2 uv%u = nvproj(vTex%u).xy;\n"
                         "  if ((pc.flags & %uu) != 0u) uv%u /= vec2(textureSize(sampler2D("
                         "uTex2D[nonuniformEXT(pc.tex[%u] & 0xFFFFu)], uSmp[0]), 0)) /\n"
-                        "      ((pc.flags & %uu) != 0u ? float(pc.flags >> 24) : 1.0);\n",
-                    s, s, 1u << s, s, s, 256u << s);
+                        "      ((pc.flags & %uu) != 0u ? float(pc.flags >> 24) : 1.0);\n"
+                        /* a scaled surface holds a texel's own sample in its block's
+                         * first pixel (ff.h HLE_TEXEL_EDGE_GLSL) */
+                        "  if ((pc.flags & %uu) != 0u) uv%u -= (0.5 * float(pc.flags >> 24) - 0.5) /\n"
+                        "      vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(pc.tex[%u] & 0xFFFFu)], uSmp[0]), 0));\n",
+                    s, s, 1u << s, s, s, 256u << s, 256u << s, s, s);
             }
             /* Use unclamped gradients for LOD and keep nearest samples inside the texture. */
             if (st->texture & 6) {

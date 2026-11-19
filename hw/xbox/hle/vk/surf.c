@@ -606,6 +606,73 @@ VkImage hle_surf_down(VkCommandBuffer cb, HleVkSurf *o, VkImageLayout layout,
                                        (int32_t)MAX(o->h >> level, 1u), 1 } },
         .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
         .dstOffsets = { { 0, 0, 0 }, { (int32_t)w, (int32_t)h, 1 } } };
+    /* One pixel of each block (nearest), of an image a whole number of
+     * times the size: the block's first, where the guest pixel's own sample
+     * is drawn (shader/ff.h HLE_TEXEL_EDGE_GLSL). A blit cannot take it: at
+     * an even factor its sample point is on the line between two pixels,
+     * and which one a driver takes differs. Copies do, exactly and for any
+     * format: every block's first column into an image of the guest's
+     * width, then every block's first row of that. */
+    const uint32_t sw = MAX(o->w >> level, 1u), sh = MAX(o->h >> level, 1u);
+    const uint32_t fx = w ? sw / w : 0, fy = h ? sh / h : 0;
+    if (!lin && fx >= 1 && fy >= 1 && fx * w == sw && fy * h == sh && (fx > 1 || fy > 1)) {
+        VkImage mid = fx > 1 && fy > 1 ? down_image(o->fmt, w, sh) : VK_NULL_HANDLE;
+        VkImageCopy2 *cr = g_new0(VkImageCopy2, MAX(w, h));
+        if (fx > 1 && fy > 1 && !mid) {
+            g_free(cr);
+            return VK_NULL_HANDLE;
+        }
+        VkImage from = o->img;
+        VkImageLayout from_l = layout;
+        uint32_t from_level = level, from_layer = layer;
+        if (fx > 1) {                           /* columns */
+            VkImage to = mid ? mid : d;
+            if (mid) {
+                hle_img_barrier(cb, mid, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
+                                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+            }
+            for (uint32_t x = 0; x < w; x++) {
+                cr[x] = (VkImageCopy2){
+                    .sType = VK_STRUCTURE_TYPE_IMAGE_COPY_2,
+                    .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, from_level, from_layer, 1 },
+                    .srcOffset = { (int32_t)(x * fx), 0, 0 },
+                    .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+                    .dstOffset = { (int32_t)x, 0, 0 }, .extent = { 1, sh, 1 } };
+            }
+            const VkCopyImageInfo2 ci = {
+                .sType = VK_STRUCTURE_TYPE_COPY_IMAGE_INFO_2, .srcImage = from, .srcImageLayout = from_l,
+                .dstImage = to, .dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                .regionCount = w, .pRegions = cr };
+            T.vkCmdCopyImage2(cb, &ci);
+            if (mid) {
+                hle_img_barrier(cb, mid, VK_IMAGE_ASPECT_COLOR_BIT,
+                                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+            }
+            from = mid;
+            from_l = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+            from_level = from_layer = 0;
+        }
+        if (fy > 1) {                           /* rows */
+            for (uint32_t y = 0; y < h; y++) {
+                cr[y] = (VkImageCopy2){
+                    .sType = VK_STRUCTURE_TYPE_IMAGE_COPY_2,
+                    .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, from_level, from_layer, 1 },
+                    .srcOffset = { 0, (int32_t)(y * fy), 0 },
+                    .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+                    .dstOffset = { 0, (int32_t)y, 0 }, .extent = { w, 1, 1 } };
+            }
+            const VkCopyImageInfo2 ci = {
+                .sType = VK_STRUCTURE_TYPE_COPY_IMAGE_INFO_2, .srcImage = from, .srcImageLayout = from_l,
+                .dstImage = d, .dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                .regionCount = h, .pRegions = cr };
+            T.vkCmdCopyImage2(cb, &ci);
+        }
+        g_free(cr);
+        hle_img_barrier(cb, d, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+        return d;
+    }
     VkBlitImageInfo2 bi = {
         .sType = VK_STRUCTURE_TYPE_BLIT_IMAGE_INFO_2,
         .srcImage = o->img, .srcImageLayout = layout,

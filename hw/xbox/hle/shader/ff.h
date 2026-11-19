@@ -360,16 +360,29 @@ static inline const char *hle_push_glsl(void)
     "      mix(" v ", trunc(" v " * 16.0) / 16.0, lessThan(abs(" v "), vec2(8388608.0))) :\n" \
     "      " v " - 0.03125 * vec2(notEqual(fract(" v " * 16.0), vec2(0.0)));\n"
 
-/* At render scales above 1x, move an edge on a logical texel centre to the centre of that
- * texel's first image pixel. The whole texel then follows the NV2A's top-left fill rule.
- * Without alignment, a full-target quad left the first image row and column from the previous
- * pass, causing a blue border in Chaos Theory. Skip this for NV2A antialiasing (flags bit
- * 12), whose texels are samples. Bits 16–23 hold the render scale. */
+/* At render scales above 1x, a guest pixel is a block of image pixels, and the block's first
+ * pixel is the guest pixel's own sample: every position moves so that a guest pixel's centre
+ * lands on the centre of its block's first image pixel. An edge on a guest pixel's centre then
+ * fills the whole block by the NV2A's top-left rule (a full-target quad left the first image
+ * row and column from the previous pass, a blue border in Chaos Theory), and what the first
+ * pixel holds (coverage, colour, depth) is what the console's pixel holds. The block's other
+ * pixels sample the way on to the next guest pixel's centre.
+ *
+ * All positions move alike. Moving only those on a centre, as before, put screen-aligned
+ * quads half a guest pixel (less half an image pixel) from the geometry around them, and left
+ * no image pixel at a guest pixel's centre at even scales: polygon edges and depths read back
+ * differed from the console's (nxdk_pgraph_tests at 2x: 2467 of 3576 pictures matched their
+ * captures, 3004 with this). What reads a scaled image follows the same placement: the
+ * readback takes each block's first pixel (vk/surf.c hle_surf_down), a texture lookup of a
+ * scaled surface is moved with it (psh.c samp).
+ *
+ * Skip this for NV2A antialiasing (flags bit 12), whose texels are samples. Bits 16-23 hold
+ * the render scale. */
 #define HLE_TEXEL_EDGE_FLAG 4096u
 #define HLE_TEXEL_EDGE_GLSL(v) \
     "  { uint rsc = (pc.flags >> 16) & 255u;\n" \
     "    if (rsc > 1u && (pc.flags & 4096u) == 0u)\n" \
-    "      " v " -= vec2(equal(fract(" v "), vec2(0.5))) * (0.5 - 0.5 / float(rsc)); }\n"
+    "      " v " -= vec2(0.5 - 0.5 / float(rsc)); }\n"
 
 /* GLSL source into buf (NUL-terminated); returns its length, or 0 if it did
  * not fit. */
