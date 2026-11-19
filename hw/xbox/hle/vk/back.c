@@ -1682,6 +1682,9 @@ static bool clear_depth_drawn(HleVkSurf *rt, HleVkSurf *ds, float z, const VkRec
         return false;
     }
     VkCommandBuffer cb = cb_get();
+    /* not a draw of the title's: a visibility test open in the pass does not
+     * count its pixels (the next draw starts another part of it) */
+    vis_pass_end(cb);
     uint32_t w = rt ? MIN(rt->w, ds->w) : ds->w, h = rt ? MIN(rt->h, ds->h) : ds->h;
     T.vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, p);
     hle_draw_state_lost();
@@ -2981,6 +2984,13 @@ static void back_free(void)
     T.vkDestroyShaderModule(d, g_mc.fs, NULL);
     T.vkDestroyPipelineLayout(d, g_mc.pl, NULL);
     memset(&g_mc, 0, sizeof(g_mc));
+    for (unsigned i = 0; i < g_zc.np; i++) {
+        T.vkDestroyPipeline(d, g_zc.p[i].p, NULL);
+    }
+    T.vkDestroyShaderModule(d, g_zc.vs, NULL);
+    T.vkDestroyShaderModule(d, g_zc.fs, NULL);
+    T.vkDestroyPipelineLayout(d, g_zc.pl, NULL);
+    memset(&g_zc, 0, sizeof(g_zc));
     T.vkDestroyImageView(d, g_ovl_img.view, NULL);
     T.vkDestroyImage(d, g_ovl_img.img, NULL);
     T.vkFreeMemory(d, g_ovl_img.mem, NULL);
