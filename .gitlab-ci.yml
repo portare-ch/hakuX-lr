@@ -4,6 +4,8 @@
 include:
   - project: libretro-infrastructure/ci-templates
     file: /linux-cmake.yml
+  - project: libretro-infrastructure/ci-templates
+    file: /android-cmake.yml
 
 stages:
   - build-prepare
@@ -15,6 +17,7 @@ variables:
 .core-defs:
   variables:
     CORENAME: hakux-lr
+    HAKUX_VERSION: git-${CI_COMMIT_SHORT_SHA}
 
 # Use the same Ubuntu release as the GitHub AMD64 builds for the runtime ABI.
 prepare-linux-x64-sysroot:
@@ -35,20 +38,14 @@ prepare-linux-x64-sysroot:
       - build/sysroot-jammy.tar.gz
     expire_in: 1 day
 
-libretro-build-linux-x64:
-  extends:
-    - .libretro-linux-cmake-x86_64
-    - .core-defs
+.linux-core:
+  extends: .core-defs
   stage: build-shared
   image: rust:1.99.1-slim-trixie@sha256:9daf2b244ccc30523e55cafe32edf8465671ba567d0101620e5612ccb76ea1a7
-  needs:
-    - job: prepare-linux-x64-sysroot
-      artifacts: true
   variables:
     CC: clang-19
     CXX: clang++-19
-    HAKUX_BUILD: ${CI_PROJECT_DIR}/build/libretro-linux-x64
-    HAKUX_VERSION: git-${CI_COMMIT_SHORT_SHA}
+    HAKUX_BUILD: ${CI_PROJECT_DIR}/build/libretro-linux
   before_script:
     - apt-get update
     - >-
@@ -56,17 +53,68 @@ libretro-build-linux-x64:
       build-essential clang-19 lld-19 llvm-19 cmake ninja-build git python3
       pkg-config ca-certificates zlib1g-dev
   script:
-    - mkdir -p build/sysroot-jammy
-    - tar -xzf build/sysroot-jammy.tar.gz -C build/sysroot-jammy
-    - sh tools/native/linux-prepare-sysroot.sh build/sysroot-jammy
     - python3 tools/native/linux-deps.py
-    - >-
-      sh tools/native/linux-build.sh --core-only
-      "-DCMAKE_SYSROOT=$CI_PROJECT_DIR/build/sysroot-jammy"
-      -DHAKUX_CPU=kvm -DHAKUX_DSP_JIT=ON
+    - |
+      set -- "-DHAKUX_CPU=$HAKUX_CPU" -DHAKUX_DSP_JIT=ON
+      if [ -n "${HAKUX_SYSROOT:-}" ]; then
+        mkdir -p "$HAKUX_SYSROOT"
+        tar -xzf build/sysroot-jammy.tar.gz -C "$HAKUX_SYSROOT"
+        sh tools/native/linux-prepare-sysroot.sh "$HAKUX_SYSROOT"
+        set -- "$@" "-DCMAKE_SYSROOT=$HAKUX_SYSROOT"
+      fi
+      sh tools/native/linux-build.sh --core-only "$@"
     - sh tools/native/linux-package.sh "$HAKUX_VERSION"
     - python3 tools/native/linux-verify.py "$HAKUX_VERSION"
     - cp "build/package/hakux-lr-$HAKUX_VERSION/lib/libretro/hakux-lr_libretro.so" .
   artifacts:
     paths:
       - hakux-lr_libretro.so
+
+libretro-build-linux-x64:
+  extends:
+    - .libretro-linux-cmake-x86_64
+    - .linux-core
+  needs:
+    - job: prepare-linux-x64-sysroot
+      artifacts: true
+  variables:
+    HAKUX_CPU: kvm
+    HAKUX_SYSROOT: ${CI_PROJECT_DIR}/build/sysroot-jammy
+
+libretro-build-linux-aarch64:
+  extends:
+    - .libretro-linux-cmake-aarch64
+    - .linux-core
+  dependencies: []
+  variables:
+    HAKUX_CPU: fex
+
+android-arm64-v8a:
+  extends:
+    - .libretro-android-cmake-arm64-v8a
+    - .core-defs
+  stage: build-shared
+  image: debian:stable-slim@sha256:a717a33469731894e77e912ea7d714e27c2dc38ee6554fd1a3102e92999cfc66
+  dependencies: []
+  variables:
+    ANDROID_NDK: ${CI_PROJECT_DIR}/build/android-ndk-r29
+  before_script:
+    - apt-get update
+    - >-
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends
+      ca-certificates cmake curl git ninja-build python3 unzip
+  script:
+    - mkdir -p build
+    - >-
+      curl --fail --location --retry 3 --output build/android-ndk-r29-linux.zip
+      https://dl.google.com/android/repository/android-ndk-r29-linux.zip
+    - >-
+      printf '%s  %s\n' 87e2bb7e9be5d6a1c6cdf5ec40dd4e0c6d07c30b
+      build/android-ndk-r29-linux.zip | sha1sum --check
+    - unzip -q build/android-ndk-r29-linux.zip -d build
+    - python3 tools/native/linux-deps.py
+    - sh tools/native/android-libretro.sh "$HAKUX_VERSION"
+    - cp "build/package/hakux-lr-$HAKUX_VERSION-android-arm64/hakux-lr_libretro_android.so" .
+  artifacts:
+    paths:
+      - hakux-lr_libretro_android.so
