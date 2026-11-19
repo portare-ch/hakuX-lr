@@ -540,6 +540,8 @@ static VkClearColorValue color_of(uint32_t argb)
  * one (the draw merge count, hle_draw_ff_diag). */
 uint64_t hle_back_breaks;
 
+static bool clear_depth_drawn(HleVkSurf *rt, HleVkSurf *ds, float z, const VkRect2D *r, uint32_t nr);
+
 /* lrz_off: the pass's first draw runs without the driver's LRZ
  * (hle_draw_lrz_off; true when not known) */
 static bool open_pass(bool lrz_off)
@@ -577,6 +579,7 @@ static bool open_pass(bool lrz_off)
         ca.clearValue.color = cfresh ? (VkClearColorValue){ .float32 = { 0 } } : g_back.pend_color;
     }
     VkImageAspectFlags in_pass_clear = 0;   /* HLE_QUIRK_DS_SAME_LOAD */
+    bool z_drawn = false;                   /* the depth clear is a draw's */
     bool stencil = ds && (ds->aspect & VK_IMAGE_ASPECT_STENCIL_BIT);
     if (ds) {
         w = MIN(w, ds->w);
@@ -630,6 +633,11 @@ static bool open_pass(bool lrz_off)
         sa = da;
         sa.loadOp = (pf & HLE_CLEAR_STENCIL) ? VK_ATTACHMENT_LOAD_OP_CLEAR
                                              : VK_ATTACHMENT_LOAD_OP_LOAD;
+        if ((pf & HLE_CLEAR_ZBUFFER) && !isfinite(g_back.pend_z)) {
+            /* drawn once the pass has begun (clear_depth_drawn) */
+            da.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+            z_drawn = true;
+        }
         if (stencil && da.loadOp != sa.loadOp && hle_quirk(HLE_QUIRK_DS_SAME_LOAD)) {
             /* both loaded, the cleared aspect cleared once the pass begins */
             in_pass_clear = da.loadOp == VK_ATTACHMENT_LOAD_OP_CLEAR ? VK_IMAGE_ASPECT_DEPTH_BIT
@@ -647,6 +655,12 @@ static bool open_pass(bool lrz_off)
     if (in_pass_clear) {
         VkClearAttachment za = { .aspectMask = in_pass_clear,
                                  .clearValue.depthStencil = { g_back.pend_z, g_back.pend_s } };
+        VkClearRect zr = { .rect = ri.renderArea, .baseArrayLayer = 0, .layerCount = 1 };
+        T.vkCmdClearAttachments(cb, 1, &za, 1, &zr);
+    }
+    if (z_drawn && !clear_depth_drawn(rt, ds, g_back.pend_z, &ri.renderArea, 1)) {
+        VkClearAttachment za = { .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
+                                 .clearValue.depthStencil = { g_back.pend_z, 0 } };
         VkClearRect zr = { .rect = ri.renderArea, .baseArrayLayer = 0, .layerCount = 1 };
         T.vkCmdClearAttachments(cb, 1, &za, 1, &zr);
     }
@@ -1559,6 +1573,128 @@ static bool clear_masked(const HleCmdClear *c, HleVkSurf *rt, HleVkSurf *ds, uin
     return true;
 }
 
+/* ---- depth clears the driver's own does not take ------------------------------ */
+
+/* A 24-bit float depth buffer that holds the depth itself
+ * (VK_EXT_depth_range_unrestricted) is cleared to +infinity for the NV2A's
+ * 0xFFFFFF, D3D's far (pb/pbdraw.c zfloat_clear). Mesa 26.3's RADV clears by
+ * a rectangle whose vertices carry the value as their z, and an infinite one
+ * leaves the buffer as it was: nxdk_pgraph_tests' W buffering kept the test
+ * before's depths and drew nothing (26.2 wrote the value from its pixel
+ * shader). So a value that is not finite is written here the same way: a
+ * triangle over the cleared rectangles whose pixel shader stores it, colour
+ * and stencil untouched. One pipeline per attachment formats. */
+static const char k_zc_fs[] =
+    "#version 450\n"
+    "layout(push_constant) uniform P { float z; } pc;\n"
+    "void main() { gl_FragDepth = pc.z; }\n";
+
+static struct {
+    bool failed;
+    VkPipelineLayout pl;
+    VkShaderModule vs, fs;
+    struct { VkFormat cf, df; bool st; VkPipeline p; } p[16];
+    unsigned np;
+} g_zc;
+
+static VkPipeline zc_pipe(VkFormat cf, VkFormat df, bool st)
+{
+    for (unsigned i = 0; i < g_zc.np; i++) {
+        if (g_zc.p[i].cf == cf && g_zc.p[i].df == df && g_zc.p[i].st == st) {
+            return g_zc.p[i].p;
+        }
+    }
+    if (g_zc.failed || g_zc.np == ARRAY_SIZE(g_zc.p)) {
+        return VK_NULL_HANDLE;
+    }
+    if (!g_zc.pl) {
+        VkPushConstantRange pr = { VK_SHADER_STAGE_FRAGMENT_BIT, 0, 4 };
+        VkPipelineLayoutCreateInfo pli = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+            .pushConstantRangeCount = 1, .pPushConstantRanges = &pr };
+        g_zc.vs = mc_module(HLE_SHADER_VERTEX, k_mc_vs);
+        g_zc.fs = mc_module(HLE_SHADER_FRAGMENT, k_zc_fs);
+        if (!g_zc.vs || !g_zc.fs ||
+            T.vkCreatePipelineLayout(g_hvk.dev, &pli, NULL, &g_zc.pl) != VK_SUCCESS) {
+            g_zc.failed = true;
+            hle_log("hakuX-lr-hle-back", "drawn depth clear: setup failed (the driver's clear)");
+            return VK_NULL_HANDLE;
+        }
+    }
+    VkPipelineShaderStageCreateInfo sti[2] = {
+        { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+          .stage = VK_SHADER_STAGE_VERTEX_BIT, .module = g_zc.vs, .pName = "main" },
+        { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+          .stage = VK_SHADER_STAGE_FRAGMENT_BIT, .module = g_zc.fs, .pName = "main" },
+    };
+    VkPipelineVertexInputStateCreateInfo vi = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+    VkPipelineInputAssemblyStateCreateInfo ia = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST };
+    VkPipelineViewportStateCreateInfo vp = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        .viewportCount = 1, .scissorCount = 1 };
+    VkPipelineRasterizationStateCreateInfo rs = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        .polygonMode = VK_POLYGON_MODE_FILL, .cullMode = VK_CULL_MODE_NONE, .lineWidth = 1.0f };
+    VkPipelineMultisampleStateCreateInfo ms = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+        .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT };
+    /* every pixel takes the value; no depth clamp, which would bring it back
+     * into the viewport's 0 .. 1 */
+    VkPipelineDepthStencilStateCreateInfo dsi = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+        .depthTestEnable = VK_TRUE, .depthWriteEnable = VK_TRUE,
+        .depthCompareOp = VK_COMPARE_OP_ALWAYS };
+    VkPipelineColorBlendAttachmentState cba = { .colorWriteMask = 0 };
+    VkPipelineColorBlendStateCreateInfo cb = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+        .attachmentCount = cf ? 1 : 0, .pAttachments = &cba };
+    VkDynamicState dyn[2] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+    VkPipelineDynamicStateCreateInfo dy = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+        .dynamicStateCount = 2, .pDynamicStates = dyn };
+    VkPipelineRenderingCreateInfo ri = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+        .colorAttachmentCount = cf ? 1 : 0, .pColorAttachmentFormats = &cf,
+        .depthAttachmentFormat = df, .stencilAttachmentFormat = st ? df : VK_FORMAT_UNDEFINED };
+    VkGraphicsPipelineCreateInfo gci = {
+        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, .pNext = &ri,
+        .stageCount = 2, .pStages = sti, .pVertexInputState = &vi, .pInputAssemblyState = &ia,
+        .pViewportState = &vp, .pRasterizationState = &rs, .pMultisampleState = &ms,
+        .pDepthStencilState = &dsi, .pColorBlendState = &cb, .pDynamicState = &dy,
+        .layout = g_zc.pl };
+    VkPipeline p = VK_NULL_HANDLE;
+    if (T.vkCreateGraphicsPipelines(g_hvk.dev, VK_NULL_HANDLE, 1, &gci, NULL, &p) != VK_SUCCESS) {
+        return VK_NULL_HANDLE;
+    }
+    g_zc.p[g_zc.np++] = (typeof(g_zc.p[0])){ cf, df, st, p };
+    return p;
+}
+
+/* The depth of the open pass's rectangles set to z: false = not drawn. */
+static bool clear_depth_drawn(HleVkSurf *rt, HleVkSurf *ds, float z, const VkRect2D *r, uint32_t nr)
+{
+    VkPipeline p = zc_pipe(rt ? rt->fmt : VK_FORMAT_UNDEFINED, ds->fmt,
+                           (ds->aspect & VK_IMAGE_ASPECT_STENCIL_BIT) != 0);
+    if (!p) {
+        return false;
+    }
+    VkCommandBuffer cb = cb_get();
+    uint32_t w = rt ? MIN(rt->w, ds->w) : ds->w, h = rt ? MIN(rt->h, ds->h) : ds->h;
+    T.vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, p);
+    hle_draw_state_lost();
+    T.vkCmdPushConstants(cb, g_zc.pl, VK_SHADER_STAGE_FRAGMENT_BIT, 0, 4, &z);
+    VkViewport v = { 0, 0, (float)w, (float)h, 0.0f, 1.0f };
+    T.vkCmdSetViewport(cb, 0, 1, &v);
+    for (uint32_t i = 0; i < nr; i++) {
+        T.vkCmdSetScissor(cb, 0, 1, &r[i]);
+        T.vkCmdDraw(cb, 3, 1, 0, 0);
+    }
+    return true;
+}
+
 static void cmd_clear(const HleCmdClear *c)
 {
     HleVkSurf *rt = hle_surf_get(g_back.rt), *ds = hle_surf_get(g_back.ds);
@@ -1661,7 +1797,24 @@ static void cmd_clear(const HleCmdClear *c)
                                          0, 1 };
         }
     }
-    if (nr) {
+    if (nr && (flags & HLE_CLEAR_ZBUFFER) && !isfinite(c->z)) {
+        VkRect2D zr[HLE_CMD_MAX_RECTS];
+        for (uint32_t i = 0; i < nr; i++) {
+            zr[i] = rects[i].rect;
+            /* (the pass is as wide as the narrower of the two) */
+            zr[i].extent.width = MIN(zr[i].extent.width, ds->w - MIN(ds->w, (uint32_t)zr[i].offset.x));
+            zr[i].extent.height = MIN(zr[i].extent.height, ds->h - MIN(ds->h, (uint32_t)zr[i].offset.y));
+        }
+        if (clear_depth_drawn(rt, ds, c->z, zr, nr)) {
+            at[na - 1].aspectMask &= ~(VkImageAspectFlags)VK_IMAGE_ASPECT_DEPTH_BIT;
+            if (!at[na - 1].aspectMask) {
+                na--;
+            }
+        }
+    }
+    if (nr && !na) {
+        hle_surf_written(ds);
+    } else if (nr) {
         T.vkCmdClearAttachments(g_back.fr[g_back.cur].cb, na, at, nr, rects);
         if (ds && (flags & (HLE_CLEAR_ZBUFFER | HLE_CLEAR_STENCIL))) {
             hle_surf_written(ds);
