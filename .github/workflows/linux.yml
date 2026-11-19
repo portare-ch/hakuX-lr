@@ -32,7 +32,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: c06afaeff46aca182bc589fa1e4203c337778109
+          ref: e0ad2db8616fc1c50ca8cd8cdb0001f9bc71d475
       - name: Run the GitLab job commands
         env:
           PREFLIGHT_JOB: ${{ matrix.job }}
