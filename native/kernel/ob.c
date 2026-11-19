@@ -61,6 +61,12 @@ void nc_ob_dereference(NcKernel *k, uint32_t object)
     release(k, object, type_of(k, object));
 }
 
+void nc_ob_reference(NcKernel *k, uint32_t object)
+{
+    const uint32_t hdr = object - OB_HEADER;
+    nc_vm_wr32(k->vm, hdr, nc_vm_rd32(k->vm, hdr) + 1);
+}
+
 uint32_t nc_ob_create(NcKernel *k, enum NcObType type, uint32_t body_size)
 {
     if (freeable(type) && g_ob_size[type] != UINT32_MAX) {
@@ -160,8 +166,7 @@ static uint64_t NtDuplicateObject(NcKernel *k, NcFrame *f, const uint32_t *a)
 /* ObfReferenceObject(Object) */
 static uint64_t ObfReferenceObject(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
-    const uint32_t hdr = a[0] - OB_HEADER;
-    nc_vm_wr32(k->vm, hdr, nc_vm_rd32(k->vm, hdr) + 1);
+    nc_ob_reference(k, a[0]);
     return 0;
 }
 
