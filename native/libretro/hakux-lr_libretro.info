@@ -1,8 +1,5 @@
 # Copyright (C) 2026-present PortareOS
 # SPDX-License-Identifier: GPL-2.0-or-later
-# hakuX-lr's core info for RetroArch (LIBRETRO_SPEC.md section 10).
-# savestate = "false": with no save states RetroArch never runs ahead,
-# which would load a second hakuX-lr into its process.
 display_name = "Microsoft - Xbox (hakuX-lr)"
 authors = "hakuX-lr contributors|hakuX contributors"
 supported_extensions = "iso|chd"
@@ -29,5 +26,5 @@ load_subsystem = "false"
 hw_render = "true"
 required_hw_api = "Vulkan >= 1.2"
 is_experimental = "true"
-description = "hakuX-lr is an original Xbox emulator for ARM64 and x86-64 Linux. Uses Vulkan graphics and requires no BIOS, MCPX ROM or hard disk image."
-notes = "(!) Requires ARM64 or x86-64 Linux, Vulkan 1.2 (1.3 recommended) and RetroArch's vulkan video driver.|x86-64 requires Linux 5.16+, access to /dev/kvm, TSC scaling and UMIP.|Game saves and caches are stored in hdd/ and cache/ under RetroArch's save directory.|Start Core (no content) boots the Xbox dashboard installed in hdd/Partition2.|Save states, rewind and run-ahead are not supported."
+description = "hakuX-lr is an original Xbox emulator for Linux x86-64, Linux ARM64 and Android ARM64. Uses Vulkan graphics and requires no BIOS, MCPX ROM or hard disk image."
+notes = "(!) Requires RetroArch's vulkan video driver and Vulkan 1.2 or newer (1.3 recommended).|Linux x86-64 requires Linux 5.16+, access to /dev/kvm, TSC scaling and UMIP.|Android ARM64 requires Android 9 (API 28) or newer.|Game saves and caches are stored in hdd/ and cache/ under RetroArch's save directory.|Start Core (no content) boots the Xbox dashboard installed in hdd/Partition2.|Save states, rewind and run-ahead are not supported."

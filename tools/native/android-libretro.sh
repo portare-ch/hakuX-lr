@@ -66,8 +66,8 @@ lines = {
     'display_version': version,
     'description': 'hakuX-lr is an original Xbox emulator for ARM64 Android. Uses Vulkan graphics and requires no BIOS, '
                    'MCPX ROM or hard disk image.',
-    'notes': "(!) Experimental on Android. Requires an ARM64 device, Vulkan 1.2 (1.3 recommended) and "
-             "RetroArch's vulkan video driver.|Game saves and caches are stored in hdd/ and cache/ under "
+    'notes': "(!) Experimental on Android. Requires Android 9 (API 28) or newer on ARM64, Vulkan 1.2 (1.3 recommended) "
+             "and RetroArch's vulkan video driver.|Game saves and caches are stored in hdd/ and cache/ under "
              "RetroArch's save directory.|Start Core (no content) boots the Xbox dashboard installed in "
              "hdd/Partition2.|Save states, rewind and run-ahead are not supported.",
 }
