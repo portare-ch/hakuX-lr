@@ -1491,6 +1491,24 @@ static void rt_first_write(bool full)
  * back: without this neither format's draws reached the other's image.
  * Only linear colour targets; one of the same format is the old paths' and
  * the coherence's own business. */
+
+/* x's memory was written since its image last matched it. A target the old
+ * paths keep is asked by its pages' dirty bits, which the asking takes: they
+ * are put back, so that its next use still has the CPU's rows uploaded
+ * (rt_cpu_sync), as writeback_range does. */
+static bool alias_mem_newer(PbObj *x)
+{
+    uint32_t xl;
+    if (coh_managed(x, &xl)) {
+        return coh_mem_newer(x);
+    }
+    if (!obj_written(x)) {
+        return false;
+    }
+    hle_mem_mark_written(x->d.pa, x->d.pitch * x->d.h);
+    return true;
+}
+
 static void alias_sync(PbObj *o)
 {
     const HleFmtInfo *fi = o && o->id && o->d.pitch && !o->cube ? hle_fmt_info(o->d.xfmt) : NULL;
@@ -1505,13 +1523,12 @@ static void alias_sync(PbObj *o)
         PbObj *x = &g_pd.objs[i];
         const HleFmtInfo *xi = x->id && x != o && x->d.pitch && !x->cube && x->d.xfmt != o->d.xfmt ?
                                hle_fmt_info(x->d.xfmt) : NULL;
-        uint32_t xl;
         /* (one whose memory the CPU wrote since, or a texture was defined
          * from, is no longer what the memory holds: the memory is the newer,
          * and the target's own first write takes it, coh_first_write) */
         if (xi && !(xi->flags & (HLE_FI_DEPTH | HLE_FI_DXT)) && x->d.pa < o->d.pa + len &&
             x->d.pa + x->d.pitch * x->d.h > o->d.pa && x->written > o->written && !obj_superseded(x) &&
-            !(coh_managed(x, &xl) ? coh_mem_newer(x) : obj_written(x))) {
+            !alias_mem_newer(x)) {
             al[nal++] = x;
             newest = MAX(newest, x->written);
             v = MAX(v, x->wb_v);            /* (a writeback of its own under way) */
@@ -1520,19 +1537,33 @@ static void alias_sync(PbObj *o)
     if (newest <= o->alias_seq) {
         return;                             /* none drawn on since it last took the memory */
     }
+    /* Its own image first where that is newer than its memory (a large
+     * target is not written back at its unbind): the others may cover only
+     * part of it, and the rest of what was drawn on it is nowhere else. Its
+     * rows then lie over theirs, so each of them goes back after it, whether
+     * its memory had its pixels already or not. */
+    bool own = o->written > MAX(o->wb_written, o->synced) && o->written != o->up_written &&
+               !obj_superseded(o) && !alias_mem_newer(o);
+    if (own) {
+        const uint64_t w = writeback_ex(o->id, true);
+        own = w != 0;
+        v = MAX(v, w);
+    }
+    uint64_t after = 0;
     for (unsigned n = 0; n < nal; n++) {    /* the oldest first */
         PbObj *best = NULL;
         for (unsigned i = 0; i < nal; i++) {
             PbObj *x = al[i];
-            if (x->written > MAX(x->wb_written, x->synced) && (!best || x->written < best->written)) {
+            if (x->written > after && (own || x->written > MAX(x->wb_written, x->synced)) &&
+                (!best || x->written < best->written)) {
                 best = x;
             }
         }
-        const uint64_t w = best ? writeback_ex(best->id, true) : 0;
-        if (!w) {
+        if (!best) {
             break;
         }
-        v = MAX(v, w);
+        after = best->written;
+        v = MAX(v, writeback_ex(best->id, true));
     }
     if (v) {
         coh_wait(v);
@@ -1555,11 +1586,14 @@ static void rt_first_land(bool full)
 {
     PbObj *o = g_pd.rt_fresh && !full ? obj_of(g_pd.rt) : NULL;
     uint32_t len;
-    if (o) {
-        alias_sync(o);
-    }
+    /* (a new image's landing first: alias_sync's upload counts as a write
+     * to it, and the newest image over its memory, a swizzled one too, is
+     * to be in the memory it uploads) */
     if (o && !o->written && coh_managed(o, &len)) {
         coh_land_over(o, len);
+    }
+    if (o) {
+        alias_sync(o);
     }
 }
 
