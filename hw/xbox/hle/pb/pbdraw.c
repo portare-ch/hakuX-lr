@@ -141,6 +141,8 @@ typedef struct PbObj {
     bool x_zero;                        /* X8R8G8B8's unused byte: 0 for Z8, 0xFF for O8. */
     uint64_t written;                   /* g_pd.wseq at its last draw, clear or copy */
     uint64_t wb_written;                /* last image update copied back to guest memory */
+    uint64_t alias_seq;                 /* the write count when it last took its memory for
+                                           another format's target over it (alias_sync) */
     uint64_t up_written;                /* written as rt_upload left it: the image's last
                                            change was its memory's rows, nothing drawn since */
     uint64_t wb_v;                      /* ... that copy's value (landed once completed) */
@@ -1480,6 +1482,103 @@ static void rt_first_write(bool full)
     }
 }
 
+/* Targets of different formats over the same memory are the same bytes laid
+ * out differently, and each keeps an image of its own. Before one is drawn
+ * on (or shown), the others whose images are newer than the memory go back
+ * to it, the oldest first, and the target takes the memory as it then is.
+ * nxdk_pgraph_tests' Surface clip draws into the back buffer's memory as
+ * R5G6B5, B8 and G8B8 between draws into it as A8R8G8B8, and reads the frame
+ * back: without this neither format's draws reached the other's image.
+ * Only linear colour targets; one of the same format is the old paths' and
+ * the coherence's own business. */
+
+/* x's memory was written since its image last matched it. A target the old
+ * paths keep is asked by its pages' dirty bits, which the asking takes: they
+ * are put back, so that its next use still has the CPU's rows uploaded
+ * (rt_cpu_sync), as writeback_range does. */
+static bool alias_mem_newer(PbObj *x)
+{
+    uint32_t xl;
+    if (coh_managed(x, &xl)) {
+        return coh_mem_newer(x);
+    }
+    if (!obj_written(x)) {
+        return false;
+    }
+    hle_mem_mark_written(x->d.pa, x->d.pitch * x->d.h);
+    return true;
+}
+
+static void alias_sync(PbObj *o)
+{
+    const HleFmtInfo *fi = o && o->id && o->d.pitch && !o->cube ? hle_fmt_info(o->d.xfmt) : NULL;
+    if (!fi || (fi->flags & (HLE_FI_DEPTH | HLE_FI_DXT)) || past_block(&o->d)) {
+        return;
+    }
+    const uint32_t len = o->d.pitch * o->d.h;
+    uint64_t v = 0, newest = 0;
+    PbObj *al[8];
+    unsigned nal = 0;
+    for (unsigned i = 0; i < g_pd.nobjs && nal < ARRAY_SIZE(al); i++) {
+        PbObj *x = &g_pd.objs[i];
+        const HleFmtInfo *xi = x->id && x != o && x->d.pitch && !x->cube && x->d.xfmt != o->d.xfmt ?
+                               hle_fmt_info(x->d.xfmt) : NULL;
+        /* (one whose memory the CPU wrote since, or a texture was defined
+         * from, is no longer what the memory holds: the memory is the newer,
+         * and the target's own first write takes it, coh_first_write) */
+        if (xi && !(xi->flags & (HLE_FI_DEPTH | HLE_FI_DXT)) && x->d.pa < o->d.pa + len &&
+            x->d.pa + x->d.pitch * x->d.h > o->d.pa && x->written > o->written && !obj_superseded(x) &&
+            !alias_mem_newer(x)) {
+            al[nal++] = x;
+            newest = MAX(newest, x->written);
+            v = MAX(v, x->wb_v);            /* (a writeback of its own under way) */
+        }
+    }
+    if (newest <= o->alias_seq) {
+        return;                             /* none drawn on since it last took the memory */
+    }
+    /* Its own image first where that is newer than its memory (a large
+     * target is not written back at its unbind): the others may cover only
+     * part of it, and the rest of what was drawn on it is nowhere else. Its
+     * rows then lie over theirs, so each of them goes back after it, whether
+     * its memory had its pixels already or not. */
+    bool own = o->written > MAX(o->wb_written, o->synced) && o->written != o->up_written &&
+               !obj_superseded(o) && !alias_mem_newer(o);
+    if (own) {
+        const uint64_t w = writeback_ex(o->id, true);
+        own = w != 0;
+        v = MAX(v, w);
+    }
+    uint64_t after = 0;
+    for (unsigned n = 0; n < nal; n++) {    /* the oldest first */
+        PbObj *best = NULL;
+        for (unsigned i = 0; i < nal; i++) {
+            PbObj *x = al[i];
+            if (x->written > after && (own || x->written > MAX(x->wb_written, x->synced)) &&
+                (!best || x->written < best->written)) {
+                best = x;
+            }
+        }
+        if (!best) {
+            break;
+        }
+        after = best->written;
+        v = MAX(v, writeback_ex(best->id, true));
+    }
+    if (v) {
+        coh_wait(v);
+        coh_adopt();
+    }
+    coh_pend_wait(o->d.pa, len);            /* (and a copy queued into the memory) */
+    if (rtlog_on()) {
+        hle_log("hakuX-lr-hle-pb", "alias: target %u (format %02x) takes its memory, drawn on in another format "
+                "(write %llu, its last %llu)%s", o->id, o->d.xfmt, (unsigned long long)newest,
+                (unsigned long long)o->alias_seq, v ? ", landed first" : "");
+    }
+    rt_upload(o, o->id, false);
+    o->alias_seq = g_pd.wseq;
+}
+
 /* Before the first draw or partial clear of a new image, write back newer overlapping images.
  * Do this before allocating the draw's arena blocks. The writeback can submit all work and
  * let the arena restart at offset zero. */
@@ -1487,8 +1586,14 @@ static void rt_first_land(bool full)
 {
     PbObj *o = g_pd.rt_fresh && !full ? obj_of(g_pd.rt) : NULL;
     uint32_t len;
+    /* (a new image's landing first: alias_sync's upload counts as a write
+     * to it, and the newest image over its memory, a swizzled one too, is
+     * to be in the memory it uploads) */
     if (o && !o->written && coh_managed(o, &len)) {
         coh_land_over(o, len);
+    }
+    if (o) {
+        alias_sync(o);
     }
 }
 
@@ -1934,6 +2039,29 @@ static void swap(void)
                 fo = obj_of(frame);
                 ax = ay = 1;
             }
+        }
+    }
+    /* a target of another format bound over a frame buffer: the frame is its
+     * memory in the video mode's layout (alias_sync) */
+    if (fo && fo->d.pitch && scan_addr_seen(fo->d.pa)) {
+        /* (the frame's object where there is one: looked up, not made, and
+         * the memory's write marks left alone, as scanned_frame does not) */
+        uint32_t dpitch, dxfmt;
+        unsigned dhz;
+        hle_pb_display_mode_get(&dpitch, &dxfmt, &dhz);
+        PbObj *fr = NULL;
+        for (unsigned i = 0; i < g_pd.nobjs && !fr && dxfmt != fo->d.xfmt; i++) {
+            PbObj *x = &g_pd.objs[i];
+            if (x->id && !x->cube && x->d.pa == fo->d.pa && x->d.xfmt == dxfmt && x->d.pitch == dpitch &&
+                x->d.w == g_pd.disp_w && x->d.h >= g_pd.disp_h) {
+                fr = x;
+            }
+        }
+        if (fr && fr != fo) {
+            alias_sync(fr);
+            id = fr->id;
+            fo = fr;
+            ax = ay = 1;
         }
     }
     coh_shown(fo);                          /* the front buffer's path keeps its memory */
