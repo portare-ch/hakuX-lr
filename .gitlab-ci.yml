@@ -1,0 +1,72 @@
+# Copyright (C) 2026-present PortareOS
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+include:
+  - project: libretro-infrastructure/ci-templates
+    file: /linux-cmake.yml
+
+stages:
+  - build-prepare
+  - build-shared
+
+variables:
+  GIT_SUBMODULE_STRATEGY: none
+
+.core-defs:
+  variables:
+    CORENAME: hakux-lr
+
+# Use the same Ubuntu release as the GitHub AMD64 builds for the runtime ABI.
+prepare-linux-x64-sysroot:
+  extends: .libretro-linux-cmake-x86_64
+  stage: build-prepare
+  image: ubuntu:22.04@sha256:076e7bf82319619f28dd0aa9c02ab34b055ad37100395b4f49a2ffba04fb5e11
+  before_script:
+    - apt-get update
+    - >-
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends
+      libc6-dev libstdc++-11-dev libgcc-11-dev zlib1g-dev linux-libc-dev
+  script:
+    - mkdir -p build
+    - tar -czf build/sysroot-jammy.tar.gz -C / lib lib64 usr
+  artifacts:
+    name: hakux-lr-jammy-sysroot
+    paths:
+      - build/sysroot-jammy.tar.gz
+    expire_in: 1 day
+
+libretro-build-linux-x64:
+  extends:
+    - .libretro-linux-cmake-x86_64
+    - .core-defs
+  stage: build-shared
+  image: rust:1.99.1-slim-trixie@sha256:9daf2b244ccc30523e55cafe32edf8465671ba567d0101620e5612ccb76ea1a7
+  needs:
+    - job: prepare-linux-x64-sysroot
+      artifacts: true
+  variables:
+    CC: clang-19
+    CXX: clang++-19
+    HAKUX_BUILD: ${CI_PROJECT_DIR}/build/libretro-linux-x64
+    HAKUX_VERSION: git-${CI_COMMIT_SHORT_SHA}
+  before_script:
+    - apt-get update
+    - >-
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends
+      build-essential clang-19 lld-19 llvm-19 cmake ninja-build git python3
+      pkg-config ca-certificates zlib1g-dev
+  script:
+    - mkdir -p build/sysroot-jammy
+    - tar -xzf build/sysroot-jammy.tar.gz -C build/sysroot-jammy
+    - sh tools/native/linux-prepare-sysroot.sh build/sysroot-jammy
+    - python3 tools/native/linux-deps.py
+    - >-
+      sh tools/native/linux-build.sh --core-only
+      "-DCMAKE_SYSROOT=$CI_PROJECT_DIR/build/sysroot-jammy"
+      -DHAKUX_CPU=kvm -DHAKUX_DSP_JIT=ON
+    - sh tools/native/linux-package.sh "$HAKUX_VERSION"
+    - python3 tools/native/linux-verify.py "$HAKUX_VERSION"
+    - cp "build/package/hakux-lr-$HAKUX_VERSION/lib/libretro/hakux-lr_libretro.so" .
+  artifacts:
+    paths:
+      - hakux-lr_libretro.so

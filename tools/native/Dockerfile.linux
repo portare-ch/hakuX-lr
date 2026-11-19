@@ -12,15 +12,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config ca-certificates zlib1g-dev libvulkan1 mesa-vulkan-drivers \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=sysroot / /opt/sysroot-jammy
-# Keep absolute symlinks inside the sysroot.
-RUN find /opt/sysroot-jammy -type l -lname '/*' | while read -r l; do \
-        ln -sfn "$(realpath -m -s --relative-to="$(dirname "$l")" "/opt/sysroot-jammy$(readlink "$l")")" "$l"; \
-    done
-# Use newer kernel UAPI headers for KVM TSC control constants.
-RUN ma=$(dpkg-architecture -qDEB_HOST_MULTIARCH) && \
-    for d in linux asm-generic "$ma/asm"; do \
-        rm -rf "/opt/sysroot-jammy/usr/include/$d" && cp -RL "/usr/include/$d" "/opt/sysroot-jammy/usr/include/$d"; \
-    done
+COPY linux-prepare-sysroot.sh /tmp/linux-prepare-sysroot.sh
+RUN sh /tmp/linux-prepare-sysroot.sh /opt/sysroot-jammy
 COPY --from=rust /usr/local/cargo /usr/local/cargo
 COPY --from=rust /usr/local/rustup /usr/local/rustup
 ENV CARGO_HOME=/usr/local/cargo RUSTUP_HOME=/usr/local/rustup
