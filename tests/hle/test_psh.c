@@ -772,9 +772,10 @@ static void test_convolution(void)
     HT_CHECK(strstr(buf, "uint ti = pc.tex[s] & 0xFFFFu, si = (pc.tex[s] >> 16) & 0xFFu;\n"
                          "  vec2 sz = vec2(textureSize(") != NULL);
     HT_CHECK(strstr(buf, "  if ((pc.flags & (1u << s)) != 0u)\n    uv /= sz / ") != NULL);
-    /* a point-sampled stage (flags bit 4 + s): a coordinate on a texel's
-     * edge takes the texel after it */
-    HT_CHECK(strstr(buf, "  if ((pc.flags & (16u << s)) != 0u)\n"
+    /* Point sampling biases texel edges in guest space for scaled surfaces
+     * and adjusts UVs directly for unscaled surfaces. */
+    HT_CHECK(strstr(buf, "vec2 q = floor(uv0 * sz / sc + 0.000244140625);") != NULL);
+    HT_CHECK(strstr(buf, "  if ((pc.flags & (16u << s)) != 0u && !spt)\n"
                          "    uv += 0.000244140625 / sz;") != NULL);
     /* no descriptor indexing: the draw set's samplers (vk/draw.c fixed_bind),
      * the taps' at 1 + HLE_FF_STAGES + s, inside the sized array */
