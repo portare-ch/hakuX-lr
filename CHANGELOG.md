@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## linux-v0.35.2 (Linux ARM64, Linux x86-64, and Android ARM64)
+
+- **Morrowind.** Fix a boot crash when the game closes a disc file while a read is still pending. [#273](https://github.com/portare-ch/hakuX-lr/pull/273)
+- **Surface clipping and shared buffers.** Skip draws and clears when the clip has zero width or height, and preserve pixels when a game draws to the same video memory through different colour formats. [#270](https://github.com/portare-ch/hakuX-lr/pull/270) · [#271](https://github.com/portare-ch/hakuX-lr/pull/271)
+- **Textures and 2D copies.** Use the correct row layout when a texture shares memory with a render target, and preserve the destination layout of overlapping 2D copies. [#272](https://github.com/portare-ch/hakuX-lr/pull/272)
+
+The Morrowind fix was tested in three runs on Linux x86-64. The longest reached the game world. In the x86-64 NV2A tests for #271, Surface clip improved from 21 to 37 matching images out of 47 at both 1× and 2×.
+
 ## linux-v0.35.1 (Linux ARM64, Linux x86-64, and Android ARM64)
 
 - **Rendering above 1×.** Align scaled rendering with the Xbox pixel grid and use the corresponding pixel when a game reads back a render target. This improves the accuracy of edges and effects that sample rendered images. [#266](https://github.com/portare-ch/hakuX-lr/pull/266) · [#269](https://github.com/portare-ch/hakuX-lr/pull/269)
