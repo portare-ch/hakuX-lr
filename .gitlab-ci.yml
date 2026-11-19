@@ -50,7 +50,7 @@ prepare-linux-x64-sysroot:
     - apt-get update
     - >-
       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends
-      build-essential clang-19 lld-19 llvm-19 cmake ninja-build git python3
+      build-essential clang-19 clang-tools-19 lld-19 llvm-19 cmake ninja-build git python3
       pkg-config ca-certificates zlib1g-dev
   script:
     - python3 tools/native/linux-deps.py
