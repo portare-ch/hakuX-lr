@@ -356,11 +356,14 @@ static void test_gl_clamp(void)
     pk.st[0] = (HleFfStage){ .colorop = 2, .colorarg1 = 2, .alphaop = 2, .alphaarg1 = 2, .resultarg = 1,
                              .texture = 1 };
     HT_CHECK(hle_ff_ps_glsl(&pk, buf, sizeof(buf)) > 0);
-    HT_CHECK(strstr(buf, "clamp(uv0") == NULL && strstr(buf, "textureGrad(") == NULL);
+    HT_CHECK(strstr(buf, "clamp(uv0") == NULL);
+    HT_CHECK(strstr(buf, "vec4 t0 = textureGrad(") != NULL);
     pk.st[0].texture = 1 | 2;                           /* u */
     HT_CHECK(hle_ff_ps_glsl(&pk, buf, sizeof(buf)) > 0);
-    HT_CHECK(strstr(buf, "uv0.x = clamp(uv0.x, 0.0, 0.99999994);") != NULL);
-    HT_CHECK(strstr(buf, "textureGrad(") != NULL && strstr(buf, "g0x = dFdx(uv0)") != NULL);
+    const char *gradients = strstr(buf, "g0x = dFdx(uv0)");
+    const char *clamp_x = strstr(buf, "uv0.x = clamp(uv0.x, 0.0, 0.99999994);");
+    HT_CHECK(gradients != NULL && clamp_x != NULL && gradients < clamp_x);
+    HT_CHECK(strstr(buf, "vec4 t0 = textureGrad(") != NULL);
     HT_CHECK(strstr(buf, "uv0.y = clamp") == NULL);
     pk.st[0].texture = 1 | 2 | 4;                       /* u and v */
     HT_CHECK(hle_ff_ps_glsl(&pk, buf, sizeof(buf)) > 0);

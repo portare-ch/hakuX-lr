@@ -8,7 +8,7 @@ on:
 
 concurrency:
   group: hakux-lr-release-v0.35.1
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -16,7 +16,7 @@ permissions:
 env:
   RELEASE_VERSION: '0.35.1'
   RELEASE_TAG: linux-v0.35.1
-  RELEASE_COMMIT: 59a7c77dd27df739a8062c57988f47d7b43a5bcc
+  RELEASE_COMMIT: 9fecf759cb24834ec228cc13ed42193d61baab81
 
 jobs:
   build:
