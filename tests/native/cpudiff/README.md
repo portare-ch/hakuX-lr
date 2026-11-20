@@ -9,7 +9,8 @@ values, random bit patterns, values of ordinary size) and stores every result
 in an output region, then halts. `gen.py` lists the forms: the reciprocal
 estimates, 64-bit integers through the x87, float-to-integer conversions, x87
 arithmetic at each precision setting, the transcendental functions, SSE
-arithmetic at each rounding mode, and code that rewrites itself.
+arithmetic at each rounding mode, MXCSR's status flags, and code that rewrites
+itself.
 
 ## Running
 

@@ -70,11 +70,37 @@ extern "C" void nc_frame_set_if(NcFrame* f, bool on) {
 
 namespace {
 
+// MXCSR's six status flags: FEX keeps the ones LDMXCSR loaded in the frame's
+// MXCSR (bits 0 to 5) and reads the ones raised since from the host's
+// cumulative flags (FPSR) at STMXCSR and FXSAVE. The core's own floating
+// point must not show up there, and each guest thread has its own flags: a
+// system op starts by moving the host's into the frame's MXCSR (saved and
+// loaded with the thread) and ends with the host's cleared.
+// FPSR's IOC, DZC, OFC, UFC, IXC (bits 0 to 4) and IDC (7) are MXCSR's
+// IE (0), ZE (2), OE (3), UE (4), PE (5) and DE (1); a result flushed to
+// zero (FZ, bit 15) is an underflow to the host and inexact too on x86.
+class GuestFpFlags {
+public:
+  explicit GuestFpFlags(FEXCore::Core::CpuStateFrame* Frame) {
+    uint64_t F;
+    asm volatile("mrs %0, fpsr" : "=r"(F));
+    uint32_t M = static_cast<uint32_t>((F & 1) | ((F & 0x1E) << 1) | ((F >> 6) & 2));
+    if ((Frame->State.mxcsr & 0x8000) && (M & 0x10)) {
+      M |= 0x20;
+    }
+    Frame->State.mxcsr |= M;
+  }
+  ~GuestFpFlags() {
+    asm volatile("msr fpsr, xzr");
+  }
+};
+
 class Syscalls final : public FEXCore::HLE::SyscallHandler {
 public:
   NcCpuConfig Cfg {};
 
   void HandleSyscall(FEXCore::Core::CpuStateFrame* Frame) override {
+    const GuestFpFlags Flags(Frame);
     const uint64_t Info = Frame->SystemOpInfo;
     Frame->SystemOpInfo = 0;
     const auto Op = static_cast<NcSysOp>(Info & 0xff);
