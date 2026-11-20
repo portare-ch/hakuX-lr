@@ -4,6 +4,10 @@ rsqrtss 2039
 rsqrtss_mem 2039
 rsqrtps 2048
 rsqrtss_upper 2039
+fistp16_flags 1089
+fistp32_flags 269
+fistp64_flags 188
+fild64_fistp64_flags 1184
 fild64_fistp64_s 1184
 fild64_fistp64_d 1184
 fild64_fistp64_e 1184
