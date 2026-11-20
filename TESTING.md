@@ -266,6 +266,6 @@ Apple's `container` on a Mac can build it but cannot run KVM.
 - **Works under KVM, fails under FEX:** rule out audio settings and GPU
   driver differences first. Then try FEX's switches on the Nova, set in
   RetroArch's environment: `NC_FEX_X87=80`, `NC_FEX_PC=0`, `NC_FEX_AFP=0`,
-  `NC_FEX_RSQRT=0`.
+  `NC_FEX_RSQRT=0` (FEX's own RSQRT and RCP).
 - **Fails on both:** it's the kernel, a device or the renderer.
 - **Fails under KVM only:** a KVM backend bug.

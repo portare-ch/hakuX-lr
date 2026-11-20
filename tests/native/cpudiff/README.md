@@ -43,9 +43,8 @@ After a fix, write the list again with `--write` and commit it with the fix.
 
 - **The reference is the host's CPU**, not a Pentium III. Where the two differ
   by design, the test is tagged `vendor` and judged against a model of the
-  Xbox's CPU instead: `RSQRTSS`/`RSQRTPS` against Intel's table
-  (`native/cpu/intel_rsqrt_table.inc`). `RCPSS`/`RCPPS` have no model yet and
-  are not judged.
+  Xbox's CPU instead: `RSQRTSS`/`RSQRTPS` and `RCPSS`/`RCPPS` against Intel's
+  tables (`native/cpu/intel_rsqrt_table.inc`, `intel_rcp_table.inc`).
 - **x87 tests run FEX as the core does**: the reduced (64-bit) x87 with
   precision control, and single-precision rounding switched on where the
   test selects it.
