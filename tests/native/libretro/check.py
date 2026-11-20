@@ -444,9 +444,11 @@ def main():
         # Screen Format's Auto (the default): widescreen while a patch marked screen=widescreen is
         # applied, normal with another patch; an explicit Normal is not changed
         run(xp, 0, ('XBE patch (cheat 1): 1 runs, 2 bytes over default.xbe',
-                    'screen format auto: widescreen (a widescreen patch is applied)', 'guest executed HLT'),
+                    'screen format auto: widescreen (title ', ': a widescreen patch is applied)',
+                    'guest executed HLT'),
             dict(mods, HARNESS_CHEATS=f'{poke}|{patch()} screen=widescreen'))
-        run(xp, 0, ('XBE patch (cheat 1): 1 runs', 'screen format auto: normal', 'guest executed HLT'),
+        run(xp, 0, ('XBE patch (cheat 1): 1 runs', 'screen format auto: normal (title ',
+                    ': not a known widescreen title)', 'guest executed HLT'),
             dict(mods, HARNESS_CHEATS=f'{poke}|{patch()}'))
         run_without(xp, ('XBE patch (cheat 1): 1 runs', 'guest executed HLT'), ('screen format auto',),
                     dict(mods, HARNESS_CHEATS=f'{poke}|{patch()} screen=widescreen',
