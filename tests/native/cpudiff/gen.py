@@ -147,6 +147,21 @@ def build(rng, n):
     t.append(Test('rcpps', quad32, '<4I', 16,
                   'movups xmm0, [esi]\nrcpps xmm1, xmm0\nmovups [edi], xmm1', tags='vendor rcp'))
 
+    # None of these touch the arithmetic flags: a compare before, the flags read after.
+    FLAGS = 'pushfd\npop eax\nand eax, 0x8D5\nmov [edi], eax'
+    t.append(Test('rsqrtss_flags', pair32, '<2I', 4,
+                  'movss xmm0, [esi]\nmov eax, [esi]\ncmp eax, [esi+4]\nrsqrtss xmm1, xmm0\n' + FLAGS, tags='flags'))
+    t.append(Test('rsqrtps_flags', pair32, '<2I', 4,
+                  'movss xmm0, [esi]\nshufps xmm0, xmm0, 0\nmov eax, [esi]\ncmp eax, [esi+4]\nrsqrtps xmm1, xmm0\n' + FLAGS,
+                  tags='flags'))
+    for width, ptr in ((2, 'word'), (4, 'dword'), (8, 'qword')):
+        t.append(Test('fistp%d_flags' % (width * 8), pair64, '<2Q', 4 + width,
+                      'fld qword ptr [esi]\nmov eax, [esi+4]\ncmp eax, [esi+12]\nfistp %s ptr [edi+4]\n' % ptr + FLAGS,
+                      env=REDUCED, tags='flags'))
+    t.append(Test('fild64_fistp64_flags', [(x, y) for x, y in zip(i64, reversed(i64))], '<2Q', 12,
+                  'mov eax, [esi]\ncmp eax, [esi+8]\nfild qword ptr [esi]\nfistp qword ptr [edi+4]\n' + FLAGS,
+                  env=REDUCED, tags='flags'))
+
     # 2. 64-bit integers through the x87: exact at every precision setting.
     for pn, pc in PCS:
         t.append(Test('fild64_fistp64_' + pn, [(x,) for x in i64], '<Q', 8,
