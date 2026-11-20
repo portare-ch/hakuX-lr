@@ -335,6 +335,15 @@ def build(rng, n):
         ('ffree_push', 'fninit\n' + fill + 'ffree st(7)\nfld qword ptr [esi]\n' + SW + 'fstp tbyte ptr [edi+4]\nfninit'),
         ('ffreep', 'fninit\n' + fill + 'ffreep st(0)\nfld qword ptr [esi]\n' + SW + 'fstp tbyte ptr [edi+4]\nfninit'),
         ('ffreep_st3', 'fninit\n' + fill + 'ffreep st(3)\nfld qword ptr [esi]\n' + SW + 'fstp tbyte ptr [edi+4]\nfninit'),
+        ('ffree_read', 'fninit\nfld qword ptr [esi]\nffree st(0)\nfstp tbyte ptr [edi+4]\n' + SW + 'fninit'),
+        ('ffree_add', 'fninit\nfld1\nfld qword ptr [esi]\nffree st(1)\nfaddp st(1), st\n' + SW + 'fstp tbyte ptr [edi+4]\nfninit'),
+        ('overflow_then_fits', 'fninit\n' + fill + 'fld1\nffree st(7)\nfld qword ptr [esi]\n' + SW + 'fstp tbyte ptr [edi+4]\nfninit'),
+        ('overflow_then_copy', 'fninit\n' + fill + 'fld1\nffree st(7)\nfld st(1)\n' + SW + 'fstp tbyte ptr [edi+4]\nfninit'),
+        ('overflow_then_snan', 'fninit\n' + fill + 'fld1\nfstp st(0)\nfld dword ptr [snan]\n' + SW +
+         'fstp tbyte ptr [edi+4]\nfninit\njmp 9f\n.data\nsnan: .long 0x7F800001\n.text\n9:'),
+        ('fadd_m32_empty', 'fninit\nfadd dword ptr [esi]\n' + SW + 'fstp tbyte ptr [edi+4]\nfninit'),
+        ('fcom_m64_empty', 'fninit\nfcom qword ptr [esi]\n' + SW + 'fninit'),
+        ('fadd_m64', 'fninit\nfld1\nfadd qword ptr [esi]\n' + SW + 'fstp tbyte ptr [edi+4]\nfninit'),
         ('incstp', 'fninit\nfld qword ptr [esi]\nfincstp\nfld1\nfdecstp\nfdecstp\n' + SW + 'fstp tbyte ptr [edi+4]\nfninit'),
     ]
     for name, body in faults:
