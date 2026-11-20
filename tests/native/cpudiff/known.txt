@@ -15,6 +15,7 @@ tf64_fmul_tiny_u 566
 tf64_fdiv_tiny_u 483
 tf64_fmul_tiny_z 532
 tf64_fdiv_tiny_z 660
+stack_fadd_m64 469
 fsin 1452
 fcos 1399
 fptan 861
