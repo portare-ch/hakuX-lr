@@ -324,6 +324,17 @@ void nc_ps_schedule(NcKernel *k, NcFrame *f)
      * Scheduling by slot let Chaos Theory's timer threads keep waking a same-priority
      * DirectSound poller, starving the main thread during loading. */
     const uint64_t now = nc_ke_now_ns();
+    /* Threads that became ready while the current one ran take their places
+     * now, before it takes a new one: a thread it woke and then yielded to
+     * (SetEvent, Sleep(0)) is ahead of it, as in the Xbox's ready queue.
+     * World Championship Poker 2 posts a seek to its loader thread so, and
+     * drops the read that follows when the seek hasn't run by then. */
+    for (unsigned i = 0; i < k->threads_hi; i++) {
+        NcThread *t = &k->threads[i];
+        if (t != cur && t->state == NC_T_READY && !t->suspend && !t->ready_seq) {
+            t->ready_seq = ++k->ready_clock;
+        }
+    }
     if (cur && cur->state == NC_T_RUNNING) {
         if (cur->slice_expired) {
             cur->ready_seq = ++k->ready_clock;
