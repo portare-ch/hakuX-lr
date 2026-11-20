@@ -109,8 +109,9 @@ bool nc_vm_init(NcVm *vm, uint32_t ram_size)
     vm->vprot = nc_big_alloc(VPROT_BYTES);
     vm->rmap = calloc(ram_size / NC_PAGE, sizeof(uint32_t));
     vm->wp = calloc(ram_size / NC_PAGE, 1);
+    vm->code = calloc(ram_size / NC_PAGE, 1);
     vm->pin = calloc(ram_size / NC_PAGE, 1);
-    if (!vm->page_used || !vm->pte || !vm->vprot || !vm->rmap || !vm->wp || !vm->pin) {
+    if (!vm->page_used || !vm->pte || !vm->vprot || !vm->rmap || !vm->wp || !vm->code || !vm->pin) {
         return false;
     }
 
@@ -154,6 +155,7 @@ void nc_vm_destroy(NcVm *vm)
     nc_big_free(vm->vprot, VPROT_BYTES);
     free(vm->rmap);
     free(vm->wp);
+    free(vm->code);
     free(vm->pin);
     free(g_na);
     g_na = NULL;
@@ -278,8 +280,8 @@ static bool map_range(NcVm *vm, uint32_t va, uint32_t pa, uint32_t len, bool vie
         int prot = PROT_READ | PROT_WRITE;
         if (g_na && g_na[page]) {
             prot = PROT_NONE;                   /* still no access (nc_vm_noaccess) */
-        } else if (vm->wp[page] == NC_WP_CLEAN) {
-            prot = PROT_READ;                   /* still tracked */
+        } else if (vm->wp[page] == NC_WP_CLEAN || vm->code[page]) {
+            prot = PROT_READ;                   /* still tracked, or translated code */
         }
         if (prot != (PROT_READ | PROT_WRITE)) {
             mprotect(vm->base + va + off, NC_PAGE, prot);
@@ -347,6 +349,47 @@ static void prot_views(NcVm *vm, uint32_t page, uint32_t n, int prot)
     pthread_mutex_unlock(&g_prot_lock);
 }
 
+/* prot_views for pages write tracking opens: the ones holding translated
+ * code (nc_vm_code_mark) stay read-only. */
+static void prot_views_open(NcVm *vm, uint32_t page, uint32_t n)
+{
+    for (uint32_t i = 0; i < n;) {
+        const bool code = __atomic_load_n(&vm->code[page + i], __ATOMIC_ACQUIRE);
+        uint32_t k = 1;
+        while (i + k < n && (bool)__atomic_load_n(&vm->code[page + i + k], __ATOMIC_ACQUIRE) == code) {
+            k++;
+        }
+        prot_views(vm, page + i, k, code ? PROT_READ : PROT_READ | PROT_WRITE);
+        i += k;
+    }
+}
+
+void nc_vm_code_mark(NcVm *vm, uint32_t pa)
+{
+    const uint32_t page = pa / NC_PAGE;
+    if (pa >= vm->ram_size || __atomic_exchange_n(&vm->code[page], 1, __ATOMIC_ACQ_REL)) {
+        return;
+    }
+    /* a page without access stays so (nc_vm_noaccess gives it back read-only) */
+    if (!(g_na && __atomic_load_n(&g_na[page], __ATOMIC_ACQUIRE))) {
+        prot_views(vm, page, 1, PROT_READ);
+    }
+}
+
+bool nc_vm_code_clear(NcVm *vm, uint32_t pa)
+{
+    const uint32_t page = pa / NC_PAGE;
+    if (pa >= vm->ram_size || !__atomic_exchange_n(&vm->code[page], 0, __ATOMIC_ACQ_REL)) {
+        return false;
+    }
+    /* writable again unless write tracking has it clean, or it has no access */
+    if (__atomic_load_n(&vm->wp[page], __ATOMIC_ACQUIRE) != NC_WP_CLEAN &&
+        !(g_na && __atomic_load_n(&g_na[page], __ATOMIC_ACQUIRE))) {
+        prot_views(vm, page, 1, PROT_READ | PROT_WRITE);
+    }
+    return true;
+}
+
 void nc_vm_protect_pages(NcVm *vm, uint32_t pa, uint32_t n, bool ro)
 {
     if (!n) {
@@ -375,7 +418,11 @@ void nc_vm_protect_pages(NcVm *vm, uint32_t pa, uint32_t n, bool ro)
         while (i + k < n && !(g_na && __atomic_load_n(&g_na[page + i + k], __ATOMIC_ACQUIRE))) {
             k++;
         }
-        prot_views(vm, page + i, k, prot);
+        if (ro) {
+            prot_views(vm, page + i, k, prot);
+        } else {
+            prot_views_open(vm, page + i, k);
+        }
         for (uint32_t j = i; g_na && j < i + k; j++) {
             if (__atomic_load_n(&g_na[page + j], __ATOMIC_ACQUIRE)) {
                 prot_views(vm, page + j, 1, PROT_NONE);
@@ -421,7 +468,11 @@ void nc_vm_noaccess(NcVm *vm, uint32_t pa, uint32_t n, bool on)
         while (i + k < n && __atomic_load_n(&vm->wp[page + i + k], __ATOMIC_ACQUIRE) == wp) {
             k++;
         }
-        prot_views(vm, page + i, k, wp == NC_WP_CLEAN ? PROT_READ : PROT_READ | PROT_WRITE);
+        if (wp == NC_WP_CLEAN) {
+            prot_views(vm, page + i, k, PROT_READ);
+        } else {
+            prot_views_open(vm, page + i, k);
+        }
         i += k;
     }
     for (uint32_t i = 0; i < n; i++) {

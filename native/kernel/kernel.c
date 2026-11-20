@@ -788,7 +788,7 @@ static void stats_tick(NcKernel *k)
            g_nc_sched.dpc_wait_max_ns / 1e6, g_nc_sched.dpc_run_max_ns / 1e6,
            (unsigned long long)g_nc_sched.dpc_slow, holds, held_max_ns / 1e6, held_out_ns / 1e6, top);
     {
-        static uint64_t cr, di, mm, ua;
+        static uint64_t cr, di, mm, ua, co;
         char ms[240];
         uint32_t fe[6], fn[6];
         const unsigned nf = nc_mmio_fault_top(fe, fn, 6);
@@ -809,10 +809,12 @@ static void stats_tick(NcKernel *k)
         const uint64_t ncr = __atomic_load_n(&g_nc_faults_callret, __ATOMIC_RELAXED),
                        ndi = __atomic_load_n(&g_nc_faults_dirty, __ATOMIC_RELAXED),
                        nmm = __atomic_load_n(&g_nc_faults_mmio, __ATOMIC_RELAXED),
-                       nua = __atomic_load_n(&g_nc_faults_unaligned, __ATOMIC_RELAXED);
+                       nua = __atomic_load_n(&g_nc_faults_unaligned, __ATOMIC_RELAXED),
+                       nco = __atomic_load_n(&g_nc_faults_code, __ATOMIC_RELAXED);
         nc_log("hakuX-lr-native-stats", "host faults per s: call-return %.0f dirty pages %.0f (pages%s) mmio %.0f "
-               "(eips%s) unaligned atomics %.0f", (double)(ncr - cr) / s, (double)(ndi - di) / s, ds,
-               (double)(nmm - mm) / s, ms, (double)(nua - ua) / s);
+               "(eips%s) unaligned atomics %.0f stores to translated code %.0f", (double)(ncr - cr) / s,
+               (double)(ndi - di) / s, ds, (double)(nmm - mm) / s, ms, (double)(nua - ua) / s, (double)(nco - co) / s);
+        co = nco;
         cr = ncr;
         di = ndi;
         mm = nmm;

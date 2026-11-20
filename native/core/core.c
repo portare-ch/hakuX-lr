@@ -50,6 +50,7 @@ void nc_core_set_loadstate(const char *path)
     snprintf(g_loadstate, sizeof(g_loadstate), "%s", path ? path : "");
 }
 static bool core_hook_query(void *opaque, uint32_t eip);
+static void core_code_page(void *opaque, uint32_t va);
 
 /* An XBE header's certificate: the title ID and version. */
 static bool xbe_title(const uint8_t *h, size_t len, uint32_t *tid, uint32_t *ver)
@@ -403,12 +404,25 @@ void nc_core_cpu_backend(NcCore *c, NcCpuConfig *cfg)
     cfg->cpuid = nc_kernel_cpuid;
     cfg->hook_list = nc_hle_hook_list;
     cfg->title_image = kvm_title_image;
+    cfg->code_page = core_code_page; /* FEX's; KVM translates nothing */
 }
 
 /* Hooked guest addresses: the HLE GPU's functions and device-access sites. */
 static bool core_hook_query(void *opaque, uint32_t eip)
 {
     return nc_x86mmio_is_site(eip) || nc_hle_hook_query(opaque, eip);
+}
+
+/* FEX has translated code from the page at va (NcCpuConfig.code_page):
+ * read-only from now on, so a store to it is seen (nc_core_guest_fault). */
+static void core_code_page(void *opaque, uint32_t va)
+{
+    (void)opaque;
+    NcVm *vm = &g_cpu_core->vm;
+    const uint32_t pa = nc_vm_phys(vm, va);
+    if (pa != UINT32_MAX) {
+        nc_vm_code_mark(vm, pa & ~(NC_PAGE - 1));
+    }
 }
 
 /* A fault in translated code the core can't take as the guest's: where the
@@ -432,7 +446,7 @@ static bool fault_report(NcCore *c, uintptr_t pc, uint64_t va, const char *what)
 }
 
 /* bumped from the fault handlers of any thread (atomically), read by the stats */
-uint64_t g_nc_faults_callret, g_nc_faults_dirty, g_nc_faults_mmio, g_nc_faults_unaligned;
+uint64_t g_nc_faults_callret, g_nc_faults_dirty, g_nc_faults_mmio, g_nc_faults_unaligned, g_nc_faults_code;
 
 static struct {
     uint32_t eip, n;
@@ -521,6 +535,28 @@ enum NcGuestFault nc_core_guest_fault(NcCore *c, const NcGuestAccess *a, const c
                     }
                 }
                 nc_log("hakuX-lr-native-watch", "  esp %08x stack%s", esp, fr);
+            }
+        }
+        /* A store to a page of translated code (FEX; nc_vm_code_mark): its
+         * translations go, in every address the page has, and it is writable
+         * again unless write tracking has it too (which the next lines open). */
+        if (gpa != UINT32_MAX && a->write && nc_vm_code_clear(&c->vm, gpa & ~(NC_PAGE - 1))) {
+            const uint32_t page_pa = gpa & ~(NC_PAGE - 1);
+            const uint32_t at = a->va & ~(NC_PAGE - 1), window = NC_CONTIG_WINDOW + page_pa;
+            const uint32_t user = c->vm.rmap[page_pa / NC_PAGE];
+            nc_cpu_code_written(c->cpu, at);
+            if (window != at) {
+                nc_cpu_code_written(c->cpu, window);
+            }
+            if (user && user != at && user != window) {
+                nc_cpu_code_written(c->cpu, user);
+            }
+            if (__atomic_fetch_add(&g_nc_faults_code, 1, __ATOMIC_RELAXED) < 8) {
+                nc_log("hakuX-lr-native", "cpu: a store to translated code at %08x (eip %08x): translations dropped (first 8 logged)",
+                       a->va, a->eip(a->opaque));
+            }
+            if (__atomic_load_n(&c->vm.wp[page_pa / NC_PAGE], __ATOMIC_ACQUIRE) != NC_WP_CLEAN) {
+                return NC_GF_RETRY;
             }
         }
         /* With a decoder (FEX's backend), an access it can't decode counts
@@ -703,6 +739,7 @@ void nc_core_destroy(NcCore *c)
     memset(g_mfs, 0, sizeof(g_mfs));
     __atomic_store_n(&g_nc_faults_callret, 0, __ATOMIC_RELAXED);
     __atomic_store_n(&g_nc_faults_dirty, 0, __ATOMIC_RELAXED);
+    __atomic_store_n(&g_nc_faults_code, 0, __ATOMIC_RELAXED);
     __atomic_store_n(&g_nc_faults_mmio, 0, __ATOMIC_RELAXED);
     __atomic_store_n(&g_nc_faults_unaligned, 0, __ATOMIC_RELAXED);
 }
