@@ -23,7 +23,10 @@
 #include <FEXCore/Utils/LogManager.h>
 
 #include <asm/sigcontext.h>
+#include <atomic>
 #include <cerrno>
+#include <mutex>
+#include <pthread.h>
 #include <cstring>
 #include <string>
 #include <sys/mman.h>
@@ -69,11 +72,19 @@ extern "C" void nc_frame_set_if(NcFrame* f, bool on) {
 
 namespace {
 
+void DrainCodeWrites(NcCpu* Cpu);
+
 class Syscalls final : public FEXCore::HLE::SyscallHandler {
 public:
   NcCpuConfig Cfg {};
+  NcCpu* Cpu {};
+  bool TrackCode = false;                // write-protect translated pages (code_page)
+  std::atomic<bool> CodeWrites {false};  // nc_cpu_code_written left pages for the guest's thread
 
   void HandleSyscall(FEXCore::Core::CpuStateFrame* Frame) override {
+    if (CodeWrites.load(std::memory_order_relaxed)) {
+      DrainCodeWrites(Cpu);
+    }
     const uint64_t Info = Frame->SystemOpInfo;
     Frame->SystemOpInfo = 0;
     const auto Op = static_cast<NcSysOp>(Info & 0xff);
@@ -83,6 +94,17 @@ public:
     }
     nc_log("hakuX-lr-native", "cpu: unhandled %s at %08x", Info ? "system op" : "syscall", static_cast<uint32_t>(Frame->State.rip));
     abort();
+  }
+  // A page FEX now holds translations of: the core write-protects it, and
+  // a store's fault drops them (nc_cpu_code_written). A title that rewrites
+  // code it has run, with no kernel call to say so, ran the old translation.
+  void MarkGuestExecutableRange(FEXCore::Core::InternalThreadState*, uint64_t Start, uint64_t Length) override {
+    if (!TrackCode) {
+      return;
+    }
+    for (uint64_t A = Start & ~0xFFFull; A < Start + Length && A < (1ull << 32); A += 0x1000) {
+      Cfg.code_page(Cfg.opaque, static_cast<uint32_t>(A));
+    }
   }
   FEXCore::HLE::ExecutableRangeInfo QueryGuestExecutableRange(FEXCore::Core::InternalThreadState*, uint64_t) override {
     return {0, 1ull << 32, true};
@@ -184,7 +206,58 @@ struct NcCpu {
   SavedState Reset {}; // the JIT's reset state, for new guest threads
   bool X87Watch = false;  // reduced x87 with precision control: watch FCW.PC (nc_cpu_x87_single_check)
   bool X87Single = false; // a thread selected single precision: translations round to it
+  // nc_cpu_code_written from a thread that isn't the guest's: pages for the
+  // guest's thread to drop (DrainCodeWrites); All when they didn't fit.
+  pthread_t GuestThread {};
+  bool HasGuestThread = false;
+  pthread_mutex_t CodeLock = PTHREAD_MUTEX_INITIALIZER;
+  uint32_t CodePages[64] {};
+  unsigned NumCodePages = 0;
+  bool AllCode = false;
 };
+
+namespace {
+void DropPage(NcCpu* Cpu, uint32_t Va, uint32_t Len) {
+  std::scoped_lock Lock(Cpu->CTX->GetCodeInvalidationMutex());
+  Cpu->CTX->InvalidateCodeBuffersCodeRange(Va, Len);
+  Cpu->CTX->InvalidateThreadCachedCodeRange(Cpu->Thread, Va, Len);
+}
+
+void DrainCodeWrites(NcCpu* Cpu) {
+  uint32_t Pages[64];
+  pthread_mutex_lock(&Cpu->CodeLock);
+  const unsigned N = Cpu->NumCodePages;
+  const bool All = Cpu->AllCode;
+  memcpy(Pages, Cpu->CodePages, N * sizeof(Pages[0]));
+  Cpu->NumCodePages = 0;
+  Cpu->AllCode = false;
+  Cpu->Sys.CodeWrites.store(false, std::memory_order_relaxed);
+  pthread_mutex_unlock(&Cpu->CodeLock);
+  if (All) {
+    DropPage(Cpu, 0, 0xFFFFF000u);
+    return;
+  }
+  for (unsigned i = 0; i < N; ++i) {
+    DropPage(Cpu, Pages[i], NC_PAGE);
+  }
+}
+} // namespace
+
+extern "C" void nc_cpu_code_written(NcCpu* cpu, uint32_t va) {
+  va &= ~(NC_PAGE - 1);
+  if (cpu->HasGuestThread && pthread_equal(pthread_self(), cpu->GuestThread)) {
+    DropPage(cpu, va, NC_PAGE);
+    return;
+  }
+  pthread_mutex_lock(&cpu->CodeLock);
+  if (cpu->NumCodePages < 64) {
+    cpu->CodePages[cpu->NumCodePages++] = va;
+  } else {
+    cpu->AllCode = true;
+  }
+  cpu->Sys.CodeWrites.store(true, std::memory_order_relaxed);
+  pthread_mutex_unlock(&cpu->CodeLock);
+}
 
 static bool HookAdapter(void* Opaque, uint64_t Rip) {
   auto* Cpu = static_cast<NcCpu*>(Opaque);
@@ -328,6 +401,21 @@ extern "C" NcCpu* nc_cpu_create(const NcCpuConfig* cfg, uint32_t fs_base) {
 
   auto* Cpu = new NcCpu {};
   Cpu->Sys.Cfg = *cfg;
+  Cpu->Sys.Cpu = Cpu;
+  // Pages of translated code are write-protected, their translations dropped
+  // at a store. A/B switch (NC_FEX_SMC=0, or debug.hakux.fex_smc=0): only
+  // the kernel's own calls drop translations, as before.
+  {
+    const char* e = getenv("NC_FEX_SMC");
+    char v[NC_PROPERTY_VALUE_MAX] = "";
+#ifdef __ANDROID__
+    hle_prop_get("debug.hakux.fex_smc", v);
+#endif
+    Cpu->Sys.TrackCode = cfg->code_page && !((e && !strcmp(e, "0")) || !strcmp(v, "0"));
+    if (cfg->code_page && !Cpu->Sys.TrackCode) {
+      nc_log("hakuX-lr-native", "cpu: stores into translated code are not tracked");
+    }
+  }
   Cpu->X87Watch = !x87_full && !x87_pc_off;
   Cpu->CTX = FEXCore::Context::Context::CreateNewContext(FEX::FetchHostFeatures(false)); // a 32-bit guest
   Cpu->CTX->SetSignalDelegator(&Cpu->Sig);
@@ -435,6 +523,8 @@ extern "C" void nc_cpu_destroy(NcCpu* cpu) {
 }
 
 extern "C" void nc_cpu_run(NcCpu* cpu, const NcCpuContext* c) {
+  cpu->GuestThread = pthread_self();
+  cpu->HasGuestThread = true;
   nc_frame_load(reinterpret_cast<NcFrame*>(cpu->Thread->CurrentFrame), c);
   cpu->CTX->ExecuteThread(cpu->Thread);
 }

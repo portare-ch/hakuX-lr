@@ -1885,6 +1885,12 @@ void nc_cpu_run(NcCpu *cpu, const NcCpuContext *c)
     }
 }
 
+void nc_cpu_code_written(NcCpu *cpu, uint32_t va)
+{
+    (void)cpu;
+    (void)va; /* nothing is translated */
+}
+
 void nc_cpu_invalidate(NcCpu *cpu, uint32_t va, uint32_t len)
 {
     if (!cpu) {

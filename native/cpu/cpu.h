@@ -115,6 +115,11 @@ typedef struct NcCpuConfig {
     uint32_t idt_base; /* what SIDT reports */
     uint16_t idt_limit;
 
+    /* FEX only (optional): a page it has translated code from, by guest
+     * address, each once until its translations are dropped. The embedder
+     * write-protects it and calls nc_cpu_code_written at the store's fault. */
+    void (*code_page)(void *opaque, uint32_t va);
+
     /* The KVM backend's (x86-64, #56), which FEX ignores: what FEX reaches
      * through host faults and system ops comes out of KVM's exits, and the
      * core hands it on (nc_core_cpu_backend). */
@@ -159,6 +164,10 @@ void nc_cpu_run(NcCpu *cpu, const NcCpuContext *c);
 
 /* Drops translations of guest code in [va, va+len) (it was replaced). */
 void nc_cpu_invalidate(NcCpu *cpu, uint32_t va, uint32_t len);
+/* A store reached a page of translated code (NcCpuConfig.code_page), seen
+ * at its fault on any thread: the page's translations are dropped at once
+ * on the guest's thread, at its next system operation otherwise. */
+void nc_cpu_code_written(NcCpu *cpu, uint32_t va);
 
 /* At the end of a system op: the first time the running thread's x87 control
  * word selects single precision, FEX's reduced x87 starts rounding to it

@@ -39,6 +39,7 @@ typedef struct NcVm {
     uint8_t *phys;         /* host view of physical RAM outside the guest space (never protected) */
     uint32_t *rmap;        /* per physical page: the user VA mapping it (besides the window), or 0 */
     uint8_t *wp;           /* per physical page: dirty tracking's (NC_WP_*); 0 not tracked */
+    uint8_t *code;         /* per physical page: the CPU holds translations of it (nc_vm_code_mark) */
     uint8_t *pin;          /* per physical page: NC_PIN_KNOWN | lock count (nc_vm_pin) */
 } NcVm;
 
@@ -65,6 +66,17 @@ bool nc_vm_map(NcVm *vm, uint32_t va, uint32_t pa, uint32_t len);
 /* Map a RAM alias outside rmap; physical-page protections reach it too.
  * Unmapping the full range removes it. Return false if it cannot be mapped. */
 bool nc_vm_map_alias(NcVm *vm, uint32_t va, uint32_t pa, uint32_t len);
+
+/* The page at pa holds code a translating CPU backend (FEX) has translated:
+ * read-only in every guest view, whatever write tracking wants, until a
+ * store's fault takes the mark off (nc_core_guest_fault, which drops the
+ * translations). nc_vm_code_clear says whether the page was marked. */
+void nc_vm_code_mark(NcVm *vm, uint32_t pa);
+bool nc_vm_code_clear(NcVm *vm, uint32_t pa);
+static inline bool nc_vm_code_has(const NcVm *vm, uint32_t pa)
+{
+    return pa < vm->ram_size && __atomic_load_n(&vm->code[pa / NC_PAGE], __ATOMIC_ACQUIRE);
+}
 
 /* Write-protects (ro) or unprotects every guest mapping of physical page pa. */
 void nc_vm_protect_page(NcVm *vm, uint32_t pa, bool ro);

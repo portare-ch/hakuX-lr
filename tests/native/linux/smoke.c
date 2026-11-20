@@ -217,6 +217,41 @@ int main(int argc, char **argv)
     check(nc_rd32(nc_vm_host(&core.vm, 0x20003)) == 42, "translated unaligned locked increment");
     check(prot_mirrored(&core.vm), "page protections mirrored after the tracked write opened one view");
 
+    /* Code that rewrites code it has run, with no call to say so: a function
+     * in a page of its own (0x12000: mov eax, imm32; ret), called, its
+     * immediate stored over by the guest, called again; then the same after
+     * the host wrote it through the guest's view. Each call must return the
+     * immediate as it is then. Under FEX the page's translations are dropped
+     * at the store's fault (nc_vm_code_mark); KVM runs the bytes as they are. */
+    {
+        uint32_t fn_pa;
+        check(nc_vm_alloc_at(&core.vm, 0x12000, NC_PAGE, &fn_pa), "a page for rewritten code");
+        const uint8_t fn[] = {0xb8, 0x11, 0x11, 0x11, 0x11, 0xc3};
+        memcpy(nc_vm_host(&core.vm, 0x12000), fn, sizeof(fn));
+        /* mov esi, 0x12000; call esi; mov ebx, eax; mov dword [0x12001], 0x22222222; call esi;
+         * shl eax, 4; or eax, ebx  -> the two results' low digits side by side; int 42h; hlt */
+        const uint8_t smc[] = {0xbc, 0x00, 0x10, 0x02, 0x00, /* mov esp, 0x21000: the data page's end */
+                               0xbe, 0x00, 0x20, 0x01, 0x00, 0xff, 0xd6, 0x89, 0xc3,
+                               0xc7, 0x05, 0x01, 0x20, 0x01, 0x00, 0x22, 0x22, 0x22, 0x22,
+                               0xff, 0xd6, 0xc1, 0xe0, 0x04, 0x09, 0xd8, 0xcd, 0x42, 0xf4};
+        memcpy(nc_vm_host(&core.vm, 0x10180), smc, sizeof(smc));
+        const uint64_t code_faults = g_nc_faults_code;
+        result = 0;
+        nc_context_init(core.cpu, &context, 0x10180, 0);
+        nc_cpu_run(core.cpu, &context);
+        check(result == 0x33333331u, "a function the guest rewrote runs its new bytes");
+        check(kvm || g_nc_faults_code > code_faults, "the store to translated code was seen at its fault");
+        /* the host's turn, through the guest's view: mov esi; call esi; int 42h; hlt */
+        nc_wr32((uint8_t *)nc_vm_host(&core.vm, 0x12001), 0x44444444);
+        const uint8_t again[] = {0xbc, 0x00, 0x10, 0x02, 0x00, 0xbe, 0x00, 0x20, 0x01, 0x00, 0xff, 0xd6, 0xcd, 0x42, 0xf4};
+        memcpy(nc_vm_host(&core.vm, 0x101c0), again, sizeof(again));
+        result = 0;
+        nc_context_init(core.cpu, &context, 0x101c0, 0);
+        nc_cpu_run(core.cpu, &context);
+        check(result == 0x44444444u, "a function the host rewrote through the guest's view runs its new bytes");
+        check(prot_mirrored(&core.vm), "page protections mirrored after stores to translated code");
+    }
+
     /* CPUID as the kernel's table answers it: leaf 0's vendor, leaf 1's
      * signature, zeros past the highest leaf (7). */
     struct {
