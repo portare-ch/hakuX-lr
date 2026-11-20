@@ -128,7 +128,12 @@ typedef struct HlePshKey {
     uint16_t fb_src, fb_dst, fb_op;
     uint8_t precise;                    /* Reuse padding; keep the shader key size stable. */
     uint8_t shadow_point;               /* Bits 0-3: stages using point shadow comparison.
-                                           Reuses padding to keep the key layout stable. */
+                                           Reuses padding to keep the key layout stable.
+                                           Bits 4-7: stages whose texture is an R16B16
+                                           sampled as stored, two 16-bit halves (the high
+                                           in r and a, the low in g and b): a dot mapping
+                                           takes them at 16 bits, and a signed one
+                                           (sgn_ob) is the half as two's complement */
     uint32_t fb_const;
     /* SET_ANTI_ALIASING_CONTROL on an antialiased target, which is emulated
      * as an image aa_grid's times as large (bits 0-1 xs, 2-3 ys; 0: no

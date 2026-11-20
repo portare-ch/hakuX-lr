@@ -433,12 +433,35 @@ static bool fetches(unsigned m)
            m != HLE_PST_DOTPRODUCT && m != HLE_PST_DOT_ZW;
 }
 
+/* Stage s's texel is an R16B16's sampled as stored (HlePshKey shadow_point):
+ * the texture bound there is one, and the stage's mode fetches it (a
+ * PASSTHRU stage's result is its coordinates, whatever is bound). */
+static bool w16(const HlePshKey *k, unsigned s)
+{
+    return ((k->shadow_point >> (4 + s)) & 1u) && fetches((k->tex_modes >> (5 * s)) & 0x1F);
+}
+
 /* Texture colour sign: stage s's signed channels (HlePshKey sgn_ob,
  * sgn_raw) as the NV2A reads them, before anything uses the texel. */
 static void sign_decode(Buf *b, const HlePshKey *k, unsigned s, unsigned m)
 {
     const unsigned ob = (k->sgn_ob >> (4 * s)) & 15, raw = (k->sgn_raw >> (4 * s)) & 15 & ~ob;
     if (!fetches(m)) {
+        return;
+    }
+    if (w16(k, s)) {
+        /* an R16B16's signed half, uploaded offset binary so that it filters
+         * as two's complement: the 16 bits of that, read unsigned as every
+         * use reads the texel (nxdk_pgraph_tests' Bump map, HILO_1: a blend
+         * of 0x0202 and 0xFFFF stays near 0 until it passes below it, where
+         * it reads as 0xFFFF). To a 64th of a step: a float's 0x8000 of
+         * 0xFFFF is a 250th of a step short, and would read as 0xFFFF. */
+        for (unsigned c = 0; c < 4; c++) {
+            if ((ob >> c) & 1) {
+                put(b, "  t%u.%c = mod(floor((t%u.%c * 65535.0 - 32768.0) * 64.0 + 0.5) / 64.0, "
+                       "65536.0) / 65535.0;\n", s, "rgba"[c], s, "rgba"[c]);
+            }
+        }
         return;
     }
     for (unsigned c = 0; c < 4; c++) {
@@ -455,7 +478,7 @@ static const char *tex_read(char *e, size_t n, const HlePshKey *k, unsigned t)
 {
     const unsigned m = (k->tex_modes >> (5 * t)) & 0x1F;
     const unsigned sg = ((k->sgn_ob | k->sgn_raw) >> (4 * t)) & 15;
-    if (!sg || !fetches(m)) {
+    if (!sg || !fetches(m) || w16(k, t)) {
         snprintf(e, n, "t%u", t);
     } else {
         snprintf(e, n, "tsh(t%u, bvec4(%s, %s, %s, %s))", t, sg & 1 ? "true" : "false",
@@ -484,11 +507,20 @@ static void color_key(Buf *b, const HlePshKey *k, unsigned s, unsigned m)
         { "vec4(15.0, 15.0, 15.0, 0.0)", "vec4(15.0)" } };
     const unsigned op = (k->ckey >> (2 * s)) & 3, bits = (k->ckey_bits >> (2 * s)) & 3;
     const unsigned alpha = (k->ckey_alpha >> s) & 1;
-    const unsigned ob = (k->sgn_ob >> (4 * s)) & 15;
-    const bool sgn = ((k->sgn_ob | k->sgn_raw) >> (4 * s)) & 15;
+    /* An R16B16 as stored has the guest's unsigned bits once sign_decode has
+     * run, the same for the key as for every other use: decoded first, then
+     * compared and zeroed as a texel without colour sign. */
+    const bool first = w16(k, s);
+    const unsigned ob = first ? 0 : (k->sgn_ob >> (4 * s)) & 15;
+    const bool sgn = !first && ((k->sgn_ob | k->sgn_raw) >> (4 * s)) & 15;
     const uint32_t c = k->ckey_col[s];
-    if (!op || !fetches(m)) {
+    if (first) {
         sign_decode(b, k, s, m);
+    }
+    if (!op || !fetches(m)) {
+        if (!first) {
+            sign_decode(b, k, s, m);
+        }
         return;
     }
     char t[160], act[24];
@@ -507,7 +539,9 @@ static void color_key(Buf *b, const HlePshKey *k, unsigned s, unsigned m)
     if (op == 3 || !sgn) {
         put(b, "  if (ckeq(%s, vec4(%u.0, %u.0, %u.0, %u.0) / 255.0, %s)) %s;\n", t,
             (c >> 16) & 255, (c >> 8) & 255, c & 255, c >> 24, k_n[bits][alpha], act);
-        sign_decode(b, k, s, m);
+        if (!first) {
+            sign_decode(b, k, s, m);
+        }
         return;
     }
     put(b, "  bool ck%u = ckeq(%s, vec4(%u.0, %u.0, %u.0, %u.0) / 255.0, %s);\n", s, t,
@@ -556,6 +590,21 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
     put(&b, "#version 450\n#extension GL_EXT_nonuniform_qualifier : require\n%s%s",
         k->poly_smooth ? HLE_BARY_EXT_GLSL : "",
         hle_push_glsl());
+    if (k->shadow_point >> 4) {
+        /* The HILO dot mappings of an R16B16 sampled as stored (w16): its
+         * two halves as filtered, at 16 bits, where dmap puts them together
+         * from the bytes of an 8-bit texel. nxdk_pgraph_tests' Bump map: the
+         * console's lookup slopes across the texels' blend, in steps of a
+         * 65535th; from bytes it moved in 256 steps. */
+        put(&b, "vec3 dmap16(uint m, vec4 c) {\n"
+                "  if (m == 4u) return vec3(c.rg, 1.0);\n"
+                "  vec2 w = c.rg * 65535.0;\n"
+                "  vec2 h = m == 5u ? (w - 32768.0) / 32767.0 :\n"
+                "           mix(w, w - 65536.0, greaterThanEqual(w, vec2(32768.0))) / 32767.0;\n"
+                "  if (m == 6u) h = (2.0 * h * 32767.0 + 1.0) / 65535.0;\n"
+                "  return vec3(h, sqrt(max(1.0 - dot(h, h), 0.0)));\n"
+                "}\n");
+    }
     if (k->precise) {
         put(&b, "float q9(float x) { return floor(x * 255.0 + 0.500244140625) / 255.0; }\n"
                 "vec3 q9(vec3 x) { return floor(x * 255.0 + 0.500244140625) / 255.0; }\n");
@@ -803,14 +852,14 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
                              m == HLE_PST_DOT_RFLCT_SPEC_CONST);
         char ts[64], ts2[64];
         if (dotmode) {
-            put(&b, "  dot%u = dot(vTex%u.xyz, dmap(%uu, %s));\n", s, s, dm,
-                tex_read(ts, sizeof(ts), k, in));
+            put(&b, "  dot%u = dot(vTex%u.xyz, dmap%s(%uu, %s));\n", s, s,
+                w16(k, in) && dm >= 4 ? "16" : "", dm, tex_read(ts, sizeof(ts), k, in));
         }
         if (s == 2 && m == HLE_PST_DOT_RFLCT_DIFF) {
             /* the diffuse lookup needs stage 3's dot, computed here first */
             unsigned in3 = (k->input_tex >> 20) & 3, dm3 = (k->dot_map >> 8) & 7;
-            put(&b, "  dot3 = dot(vTex3.xyz, dmap(%uu, %s));\n", dm3,
-                tex_read(ts, sizeof(ts), k, in3));
+            put(&b, "  dot3 = dot(vTex3.xyz, dmap%s(%uu, %s));\n",
+                w16(k, in3) && dm3 >= 4 ? "16" : "", dm3, tex_read(ts, sizeof(ts), k, in3));
         }
         if ((k->fbfetch >> s) & 1) {
             /* the target drawn into: this pixel as the earlier draws left it
@@ -878,7 +927,8 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
              * it the other way (nxdk_pgraph_tests' Bump map: over 127 the
              * console's offsets were a texel in 128 short). A channel colour
              * sign already made signed (sign_decode) is that byte again. */
-            const unsigned sd = ((k->sgn_ob | k->sgn_raw) >> (4 * in)) & 6;
+            /* (an R16B16 as stored comes unsigned whatever its sign: w16) */
+            const unsigned sd = w16(k, in) ? 0 : ((k->sgn_ob | k->sgn_raw) >> (4 * in)) & 6;
             char duv[176], du[80], dv[80];
             if (sd & 4) {
                 snprintf(du, sizeof(du), "bmps(t%u.b)", in);
@@ -910,7 +960,16 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             if (m == HLE_PST_BUMPENVMAP_LUM) {
                 /* the luminance is the red byte unsigned, a signed one's
                  * bits too (filtered as signed): -1 is 255 */
-                char lr[32];
+                char lr[80];
+                if (w16(k, in)) {
+                    /* an R16B16's red is the low byte of its high half as
+                     * filtered: across a blend of 0x7F7F and 0x8080 the
+                     * console's luminance climbs to full, falls to none at
+                     * the middle and climbs back (nxdk_pgraph_tests' Bump
+                     * env lum), whatever the colour sign */
+                    snprintf(lr, sizeof(lr),
+                             "(fract(floor(t%u.r * 65535.0 + 0.5) / 256.0) * (256.0 / 255.0))", in);
+                } else
                 snprintf(lr, sizeof(lr), ((k->sgn_ob | k->sgn_raw) >> (4 * in)) & 1 ?
                          "bmpu(t%u.r)" : "t%u.r", in);
                 put(&b, "    vec2 l = unpackHalf2x16(pc.bumpl[%u]);\n"

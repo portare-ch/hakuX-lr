@@ -4345,6 +4345,13 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
             }
         }
         for (unsigned st = 0; st < 4; st++) {
+            /* R16B16 sampled as stored: its halves at 16 bits (psh.h) */
+            HleVkTex *tx = c->tex[st] ? tex_find(c->tex[st]) : NULL;
+            if (tx && tx->fmt == VK_FORMAT_R16G16_UNORM) {
+                k.pk.shadow_point |= (uint8_t)(0x10u << st);
+            }
+        }
+        for (unsigned st = 0; st < 4; st++) {
             /* colour sign (D3DTSIGN_*: A R G B): an uploaded texture's signed
              * 8-bit channels came offset binary (pb/pbres.c) and map back
              * exactly; a target's, and L8's, AL8's, A8's and A8L8's, are read
@@ -4358,8 +4365,15 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
             HleVkTex *tx = tex_find(c->tex[st]);
             HleVkSurf *sf = tx ? NULL : hle_surf_get(c->tex[st]);
             const uint32_t gx = tx ? tx->gfmt : sf ? sf->d.xfmt : 0;
-            const uint32_t want = tx || sf ? hle_fmt_sign_rgba(gx, sign) : 0;     /* rgba */
-            const uint32_t ob = tx ? tx->sgn : 0, raw = want & ~ob;
+            uint32_t want = tx || sf ? hle_fmt_sign_rgba(gx, sign) : 0;     /* rgba */
+            const uint32_t ob = tx ? tx->sgn : 0;
+            if (gx == HLE_XFMT_V16U16 || gx == HLE_XFMT_LIN_V16U16) {
+                /* an R16B16's halves are signed only as uploaded (16 bits,
+                 * offset binary): one converted to bytes (no 16-bit format
+                 * here), sampled with a border, or a surface stays unsigned */
+                want = ob;
+            }
+            const uint32_t raw = want & ~ob;
             k.pk.sgn_ob |= (uint16_t)(ob << (4 * st));
             k.pk.sgn_raw |= (uint16_t)(raw << (4 * st));
             static unsigned s_logged;
