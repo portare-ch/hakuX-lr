@@ -15,6 +15,10 @@ tf64_fmul_tiny_u 566
 tf64_fdiv_tiny_u 483
 tf64_fmul_tiny_z 532
 tf64_fdiv_tiny_z 660
+stack_push_full 3
+stack_push_mmx 3
+stack_add_empty 2
+stack_add_mem_empty 5
 fsin 1452
 fcos 1399
 fptan 861
@@ -62,7 +66,3 @@ status_loaded 5
 status_sticky 12
 smc_imm 2044
 smc_far 2044
-stack_push_full 3
-stack_push_mmx 3
-stack_add_empty 2
-stack_add_mem_empty 5
