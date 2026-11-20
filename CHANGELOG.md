@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## linux-v0.36.0 (Linux ARM64, Linux x86-64, and Android ARM64)
+
+- **Native widescreen.** Screen Format **Auto** now selects 16:9 for 331 known North American titles with native widescreen support when the frontend reports a wide display or leaves the display size unknown. **Normal** forces 4:3. An applied widescreen patch still takes priority in Auto. [#276](https://github.com/portare-ch/hakuX-lr/pull/276)
+- **ARM64 CPU accuracy.** Update FEX and use the modeled Intel reciprocal-square-root values for `RSQRTSS` and `RSQRTPS`. Correct x87 integer stores for invalid and out-of-range inputs and preserve full precision in adjacent 64-bit integer load/store pairs. [#278](https://github.com/portare-ch/hakuX-lr/pull/278) · [#280](https://github.com/portare-ch/hakuX-lr/pull/280) · [#281](https://github.com/portare-ch/hakuX-lr/pull/281)
+- **Vulkan depth clears.** Restore 24-bit floating-point depth clears to infinity on Mesa 26.3 RADV. The 1× NV2A test run on Mesa 26.3.1 rose from 2,955 to 3,050 matching images out of 3,576. [#274](https://github.com/portare-ch/hakuX-lr/pull/274)
+- **Bump maps.** Preserve both 16-bit channels and their signed filtering when sampling R16B16 textures. Correct the luminance calculation for those textures. [#275](https://github.com/portare-ch/hakuX-lr/pull/275)
+
+The CPU differential tests ran on the Retroid Pocket Nova. All four tested reciprocal-square-root forms matched the Intel model, and all 19 affected x87 integer-store and round-trip forms matched the x86 reference across 2,048 inputs each. [#279](https://github.com/portare-ch/hakuX-lr/pull/279) · [#280](https://github.com/portare-ch/hakuX-lr/pull/280) · [#281](https://github.com/portare-ch/hakuX-lr/pull/281)
+
 ## linux-v0.35.2 (Linux ARM64, Linux x86-64, and Android ARM64)
 
 - **Morrowind.** Fix a boot crash when the game closes a disc file while a read is still pending. [#273](https://github.com/portare-ch/hakuX-lr/pull/273)
