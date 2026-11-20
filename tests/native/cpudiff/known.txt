@@ -1,25 +1,6 @@
 # Known differences between FEX and the x86 reference: <test> <differing cases>.
 # Written by compare.py --write; see README.md.
-fild64_fistp64_s 1184
-fild64_fistp64_d 1184
-fild64_fistp64_e 1184
 fild64_fstp80 1185
-fist32_f64_n 269
-fist16_f64_n 1089
-fist64_f64_n 188
-fist32_f32_n 223
-fist32_f64_d 268
-fist16_f64_d 1089
-fist64_f64_d 188
-fist32_f32_d 223
-fist32_f64_u 269
-fist16_f64_u 1089
-fist64_f64_u 188
-fist32_f32_u 223
-fist32_f64_z 268
-fist16_f64_z 1089
-fist64_f64_z 188
-fist32_f32_z 223
 fmul_f64_s 1
 fdiv_f64_s 7
 fsqrt_f64_s 1024
