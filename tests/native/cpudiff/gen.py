@@ -278,9 +278,13 @@ def build(rng, n):
         post = '\nstmxcsr [edi]\nand dword ptr [edi], 0x3F'
         data = '.data\nmx: .long %d\n.text' % mx
         sfx = '_fz' if fz else ''
-        for op in ('addss', 'subss', 'mulss', 'divss', 'minss', 'comiss', 'ucomiss'):
+        for op in ('addss', 'subss', 'mulss', 'divss', 'minss', 'maxss', 'comiss', 'ucomiss'):
             t.append(Test('%s_status%s' % (op, sfx), pair32, '<2I', 4,
                           'movss xmm0, [esi]\n' + pre + '%s xmm0, dword ptr [esi+4]' % op + post,
+                          setup='jmp 9f\n' + data + '\n9:', tags='sse status'))
+        for op in ('minps', 'maxps', 'addps'):
+            t.append(Test('%s_status%s' % (op, sfx), [q + quad32[(i + 5) % n] for i, q in enumerate(quad32)], '<8I', 4,
+                          'movups xmm0, [esi]\nmovups xmm1, [esi+16]\n' + pre + '%s xmm0, xmm1' % op + post,
                           setup='jmp 9f\n' + data + '\n9:', tags='sse status'))
         t.append(Test('sqrtss_status' + sfx, [(x,) for x in a32], '<I', 4,
                       pre + 'sqrtss xmm0, dword ptr [esi]' + post, setup='jmp 9f\n' + data + '\n9:', tags='sse status'))
