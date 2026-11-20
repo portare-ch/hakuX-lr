@@ -10,8 +10,10 @@ reference is the Xbox model, <test dir>/<name>.model, when there is one;
 without a model the test is listed and not judged.
 
   --expect FILE   the differences that are known: lines "<name> <cases>".
-                  Exit 1 when a test differs in more cases than listed
-                  (or is missing); fewer is reported as a gain.
+                  Exit 1 when a test differs in more cases than listed;
+                  fewer is reported as a gain.
+
+A test without an output file, or with one of the wrong size, always fails.
   --write FILE    write the current differences in that format
   --show N        print the first N differing cases of every differing test
 """
@@ -45,7 +47,7 @@ def main():
             if len(p) == 2:
                 expect[p[0]] = int(p[1])
 
-    rows, bad, gains, unjudged = [], [], [], []
+    rows, bad, gains, unjudged, broken = [], [], [], [], []
     by_tag = {}
     for line in open(os.path.join(args.tests, 'manifest.txt')):
         p = line.split()
@@ -70,7 +72,10 @@ def main():
             continue
         cases = len(want) // rec
         if got is None or len(got) != len(want):
-            diff, first = cases, []
+            # no output, or a short one: the run failed, which no listed difference covers
+            print('%s: %s' % (name, 'no output' if got is None else 'output of %d bytes, %d expected' % (len(got), len(want))))
+            broken.append(name)
+            continue
         else:
             first = [i for i in range(cases) if got[i * rec:(i + 1) * rec] != want[i * rec:(i + 1) * rec]]
             diff = len(first)
@@ -85,7 +90,7 @@ def main():
         elif diff < expect.get(name, 0):
             gains.append((name, expect[name], diff))
         if diff and (args.show or name in bad):
-            print('%s: %d of %d cases differ%s' % (name, diff, cases, '' if got is not None else ' (no output)'))
+            print('%s: %d of %d cases differ' % (name, diff, cases))
             for i in first[:args.show]:
                 print('  case %d: reference %s, got %s' % (i, want[i * rec:(i + 1) * rec].hex(), got[i * rec:(i + 1) * rec].hex()))
 
@@ -105,10 +110,11 @@ def main():
             for name, diff in rows:
                 if diff:
                     f.write('%s %d\n' % (name, diff))
+    if broken:
+        print('FAIL: no (or a short) output from: ' + ' '.join(broken))
     if bad:
         print('FAIL: more differences than listed in: ' + ' '.join(bad))
-        return 1
-    return 0
+    return 1 if bad or broken else 0
 
 
 if __name__ == '__main__':
