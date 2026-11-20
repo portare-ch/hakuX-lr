@@ -81,12 +81,15 @@ namespace {
 // zero (FZ, bit 15) is an underflow to the host and inexact too on x86.
 class GuestFpFlags {
 public:
-  explicit GuestFpFlags(FEXCore::Core::CpuStateFrame* Frame) {
+  GuestFpFlags(FEXCore::Core::CpuStateFrame* Frame, bool X87OnHost) {
     uint64_t F;
     asm volatile("mrs %0, fpsr" : "=r"(F));
     uint32_t M = static_cast<uint32_t>((F & 1) | ((F & 0x1E) << 1) | ((F >> 6) & 2));
-    // the reduced x87's status word reads the same flags: its kept ones (FEX's X87KeptExceptions)
-    Frame->State.flags[FEXCore::X86State::X87FLAG_DE_LOC] |= static_cast<uint8_t>(M);
+    // the reduced x87's status word reads the same flags: its kept ones (FEX's
+    // X87KeptExceptions). The 80-bit x87 (NC_FEX_X87=80) computes in software and has its own.
+    if (X87OnHost) {
+      Frame->State.flags[FEXCore::X86State::X87FLAG_DE_LOC] |= static_cast<uint8_t>(M);
+    }
     if ((Frame->State.mxcsr & 0x8000) && (M & 0x10)) {
       M |= 0x20;
     }
@@ -100,9 +103,10 @@ public:
 class Syscalls final : public FEXCore::HLE::SyscallHandler {
 public:
   NcCpuConfig Cfg {};
+  bool X87OnHost = true; // FEX's reduced x87 (host doubles), not the 80-bit one
 
   void HandleSyscall(FEXCore::Core::CpuStateFrame* Frame) override {
-    const GuestFpFlags Flags(Frame);
+    const GuestFpFlags Flags(Frame, X87OnHost);
     const uint64_t Info = Frame->SystemOpInfo;
     Frame->SystemOpInfo = 0;
     const auto Op = static_cast<NcSysOp>(Info & 0xff);
@@ -272,6 +276,11 @@ extern "C" void nc_context_init(NcCpu* cpu, NcCpuContext* c, uint32_t eip, uint3
   memset(c, 0, sizeof(*c));
   auto& D = Saved(c);
   D = cpu->Reset;
+  // A new thread's x87 control word: 53-bit precision, as the console's
+  // kernel sets it (and the KVM backend does), not the x87's own reset value
+  // (64-bit). The reduced x87 computes in doubles either way; the 80-bit one
+  // (NC_FEX_X87=80) rounded every double operation twice with 0x37F.
+  D.FCW = 0x027F;
   D.rip = eip;
   D.gregs[FEXCore::X86State::REG_RSP] = esp;
 }
@@ -358,6 +367,7 @@ extern "C" NcCpu* nc_cpu_create(const NcCpuConfig* cfg, uint32_t fs_base) {
   auto* Cpu = new NcCpu {};
   Cpu->Sys.Cfg = *cfg;
   Cpu->X87Watch = !x87_full && !x87_pc_off;
+  Cpu->Sys.X87OnHost = !x87_full;
   Cpu->CTX = FEXCore::Context::Context::CreateNewContext(FEX::FetchHostFeatures(false)); // a 32-bit guest
   Cpu->CTX->SetSignalDelegator(&Cpu->Sig);
   Cpu->CTX->SetSyscallHandler(&Cpu->Sys);
