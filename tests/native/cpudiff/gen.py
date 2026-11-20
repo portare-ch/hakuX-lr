@@ -308,6 +308,40 @@ def build(rng, n):
                           'fnclex\n' + ld + '%s\nfnstsw ax\nand eax, 0x453D\nmov [edi], eax' % cmp,
                           setup='fldcw [cw]\n.data\ncw: .word %d\n.text' % cw(pc), env=env, tags='x87 status'))
 
+    # The x87's stack faults, in the 80-bit mode: a push onto a register in use (overflow) and a
+    # read of an empty one (underflow) are invalid operations with SF, and the real indefinite
+    # is what comes of them. The status word whole but for its busy bit, then the value.
+    SW = 'fnstsw ax\nand eax, 0x7F7F\nmov [edi], eax\n'
+    fill = 'fld1\n' * 8
+    faults = [
+        ('push_full', 'fninit\n' + fill + 'fld qword ptr [esi]\n' + SW + 'fstp tbyte ptr [edi+4]\nfninit'),
+        ('push_seven', 'fninit\n' + 'fld1\n' * 7 + 'fld qword ptr [esi]\n' + SW + 'fstp tbyte ptr [edi+4]\nfninit'),
+        ('push_mmx', 'fninit\npxor mm0, mm0\nfld qword ptr [esi]\n' + SW + 'fstp tbyte ptr [edi+4]\nemms\nfninit'),
+        ('push_emms', 'fninit\npxor mm0, mm0\nemms\nfld qword ptr [esi]\n' + SW + 'fstp tbyte ptr [edi+4]\nfninit'),
+        ('fild_full', 'fninit\n' + fill + 'fild dword ptr [esi]\n' + SW + 'fstp tbyte ptr [edi+4]\nfninit'),
+        ('fld_st_full', 'fninit\n' + 'fld1\n' * 7 + 'fld qword ptr [esi]\nfld st(0)\n' + SW + 'fstp tbyte ptr [edi+4]\nfninit'),
+        ('pop_empty', 'fninit\nfstp tbyte ptr [edi+4]\n' + SW + 'fninit'),
+        ('store_empty', 'fninit\nfst qword ptr [edi+4]\n' + SW + 'fninit'),
+        ('add_empty', 'fninit\nfld qword ptr [esi]\nfaddp st(1), st\n' + SW + 'fstp tbyte ptr [edi+4]\nfninit'),
+        ('add_mem_empty', 'fninit\nfadd qword ptr [esi]\n' + SW + 'fstp tbyte ptr [edi+4]\nfninit'),
+        ('fxch_empty', 'fninit\nfld qword ptr [esi]\nfxch st(1)\n' + SW + 'fstp tbyte ptr [edi+4]\nfninit'),
+        ('fld_st_empty', 'fninit\nfld qword ptr [esi]\nfld st(3)\n' + SW + 'fstp tbyte ptr [edi+4]\nfninit'),
+        ('fcom_empty', 'fninit\nfld qword ptr [esi]\nfcom st(1)\n' + SW + 'fstp tbyte ptr [edi+4]\nfninit'),
+        ('fist_empty', 'fninit\nmov dword ptr [edi+4], 0x55555555\nfistp dword ptr [edi+4]\n' + SW + 'fninit'),
+        ('fsqrt_empty', 'fninit\nfsqrt\n' + SW + 'fstp tbyte ptr [edi+4]\nfninit'),
+        ('fxam_empty', 'fninit\nfxam\n' + SW + 'fninit'),
+        ('fxam_full', 'fninit\nfld qword ptr [esi]\nfxam\n' + SW + 'fstp tbyte ptr [edi+4]\nfninit'),
+        ('after_fault', 'fninit\n' + fill + 'fld qword ptr [esi]\nfnclex\nfld st(0)\nfaddp st(1), st\n' + SW + 'fstp tbyte ptr [edi+4]\nfninit'),
+        ('ffree_push', 'fninit\n' + fill + 'ffree st(7)\nfld qword ptr [esi]\n' + SW + 'fstp tbyte ptr [edi+4]\nfninit'),
+        ('ffreep', 'fninit\n' + fill + 'ffreep st(0)\nfld qword ptr [esi]\n' + SW + 'fstp tbyte ptr [edi+4]\nfninit'),
+        ('ffreep_st3', 'fninit\n' + fill + 'ffreep st(3)\nfld qword ptr [esi]\n' + SW + 'fstp tbyte ptr [edi+4]\nfninit'),
+        ('incstp', 'fninit\nfld qword ptr [esi]\nfincstp\nfld1\nfdecstp\nfdecstp\n' + SW + 'fstp tbyte ptr [edi+4]\nfninit'),
+    ]
+    for name, body in faults:
+        t.append(Test('stack_' + name, [(x,) for x in a64], '<Q', 16,
+                      'mov dword ptr [edi+4], 0\nmov dword ptr [edi+8], 0\nmov dword ptr [edi+12], 0\n' + body,
+                      env=(('FEX_X87REDUCEDPRECISION', '0'),), tags='x87 stack'))
+
     # x87 compares: the status word's condition codes
     t.append(Test('fcom_f64', pair64, '<2Q', 2,
                   'fld qword ptr [esi]\nfcomp qword ptr [esi+8]\nfnstsw ax\nand ax, 0x4500\nmov [edi], ax',

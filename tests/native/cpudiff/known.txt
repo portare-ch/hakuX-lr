@@ -62,3 +62,7 @@ status_loaded 5
 status_sticky 12
 smc_imm 2044
 smc_far 2044
+stack_push_full 3
+stack_push_mmx 3
+stack_add_empty 2
+stack_add_mem_empty 5
