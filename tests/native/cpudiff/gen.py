@@ -224,37 +224,89 @@ def build(rng, n):
                       'fld dword ptr [esi]\nfmul dword ptr [esi+4]\nfadd dword ptr [esi]\nfmul st, st(0)\n'
                       'fst dword ptr [edi]\nfstp qword ptr [edi+4]',
                       setup=s, env=REDUCED, single=pc == 0, tags=tag))
-    # The sequences TestFloat's F32 functions run (nxdk_low_level_cpu_tests): float operands
-    # through the x87 at the kernel's control word (53-bit precision), stored as a float, and
-    # the status word's exception flags (IE, ZE, OE, UE, PE; cleared before) after it.
-    for rn, rc in zip(RCS, range(4)):
-        s = 'fldcw [cw]\n.data\ncw: .word %d\n.text' % cw(2, rc)
-        for op in ('fadd', 'fsub', 'fmul', 'fdiv'):
-            t.append(Test('tf32_%s_%s' % (op, rn), pair32, '<2I', 8,
-                          'fnclex\nfld dword ptr [esi]\n%s dword ptr [esi+4]\nfstp dword ptr [edi]\n'
-                          'fnstsw ax\nand eax, 0x3D\nmov [edi+4], eax' % op, setup=s, env=REDUCED, tags='x87 status'))
-        t.append(Test('tf32_fsqrt_' + rn, [(x,) for x in a32], '<I', 8,
-                      'fnclex\nfld dword ptr [esi]\nfsqrt\nfstp dword ptr [edi]\nfnstsw ax\nand eax, 0x3D\nmov [edi+4], eax',
-                      setup=s, env=REDUCED, tags='x87 status'))
-    # products just under the smallest normal float: the store rounds some up to it, which is
-    # an underflow only if tininess is judged before rounding (the x87 judges after)
+    # The sequences TestFloat's functions run (nxdk_low_level_cpu_tests): operands through the
+    # x87, the result stored at the operands' width, and the status word's exception flags
+    # (IE, ZE, OE, UE, PE; cleared before) after it. F32 and F64 at the kernel's control word
+    # (53-bit precision), ExtF80 at 64-bit precision; under the reduced x87 (tf32, tf64) and
+    # the 80-bit one (tf32x, tf64x, tf80x), which alone can hold an ExtF80.
+    FULL = (('FEX_X87REDUCEDPRECISION', '0'),)
+    ext = [struct.unpack('<QH', bytes(trng2.getrandbits(8) for _ in range(10))) for trng2 in [random.Random(rng.random())] for _ in range(n)]
+    ext80 = []
+    for i, (m, e) in enumerate(ext):
+        k = i % 4
+        if k == 0:      # a normal number of any size
+            m |= 1 << 63
+        elif k == 1:    # of ordinary size
+            m |= 1 << 63
+            e = (e & 0x8000) | (0x3FFF + (e % 61) - 30)
+        elif k == 2:    # near the ends of the exponent's range, denormals with them
+            e = (e & 0x8000) | [0, 0, 1, 2, 0x7FFD, 0x7FFE][e % 6]
+            m = m | (1 << 63) if e & 0x7FFF else m & ~(1 << 63)
+        else:           # any bits, made an encoding the x87 supports: the integer bit set unless the exponent is 0
+            m = m | (1 << 63) if e & 0x7FFF else m & ~(1 << 63)
+        ext80.append((m, e))
+    ext80[:6] = [(0, 0), (0, 0x8000), (1 << 63, 0x7FFF), (1 << 63, 0xFFFF), (3 << 62, 0x7FFF), (1 << 63, 0x3FFF)]
+    pair80 = [a + b for a, b in zip(ext80, reversed(ext80))]
     tiny = []
     trng = random.Random(rng.random())
     while len(tiny) < n:
         x = trng.uniform(1.0, 2.0)
         y = (2.0 ** -126) / x * (1.0 - trng.choice([0.0, 2.0 ** -25, 2.0 ** -24, 3 * 2.0 ** -25, 2.0 ** -23, 2.0 ** -20]))
         tiny.append((f32(x), f32(y) ^ (trng.getrandbits(1) << 31)))
-    for rn, rc in zip(RCS, range(4)):
-        for op in ('fmul', 'fdiv'):
-            ins = tiny if op == 'fmul' else [(b, f32(1.0 / struct.unpack('<f', struct.pack('<I', a))[0])) for a, b in tiny]
-            t.append(Test('tf32_%s_tiny_%s' % (op, rn), ins, '<2I', 8,
-                          'fnclex\nfld dword ptr [esi]\n%s dword ptr [esi+4]\nfstp dword ptr [edi]\n'
-                          'fnstsw ax\nand eax, 0x3D\nmov [edi+4], eax' % op,
-                          setup='fldcw [cw]\n.data\ncw: .word %d\n.text' % cw(2, rc), env=REDUCED, tags='x87 status'))
-    for name, cmp in (('fucompp', 'fucompp'), ('fcompp', 'fcompp')):
-        t.append(Test('tf32_' + name, pair32, '<2I', 4,
-                      'fnclex\nfld dword ptr [esi+4]\nfld dword ptr [esi]\n%s\nfnstsw ax\nand eax, 0x453D\nmov [edi], eax' % cmp,
-                      setup='fldcw [cw]\n.data\ncw: .word %d\n.text' % cw(2), env=REDUCED, tags='x87 status'))
+    tiny64 = []
+    while len(tiny64) < n:
+        x = trng.uniform(1.0, 2.0)
+        y = (2.0 ** -1022) / x * (1.0 - trng.choice([0.0, 2.0 ** -54, 2.0 ** -53, 3 * 2.0 ** -54, 2.0 ** -52, 2.0 ** -40]))
+        if trng.getrandbits(2) == 0:
+            y *= 2.0 ** -trng.randint(1, 40)    # well inside the denormals: rounded twice on the x87
+        tiny64.append((f64(x), f64(y) ^ (trng.getrandbits(1) << 63)))
+    STATUS = 'fnstsw ax\nand eax, 0x3D\nmov [edi+%d], eax'
+    forms = [('tf32', 'dword', 4, pair32, [(x,) for x in a32], '<2I', '<I', 2, REDUCED),
+             ('tf64', 'qword', 8, pair64, [(x,) for x in a64], '<2Q', '<Q', 2, REDUCED),
+             ('tf32x', 'dword', 4, pair32, [(x,) for x in a32], '<2I', '<I', 2, FULL),
+             ('tf64x', 'qword', 8, pair64, [(x,) for x in a64], '<2Q', '<Q', 2, FULL),
+             ('tf80x', 'tbyte', 10, pair80, ext80, '<QHQH', '<QH', 3, FULL)]
+    for pfx, ptr, width, pairs, singles, pfmt, sfmt, pc, env in forms:
+        out = width + (2 if width == 10 else 0) + 4
+        at = out - 4
+        for rn, rc in zip(RCS, range(4)):
+            s = 'fldcw [cw]\n.data\ncw: .word %d\n.text' % cw(pc, rc)
+            for op in ('fadd', 'fsub', 'fmul', 'fdiv'):
+                if width == 10:
+                    body = ('fnclex\nfld tbyte ptr [esi+10]\nfld tbyte ptr [esi]\n%sp st(1), st\nfstp tbyte ptr [edi]\n' %
+                            (op + 'r' if op in ('fsub', 'fdiv') else op))
+                else:
+                    body = 'fnclex\nfld %s ptr [esi]\n%s %s ptr [esi+%d]\nfstp %s ptr [edi]\n' % (ptr, op, ptr, width, ptr)
+                t.append(Test('%s_%s_%s' % (pfx, op, rn), pairs, pfmt, out, body + STATUS % at, setup=s, env=env, tags='x87 status'))
+            t.append(Test('%s_fsqrt_%s' % (pfx, rn), singles, sfmt, out,
+                          'fnclex\nfld %s ptr [esi]\nfsqrt\nfstp %s ptr [edi]\n' % (ptr, ptr) + STATUS % at,
+                          setup=s, env=env, tags='x87 status'))
+            # products and quotients just under the smallest normal number: an underflow only
+            # if tininess is judged before rounding (the x87 judges after), and rounded twice
+            if width != 10:
+                tp = tiny if width == 4 else tiny64
+                un = (lambda b: struct.unpack('<f', struct.pack('<I', b))[0]) if width == 4 else \
+                     (lambda b: struct.unpack('<d', struct.pack('<Q', b))[0])
+                pk = f32 if width == 4 else f64
+                for op in ('fmul', 'fdiv'):
+                    ins = tp if op == 'fmul' else [(b, pk(1.0 / un(a))) for a, b in tp]
+                    t.append(Test('%s_%s_tiny_%s' % (pfx, op, rn), ins, pfmt, out,
+                                  'fnclex\nfld %s ptr [esi]\n%s %s ptr [esi+%d]\nfstp %s ptr [edi]\n' % (ptr, op, ptr, width, ptr) +
+                                  STATUS % at, setup=s, env=env, tags='x87 status'))
+        cpairs = pairs
+        if width == 10:
+            # with the encodings the x87 doesn't support (the integer bit clear with a nonzero
+            # exponent): pseudo-NaNs, a pseudo-infinity, unnormals. Invalid to every compare.
+            odd = [(1 << 62, 0x7FFF), (1 << 62, 0xFFFF), (3 << 61, 0x7FFF), (1, 0x7FFF), (0, 0x7FFF), (0, 0xFFFF),
+                   (1 << 62, 0x3FFF), (0x7FFFFFFFFFFFFFFF, 0x4000), (1, 1), (0, 0xBFFF)]
+            cpairs = [o + pairs[i][:2] for i, o in enumerate(odd * 4)] + [pairs[i][:2] + o for i, o in enumerate(odd * 4)] + \
+                     [a + b for a in odd[:4] for b in odd[:4]] + pairs
+            cpairs = cpairs[:len(pairs)]
+        for cmp in ('fucompp', 'fcompp'):
+            ld = 'fld %s ptr [esi+%d]\nfld %s ptr [esi]\n' % (ptr, width, ptr)
+            t.append(Test('%s_%s' % (pfx, cmp), cpairs, pfmt, 4,
+                          'fnclex\n' + ld + '%s\nfnstsw ax\nand eax, 0x453D\nmov [edi], eax' % cmp,
+                          setup='fldcw [cw]\n.data\ncw: .word %d\n.text' % cw(pc), env=env, tags='x87 status'))
 
     # x87 compares: the status word's condition codes
     t.append(Test('fcom_f64', pair64, '<2Q', 2,
