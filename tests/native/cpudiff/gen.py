@@ -270,6 +270,28 @@ def build(rng, n):
     t.append(Test('cvtsi2ss', [(x & 0xFFFFFFFF,) for x in i64], '<I', 4,
                   'cvtsi2ss xmm0, dword ptr [esi]\nmovss [edi], xmm0', tags='sse'))
 
+    # MXCSR's status flags after one instruction, cleared before it: with every exception
+    # masked, at round to nearest with and without flush-to-zero.
+    for fz in (0, 1):
+        mx = 0x1F80 | (fz << 15)
+        pre = 'ldmxcsr [mx]\n'
+        post = '\nstmxcsr [edi]\nand dword ptr [edi], 0x3F'
+        data = '.data\nmx: .long %d\n.text' % mx
+        sfx = '_fz' if fz else ''
+        for op in ('addss', 'subss', 'mulss', 'divss', 'minss', 'comiss', 'ucomiss'):
+            t.append(Test('%s_status%s' % (op, sfx), pair32, '<2I', 4,
+                          'movss xmm0, [esi]\n' + pre + '%s xmm0, dword ptr [esi+4]' % op + post,
+                          setup='jmp 9f\n' + data + '\n9:', tags='sse status'))
+        t.append(Test('sqrtss_status' + sfx, [(x,) for x in a32], '<I', 4,
+                      pre + 'sqrtss xmm0, dword ptr [esi]' + post, setup='jmp 9f\n' + data + '\n9:', tags='sse status'))
+        t.append(Test('cvtss2si_status' + sfx, [(x,) for x in a32], '<I', 4,
+                      pre + 'cvtss2si eax, dword ptr [esi]' + post, setup='jmp 9f\n' + data + '\n9:', tags='sse status'))
+    # the flags stay set until cleared, and LDMXCSR sets them
+    t.append(Test('status_sticky', pair32, '<2I', 8,
+                  'ldmxcsr [mx]\nmovss xmm0, [esi]\ndivss xmm0, dword ptr [esi+4]\nmovss xmm1, [esi+4]\naddss xmm1, xmm1\n'
+                  'stmxcsr [edi]\nmov eax, [esi]\nand eax, 0x3F\nor eax, 0x1F80\nmov [edi+4], eax\nldmxcsr [edi+4]\nstmxcsr [edi+4]',
+                  setup='jmp 9f\n.data\nmx: .long 0x1F80\n.text\n9:', tags='sse status'))
+
     # 4. Self-modifying code: the immediate of an instruction that has already
     # run is rewritten, with no call to anything; the new value must be used.
     t.append(Test('smc_imm', [(x & 0xFFFFFFFF,) for x in i64], '<I', 4,
