@@ -332,6 +332,14 @@ def build(rng, n):
                   'mov eax, [esi]\nand eax, 0x803F\nor eax, 0x1F80\nmov [edi], eax\nldmxcsr [edi]\nstmxcsr [edi]\n'
                   'movss xmm0, [esi+4]\nmulss xmm0, xmm0\nstmxcsr [edi+4]',
                   tags='sse status'))
+    # clearing the x87's exceptions leaves MXCSR's as they were, a flushed result's inexact too
+    small = [(f32(trng.uniform(1.0, 2.0) * 2.0 ** -trng.randint(60, 90)), f32(trng.uniform(-2.0, 2.0) * 2.0 ** -trng.randint(40, 90)))
+             for _ in range(n)]
+    for fz in (0, 1):
+        t.append(Test('status_fnclex' + ('_fz' if fz else ''), small, '<2I', 8,
+                      'ldmxcsr [mx]\nmovss xmm0, [esi]\nmulss xmm0, dword ptr [esi+4]\nfnclex\nstmxcsr [edi]\n'
+                      'fninit\nstmxcsr [edi+4]',
+                      setup='jmp 9f\n.data\nmx: .long %d\n.text\n9:' % (0x1F80 | (fz << 15)), env=REDUCED, tags='sse status'))
     # the flags stay set until cleared, and LDMXCSR sets them
     t.append(Test('status_sticky', pair32, '<2I', 8,
                   'ldmxcsr [mx]\nmovss xmm0, [esi]\ndivss xmm0, dword ptr [esi+4]\nmovss xmm1, [esi+4]\naddss xmm1, xmm1\n'
