@@ -12,6 +12,9 @@
 //     --verbose             print register dumps for failures
 //     --sysops              FEX system mode: privileged/system instructions
 //                           exit to the test handler (tests/native/sysops)
+//     --dump <dir>          write each test's output region (its .cfg's
+//                           "out" line) to <dir>/<name>.out, for the CPU
+//                           differential tests (tests/native/cpudiff)
 //
 // The manifest lists one test per line: "<relative name> [tags...]".
 // Each test is <test-dir>/<name>.bin (assembled at 0x10000) plus
@@ -33,6 +36,9 @@
 #include <FEXCore/HLE/SyscallHandler.h>
 #include <FEXCore/Utils/LogManager.h>
 
+#include "native/cpu/intel_rsqrt_table.inc"
+
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <csignal>
@@ -73,6 +79,9 @@ struct TestConfig {
   std::vector<MemData> Mem;
   std::vector<RegExpect> Regs;
   std::vector<std::pair<std::string, std::string>> Env;
+  uint64_t OutAddr = 0, OutSize = 0; // the output region --dump writes (tests/native/cpudiff)
+  bool X87Single = false;            // the title selected x87 single precision, as the core tells FEX
+  bool RSqrtIntel = false;           // RSQRT from Intel's table, as the core tells FEX
 };
 
 bool ParseConfig(const std::string& Path, TestConfig& Out) {
@@ -119,6 +128,15 @@ bool ParseConfig(const std::string& Path, TestConfig& Out) {
       std::string K, V;
       S >> K >> V;
       Out.Env.emplace_back(K, V);
+    } else if (Key == "out") {
+      std::string A, L;
+      S >> A >> L;
+      Out.OutAddr = std::stoull(A, nullptr, 0);
+      Out.OutSize = std::stoull(L, nullptr, 0);
+    } else if (Key == "x87single") {
+      Out.X87Single = true;
+    } else if (Key == "rsqrt") {
+      Out.RSqrtIntel = true;
     }
   }
   return true;
@@ -146,6 +164,7 @@ struct Options {
   int TimeoutSec = 10;
   bool Verbose = false;
   bool SysOps = false; // FEX system mode, with the test handler below
+  std::string Dump;    // --dump: each test's output region to <dir>/<name>.out
 };
 
 // ------------------------------------------------------------- FEX glue
@@ -461,7 +480,7 @@ void PrintDigest(FEXCore::Context::Context* CTX, FEXCore::Core::InternalThreadSt
   }
 }
 
-int RunOne(const Options& Opt, const std::string& Bin, const std::string& Cfg) {
+int RunOne(const Options& Opt, const std::string& Bin, const std::string& Cfg, const std::string& DumpPath) {
   InstallFaultHandlers();
   LogMan::Throw::InstallHandler(AssertHandler);
   LogMan::Msg::InstallHandler(MsgHandler);
@@ -545,9 +564,16 @@ int RunOne(const Options& Opt, const std::string& Bin, const std::string& Cfg) {
     CTX->EnableSystemOps();
     CTX->SetGuestCycleCounterRatio(TscRatioQ32());
   }
+  if (C.RSqrtIntel) {
+    CTX->SetRSqrtTable(intel_rsqrt_mantissa);
+  }
   if (!CTX->InitCore()) {
     fprintf(stderr, "InitCore failed\n");
     return 6;
+  }
+
+  if (C.X87Single) {
+    CTX->EnableX87SinglePrecision();
   }
 
   auto* Thread = CTX->CreateThread();
@@ -620,6 +646,14 @@ int RunOne(const Options& Opt, const std::string& Bin, const std::string& Cfg) {
     }
     PrintDigest(CTX.get(), Thread, Sse, M);
   }
+  if (!DumpPath.empty() && C.OutSize) {
+    FILE* F = fopen(DumpPath.c_str(), "wb");
+    if (!F || fwrite(M.Host(C.OutAddr), 1, C.OutSize, F) != C.OutSize) {
+      fprintf(stderr, "cannot write %s\n", DumpPath.c_str());
+      return 6;
+    }
+    fclose(F);
+  }
   fflush(stdout);
   fflush(stderr);
   return Match ? 0 : 1;
@@ -639,7 +673,8 @@ const char* VerdictOf(int Status) {
 }
 
 // Runs one mode in a child; returns its verdict and (with --diff) its digest lines.
-const char* RunChild(const Options& Opt, const std::string& Base, std::map<std::string, std::string>* Digest) {
+const char* RunChild(const Options& Opt, const std::string& Base, std::map<std::string, std::string>* Digest,
+                     const std::string& DumpPath = {}) {
   int Pipe[2] = {-1, -1};
   if (Digest && pipe(Pipe) != 0) {
     return "ERROR";
@@ -653,7 +688,7 @@ const char* RunChild(const Options& Opt, const std::string& Base, std::map<std::
       dup2(Pipe[1], 1);
     }
     alarm(Opt.TimeoutSec);
-    _exit(RunOne(Opt, Base + ".bin", Base + ".cfg"));
+    _exit(RunOne(Opt, Base + ".bin", Base + ".cfg", DumpPath));
   }
   if (Digest) {
     close(Pipe[1]);
@@ -705,6 +740,8 @@ int main(int argc, char** argv) {
       Opt.Verbose = true;
     } else if (A == "--sysops") {
       Opt.SysOps = true;
+    } else if (A == "--dump") {
+      Opt.Dump = Next();
     } else {
       Pos.push_back(A);
     }
@@ -730,7 +767,13 @@ int main(int argc, char** argv) {
     std::string Base = Pos[0] + "/" + Name;
 
     if (!Opt.Diff) {
-      const char* Verdict = RunChild(Opt, Base, nullptr);
+      std::string DumpPath;
+      if (!Opt.Dump.empty()) {
+        DumpPath = Name;
+        std::replace(DumpPath.begin(), DumpPath.end(), '/', '_');
+        DumpPath = Opt.Dump + "/" + DumpPath + ".out";
+      }
+      const char* Verdict = RunChild(Opt, Base, nullptr, DumpPath);
       Counts[Verdict]++;
       printf("%s %s%s\n", Verdict, Name.c_str(), Tags.c_str());
       continue;
