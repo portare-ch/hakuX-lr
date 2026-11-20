@@ -85,6 +85,8 @@ public:
     uint64_t F;
     asm volatile("mrs %0, fpsr" : "=r"(F));
     uint32_t M = static_cast<uint32_t>((F & 1) | ((F & 0x1E) << 1) | ((F >> 6) & 2));
+    // the reduced x87's status word reads the same flags: its kept ones (FEX's X87KeptExceptions)
+    Frame->State.flags[FEXCore::X86State::X87FLAG_DE_LOC] |= static_cast<uint8_t>(M);
     if ((Frame->State.mxcsr & 0x8000) && (M & 0x10)) {
       M |= 0x20;
     }

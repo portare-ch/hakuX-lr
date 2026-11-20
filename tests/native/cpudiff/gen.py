@@ -224,6 +224,38 @@ def build(rng, n):
                       'fld dword ptr [esi]\nfmul dword ptr [esi+4]\nfadd dword ptr [esi]\nfmul st, st(0)\n'
                       'fst dword ptr [edi]\nfstp qword ptr [edi+4]',
                       setup=s, env=REDUCED, single=pc == 0, tags=tag))
+    # The sequences TestFloat's F32 functions run (nxdk_low_level_cpu_tests): float operands
+    # through the x87 at the kernel's control word (53-bit precision), stored as a float, and
+    # the status word's exception flags (IE, ZE, OE, UE, PE; cleared before) after it.
+    for rn, rc in zip(RCS, range(4)):
+        s = 'fldcw [cw]\n.data\ncw: .word %d\n.text' % cw(2, rc)
+        for op in ('fadd', 'fsub', 'fmul', 'fdiv'):
+            t.append(Test('tf32_%s_%s' % (op, rn), pair32, '<2I', 8,
+                          'fnclex\nfld dword ptr [esi]\n%s dword ptr [esi+4]\nfstp dword ptr [edi]\n'
+                          'fnstsw ax\nand eax, 0x3D\nmov [edi+4], eax' % op, setup=s, env=REDUCED, tags='x87 status'))
+        t.append(Test('tf32_fsqrt_' + rn, [(x,) for x in a32], '<I', 8,
+                      'fnclex\nfld dword ptr [esi]\nfsqrt\nfstp dword ptr [edi]\nfnstsw ax\nand eax, 0x3D\nmov [edi+4], eax',
+                      setup=s, env=REDUCED, tags='x87 status'))
+    # products just under the smallest normal float: the store rounds some up to it, which is
+    # an underflow only if tininess is judged before rounding (the x87 judges after)
+    tiny = []
+    trng = random.Random(rng.random())
+    while len(tiny) < n:
+        x = trng.uniform(1.0, 2.0)
+        y = (2.0 ** -126) / x * (1.0 - trng.choice([0.0, 2.0 ** -25, 2.0 ** -24, 3 * 2.0 ** -25, 2.0 ** -23, 2.0 ** -20]))
+        tiny.append((f32(x), f32(y) ^ (trng.getrandbits(1) << 31)))
+    for rn, rc in zip(RCS, range(4)):
+        for op in ('fmul', 'fdiv'):
+            ins = tiny if op == 'fmul' else [(b, f32(1.0 / struct.unpack('<f', struct.pack('<I', a))[0])) for a, b in tiny]
+            t.append(Test('tf32_%s_tiny_%s' % (op, rn), ins, '<2I', 8,
+                          'fnclex\nfld dword ptr [esi]\n%s dword ptr [esi+4]\nfstp dword ptr [edi]\n'
+                          'fnstsw ax\nand eax, 0x3D\nmov [edi+4], eax' % op,
+                          setup='fldcw [cw]\n.data\ncw: .word %d\n.text' % cw(2, rc), env=REDUCED, tags='x87 status'))
+    for name, cmp in (('fucompp', 'fucompp'), ('fcompp', 'fcompp')):
+        t.append(Test('tf32_' + name, pair32, '<2I', 4,
+                      'fnclex\nfld dword ptr [esi+4]\nfld dword ptr [esi]\n%s\nfnstsw ax\nand eax, 0x453D\nmov [edi], eax' % cmp,
+                      setup='fldcw [cw]\n.data\ncw: .word %d\n.text' % cw(2), env=REDUCED, tags='x87 status'))
+
     # x87 compares: the status word's condition codes
     t.append(Test('fcom_f64', pair64, '<2Q', 2,
                   'fld qword ptr [esi]\nfcomp qword ptr [esi+8]\nfnstsw ax\nand ax, 0x4500\nmov [edi], ax',
