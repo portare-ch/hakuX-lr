@@ -24,8 +24,10 @@ import subprocess
 import sys
 
 CODE = 0x10000
-OUT = 0x00400000      # output region
-STACK = 0x00300000    # one page, ESP starts at its end
+CODE_END = 0x00200000  # the image (code and inputs) ends below this
+STACK = 0x00300000     # one page, ESP starts at its end
+PATCH = 0x00380000     # one page of code the smc tests write and run
+OUT = 0x00400000       # output region, as long as the test needs: nothing above it
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -264,8 +266,8 @@ def build(rng, n):
                   'mov eax, [esi]\nmov dword ptr [patch+1], eax\ncall patch\nmov [edi], eax',
                   setup='jmp 9f\npatch: mov eax, 0x11111111\nret\n9:', tags='smc'))
     t.append(Test('smc_far', [(x & 0xFFFFFFFF,) for x in i64], '<I', 4,
-                  'mov eax, [esi]\nmov dword ptr [0x00500001], eax\nmov eax, 0x00500000\ncall eax\nmov [edi], eax',
-                  setup='mov byte ptr [0x00500000], 0xB8\nmov byte ptr [0x00500005], 0xC3', tags='smc'))
+                  'mov eax, [esi]\nmov dword ptr [0x380001], eax\nmov eax, 0x00380000\ncall eax\nmov [edi], eax',
+                  setup='mov byte ptr [0x00380000], 0xB8\nmov byte ptr [0x00380005], 0xC3', tags='smc'))
     return t
 
 
@@ -359,12 +361,14 @@ def main():
                                '-e', '_start', '-o', base + '.bin', base + '.o'])
         os.remove(base + '.o')
         os.remove(base + '.s')
+        if CODE + os.path.getsize(base + '.bin') > CODE_END:
+            sys.exit('%s: %d cases do not fit the image (code and inputs up to %#x)' % (t.name, len(t.inputs), CODE_END))
         out_size = t.out_bytes * len(t.inputs)
         with open(base + '.cfg', 'w') as f:
             f.write('mode 32\nfeat 0\n')
             f.write('region %#x %#x\n' % (STACK, 0x1000))
             f.write('region %#x %#x\n' % (OUT, (out_size + 0xFFF) & ~0xFFF))
-            f.write('region %#x %#x\n' % (0x00500000, 0x1000))
+            f.write('region %#x %#x\n' % (PATCH, 0x1000))
             f.write('out %#x %#x %d\n' % (OUT, out_size, t.out_bytes))
             for k, v in t.env:
                 f.write('env %s %s\n' % (k, v))
