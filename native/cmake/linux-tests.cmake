@@ -30,6 +30,9 @@ if(HAKUX_CPU STREQUAL "kvm")
   target_include_directories(kvm-rsqrt-lane-test PRIVATE "${NC_REPO}")
   add_test(NAME kvm-rsqrt-lane-test COMMAND kvm-rsqrt-lane-test)
   set_tests_properties(kvm-rsqrt-lane-test PROPERTIES TIMEOUT 30)
+  # The CPU differential tests' reference runs (tests/native/cpudiff): the
+  # same programs fexrun runs under FEX, on the host's CPU (not a test).
+  add_executable(cpudiff-ref "${NC_REPO}/tests/native/cpudiff/ref.c")
   # In-guest RSQRT prototype: a timed guest loop on each path (not a test).
   add_executable(kvm-rsqrt-bench "${NC_REPO}/tests/native/kvm/rsqrt_bench.c" "${NC_APU_OUT_NULL}")
   target_link_libraries(kvm-rsqrt-bench PRIVATE hakux_native)
