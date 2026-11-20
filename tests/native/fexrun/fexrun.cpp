@@ -501,9 +501,9 @@ int RunOne(const Options& Opt, const std::string& Bin, const std::string& Cfg) {
     }
   }
 
-  auto HostFeatures = FEX::FetchHostFeatures();
-  bool AVX = HostFeatures.SupportsAVX;
-  bool Unsupported = ((C.Features & FEATURE_AVX) && !HostFeatures.SupportsAVX) || ((C.Features & FEATURE_RAND) && !HostFeatures.SupportsRAND) ||
+  auto HostFeatures = FEX::FetchHostFeatures(false); // a 32-bit guest
+  bool AVX = HostFeatures.SupportsAVX();
+  bool Unsupported = ((C.Features & FEATURE_AVX) && !HostFeatures.SupportsAVX()) || ((C.Features & FEATURE_RAND) && !HostFeatures.SupportsRAND) ||
                      ((C.Features & FEATURE_SHA) && !HostFeatures.SupportsSHA) ||
                      ((C.Features & FEATURE_CLZERO) && !HostFeatures.SupportsCLZERO) ||
                      ((C.Features & FEATURE_AES256) && !HostFeatures.SupportsAES256) ||
