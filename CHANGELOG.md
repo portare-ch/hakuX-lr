@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## linux-v0.36.1 (Linux ARM64, Linux x86-64, and Android ARM64)
+
+- **World Championship Poker 2.** Fix a crash during the opening movies by running the game’s loader thread in the same order as the Xbox. The fix was verified through the character-select prompt in RetroArch on Linux x86-64. [#286](https://github.com/portare-ch/hakuX-lr/pull/286)
+- **ARM64 reciprocal estimates.** FEX now matches the Pentium III’s `RCPSS` and `RCPPS` results. All 29 checks in the Xbox CPU suite’s SSE Approximations test pass on the Retroid Pocket Nova, up from 24. [#287](https://github.com/portare-ch/hakuX-lr/pull/287)
+- **ARM64 floating point.** Improve SSE and x87 exception flags, NaN handling, and x87 underflow. TestFloat F32 now passes all eight functions on the Nova, bringing the Xbox CPU suite from 8 to 12 of 15 passing tests. Remaining failures are MMX/x87 aliasing and `EMMS`, TestFloat F64 multiply and divide, and ExtF80. [#288](https://github.com/portare-ch/hakuX-lr/pull/288) · [#290](https://github.com/portare-ch/hakuX-lr/pull/290)
+
 ## linux-v0.36.0 (Linux ARM64, Linux x86-64, and Android ARM64)
 
 - **Native widescreen.** Screen Format **Auto** now selects 16:9 for 331 known North American titles with native widescreen support when the frontend reports a wide display or leaves the display size unknown. **Normal** forces 4:3. An applied widescreen patch still takes priority in Auto. [#276](https://github.com/portare-ch/hakuX-lr/pull/276)
