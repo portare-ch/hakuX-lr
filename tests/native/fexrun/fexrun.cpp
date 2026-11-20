@@ -36,6 +36,8 @@
 #include <FEXCore/HLE/SyscallHandler.h>
 #include <FEXCore/Utils/LogManager.h>
 
+#include "native/cpu/intel_rsqrt_table.inc"
+
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
@@ -79,6 +81,7 @@ struct TestConfig {
   std::vector<std::pair<std::string, std::string>> Env;
   uint64_t OutAddr = 0, OutSize = 0; // the output region --dump writes (tests/native/cpudiff)
   bool X87Single = false;            // the title selected x87 single precision, as the core tells FEX
+  bool RSqrtIntel = false;           // RSQRT from Intel's table, as the core tells FEX
 };
 
 bool ParseConfig(const std::string& Path, TestConfig& Out) {
@@ -132,6 +135,8 @@ bool ParseConfig(const std::string& Path, TestConfig& Out) {
       Out.OutSize = std::stoull(L, nullptr, 0);
     } else if (Key == "x87single") {
       Out.X87Single = true;
+    } else if (Key == "rsqrt") {
+      Out.RSqrtIntel = true;
     }
   }
   return true;
@@ -558,6 +563,9 @@ int RunOne(const Options& Opt, const std::string& Bin, const std::string& Cfg, c
   if (Opt.SysOps) {
     CTX->EnableSystemOps();
     CTX->SetGuestCycleCounterRatio(TscRatioQ32());
+  }
+  if (C.RSqrtIntel) {
+    CTX->SetRSqrtTable(intel_rsqrt_mantissa);
   }
   if (!CTX->InitCore()) {
     fprintf(stderr, "InitCore failed\n");
