@@ -146,6 +146,11 @@ def build(rng, n):
                   tags='vendor rsqrt'))
     t.append(Test('rcpss', [(x,) for x in a32], '<I', 4,
                   'movss xmm0, [esi]\nrcpss xmm1, xmm0\nmovss [edi], xmm1', tags='vendor rcp'))
+    t.append(Test('rcpss_mem', [(x,) for x in a32], '<I', 4,
+                  'xorps xmm1, xmm1\nrcpss xmm1, [esi]\nmovss [edi], xmm1', tags='vendor rcp'))
+    t.append(Test('rcpss_upper', pair32, '<2I', 16,
+                  'movss xmm0, [esi]\nmovss xmm1, [esi+4]\nshufps xmm1, xmm1, 0x15\nrcpss xmm1, xmm0\nmovups [edi], xmm1',
+                  tags='vendor rcp'))
     t.append(Test('rcpps', quad32, '<4I', 16,
                   'movups xmm0, [esi]\nrcpps xmm1, xmm0\nmovups [edi], xmm1', tags='vendor rcp'))
 
@@ -155,6 +160,11 @@ def build(rng, n):
                   'movss xmm0, [esi]\nmov eax, [esi]\ncmp eax, [esi+4]\nrsqrtss xmm1, xmm0\n' + FLAGS, tags='flags'))
     t.append(Test('rsqrtps_flags', pair32, '<2I', 4,
                   'movss xmm0, [esi]\nshufps xmm0, xmm0, 0\nmov eax, [esi]\ncmp eax, [esi+4]\nrsqrtps xmm1, xmm0\n' + FLAGS,
+                  tags='flags'))
+    t.append(Test('rcpss_flags', pair32, '<2I', 4,
+                  'movss xmm0, [esi]\nmov eax, [esi]\ncmp eax, [esi+4]\nrcpss xmm1, xmm0\n' + FLAGS, tags='flags'))
+    t.append(Test('rcpps_flags', pair32, '<2I', 4,
+                  'movss xmm0, [esi]\nshufps xmm0, xmm0, 0\nmov eax, [esi]\ncmp eax, [esi+4]\nrcpps xmm1, xmm0\n' + FLAGS,
                   tags='flags'))
     for width, ptr in ((2, 'word'), (4, 'dword'), (8, 'qword')):
         t.append(Test('fistp%d_flags' % (width * 8), pair64, '<2Q', 4 + width,
@@ -295,12 +305,12 @@ inputs:
 """
 
 
-def rsqrt_table():
-    text = open(os.path.join(HERE, '..', '..', '..', 'native', 'cpu', 'intel_rsqrt_table.inc')).read()
+def table(name, hexadecimal=False):
+    text = open(os.path.join(HERE, '..', '..', '..', 'native', 'cpu', name)).read()
     text = text[text.index('{') + 1:text.index('}')]
-    table = [int(x) for x in re.findall(r'\d+', text)]
-    assert len(table) == 2048
-    return table
+    values = [int(x, 16 if hexadecimal else 10) for x in re.findall(r'0x[0-9a-fA-F]+' if hexadecimal else r'\d+', text)]
+    assert len(values) == 2048
+    return values
 
 
 def rsqrt_intel(bits, table):
@@ -317,17 +327,35 @@ def rsqrt_intel(bits, table):
     return (((380 - (bits >> 23)) >> 1) << 23) | (table[(bits >> 13) & 2047] << 11)
 
 
-def model(test, table):
-    if 'rsqrt' not in test.tags.split():
+def rcp_intel(bits, table):
+    """Bochs' approximate_rcp (cpu/sse_rcp.cc), the table native/cpu/intel_rcp_table.inc."""
+    sign, exp, frac = bits & 0x80000000, (bits >> 23) & 0xFF, bits & 0x7FFFFF
+    if exp == 0xFF:
+        return sign if frac == 0 else bits | 0x00400000
+    if exp == 0:
+        return sign | 0x7F800000
+    exp = 253 - exp
+    if exp <= 0:
+        return sign
+    return sign | (exp << 23) | (table[frac >> 12] << 8)
+
+
+def model(test, tables):
+    tags = test.tags.split()
+    if 'rsqrt' in tags:
+        f, t = rsqrt_intel, tables['rsqrt']
+    elif 'rcp' in tags:
+        f, t = rcp_intel, tables['rcp']
+    else:
         return None
     out = b''
     for rec in test.inputs:
-        if test.name == 'rsqrtps':
-            out += struct.pack('<4I', *(rsqrt_intel(x, table) for x in rec))
-        elif test.name == 'rsqrtss_upper':
-            out += struct.pack('<4I', rsqrt_intel(rec[0], table), 0, 0, rec[1])
+        if test.name.endswith('ps'):
+            out += struct.pack('<4I', *(f(x, t) for x in rec))
+        elif test.name.endswith('_upper'):
+            out += struct.pack('<4I', f(rec[0], t), 0, 0, rec[1])
         else:
-            out += struct.pack('<I', rsqrt_intel(rec[0], table))
+            out += struct.pack('<I', f(rec[0], t))
     return out
 
 
@@ -344,7 +372,7 @@ def main():
     tests = build(random.Random(args.seed), args.count)
     if args.only:
         tests = [t for t in tests if t.name.startswith(args.only)]
-    table = rsqrt_table()
+    tables = {'rsqrt': table('intel_rsqrt_table.inc'), 'rcp': table('intel_rcp_table.inc', True)}
     manifest = []
     for t in tests:
         in_size = struct.calcsize(t.in_fmt)
@@ -375,7 +403,7 @@ def main():
             if t.single:
                 f.write('x87single\n')
             f.write('rsqrt intel\n')
-        m = model(t, table)
+        m = model(t, tables)
         if m is not None:
             with open(base + '.model', 'wb') as f:
                 f.write(m)
