@@ -7,6 +7,7 @@
  * the syscall path and are handed to the core's callback.
  */
 #include "native/cpu/cpu.h"
+#include "native/cpu/intel_rsqrt_table.inc"
 
 #include "Common/HostFeatures.h"
 
@@ -339,6 +340,22 @@ extern "C" NcCpu* nc_cpu_create(const NcCpuConfig* cfg, uint32_t fs_base) {
   }
   Cpu->CTX->EnableExitOnHLT();
   Cpu->CTX->SetGuestCycleCounterRatio(TscRatioQ32());
+  // RSQRTSS/RSQRTPS from Intel's table, as the KVM backend corrects an AMD
+  // host to (kvm_rsqrt.c): FEX's own is 1/sqrt(x) correctly rounded, or the
+  // Arm estimate, neither of which a Pentium III returns. A/B switch
+  // (NC_FEX_RSQRT=0, or debug.hakux.fex_rsqrt=0): FEX's own.
+  {
+    const char* e = getenv("NC_FEX_RSQRT");
+    char v[NC_PROPERTY_VALUE_MAX] = "";
+#ifdef __ANDROID__
+    hle_prop_get("debug.hakux.fex_rsqrt", v);
+#endif
+    if ((e && !strcmp(e, "0")) || !strcmp(v, "0")) {
+      nc_log("hakuX-lr-native", "cpu: FEX's own RSQRT, not Intel's table");
+    } else {
+      Cpu->CTX->SetRSqrtTable(intel_rsqrt_mantissa);
+    }
+  }
   if (!Cpu->CTX->InitCore()) {
     nc_log("hakuX-lr-native", "cpu: InitCore failed");
     delete Cpu;

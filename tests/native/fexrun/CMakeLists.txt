@@ -13,5 +13,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 include("${CMAKE_CURRENT_SOURCE_DIR}/../../../native/cmake/fex.cmake")
 
 add_executable(fexrun fexrun.cpp)
+target_include_directories(fexrun PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../..")
 target_link_libraries(fexrun PRIVATE nc_fex)
 target_compile_options(fexrun PRIVATE -Wall -Wno-unused-parameter)

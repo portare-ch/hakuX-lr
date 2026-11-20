@@ -1,9 +1,5 @@
 # Known differences between FEX and the x86 reference: <test> <differing cases>.
 # Written by compare.py --write; see README.md.
-rsqrtss 2039
-rsqrtss_mem 2039
-rsqrtps 2048
-rsqrtss_upper 2039
 fild64_fistp64_s 1184
 fild64_fistp64_d 1184
 fild64_fistp64_e 1184

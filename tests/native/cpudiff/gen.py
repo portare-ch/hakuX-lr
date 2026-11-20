@@ -355,6 +355,7 @@ def main():
                 f.write('env %s %s\n' % (k, v))
             if t.single:
                 f.write('x87single\n')
+            f.write('rsqrt intel\n')
         m = model(t, table)
         if m is not None:
             with open(base + '.model', 'wb') as f:
