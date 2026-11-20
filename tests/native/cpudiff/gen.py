@@ -293,9 +293,18 @@ def build(rng, n):
                     t.append(Test('%s_%s_tiny_%s' % (pfx, op, rn), ins, pfmt, out,
                                   'fnclex\nfld %s ptr [esi]\n%s %s ptr [esi+%d]\nfstp %s ptr [edi]\n' % (ptr, op, ptr, width, ptr) +
                                   STATUS % at, setup=s, env=env, tags='x87 status'))
+        cpairs = pairs
+        if width == 10:
+            # with the encodings the x87 doesn't support (the integer bit clear with a nonzero
+            # exponent): pseudo-NaNs, a pseudo-infinity, unnormals. Invalid to every compare.
+            odd = [(1 << 62, 0x7FFF), (1 << 62, 0xFFFF), (3 << 61, 0x7FFF), (1, 0x7FFF), (0, 0x7FFF), (0, 0xFFFF),
+                   (1 << 62, 0x3FFF), (0x7FFFFFFFFFFFFFFF, 0x4000), (1, 1), (0, 0xBFFF)]
+            cpairs = [o + pairs[i][:2] for i, o in enumerate(odd * 4)] + [pairs[i][:2] + o for i, o in enumerate(odd * 4)] + \
+                     [a + b for a in odd[:4] for b in odd[:4]] + pairs
+            cpairs = cpairs[:len(pairs)]
         for cmp in ('fucompp', 'fcompp'):
             ld = 'fld %s ptr [esi+%d]\nfld %s ptr [esi]\n' % (ptr, width, ptr)
-            t.append(Test('%s_%s' % (pfx, cmp), pairs, pfmt, 4,
+            t.append(Test('%s_%s' % (pfx, cmp), cpairs, pfmt, 4,
                           'fnclex\n' + ld + '%s\nfnstsw ax\nand eax, 0x453D\nmov [edi], eax' % cmp,
                           setup='fldcw [cw]\n.data\ncw: .word %d\n.text' % cw(pc), env=env, tags='x87 status'))
 
