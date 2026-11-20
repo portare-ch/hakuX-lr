@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## linux-v0.36.2 (Linux ARM64, Linux x86-64, and Android ARM64)
+
+FEX’s optional 80-bit x87 mode (`NC_FEX_X87=80`) now reports floating-point exceptions correctly. New guest threads start at the Xbox’s 53-bit precision, which fixes double rounding in the 80-bit mode. On the Retroid Pocket Nova, TestFloat F32, F64, and ExtF80 all pass in this mode, bringing the Xbox CPU suite from 11 to **14 of 15** passing tests. The remaining failure is MMX/x87 Aliasing & EMMS. The default FEX mode still passes 12 of 15. [#291](https://github.com/portare-ch/hakuX-lr/pull/291)
+
 ## linux-v0.36.1 (Linux ARM64, Linux x86-64, and Android ARM64)
 
 - **World Championship Poker 2.** Fix a crash during the opening movies by running the game’s loader thread in the same order as the Xbox. The fix was verified through the character-select prompt in RetroArch on Linux x86-64. [#286](https://github.com/portare-ch/hakuX-lr/pull/286)
