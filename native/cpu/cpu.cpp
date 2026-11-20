@@ -70,29 +70,29 @@ extern "C" void nc_frame_set_if(NcFrame* f, bool on) {
 
 namespace {
 
-// MXCSR's six status flags are the host's cumulative ones (FPSR) while the
-// guest runs: FEX reads them there at STMXCSR and FXSAVE. The core's own
-// floating point must not show up in them, and each guest thread has its
-// own: for a system op they are in the frame's MXCSR, bits 0 to 5 (saved
-// and loaded with the thread), and go back to the host when it returns.
+// MXCSR's six status flags: FEX keeps the ones LDMXCSR loaded in the frame's
+// MXCSR (bits 0 to 5) and reads the ones raised since from the host's
+// cumulative flags (FPSR) at STMXCSR and FXSAVE. The core's own floating
+// point must not show up there, and each guest thread has its own flags: a
+// system op starts by moving the host's into the frame's MXCSR (saved and
+// loaded with the thread) and ends with the host's cleared.
 // FPSR's IOC, DZC, OFC, UFC, IXC (bits 0 to 4) and IDC (7) are MXCSR's
-// IE (0), ZE (2), OE (3), UE (4), PE (5) and DE (1).
+// IE (0), ZE (2), OE (3), UE (4), PE (5) and DE (1); a result flushed to
+// zero (FZ, bit 15) is an underflow to the host and inexact too on x86.
 class GuestFpFlags {
 public:
-  explicit GuestFpFlags(FEXCore::Core::CpuStateFrame* Frame) : Frame {Frame} {
+  explicit GuestFpFlags(FEXCore::Core::CpuStateFrame* Frame) {
     uint64_t F;
     asm volatile("mrs %0, fpsr" : "=r"(F));
-    Frame->State.mxcsr |= static_cast<uint32_t>((F & 1) | ((F & 0x1E) << 1) | ((F >> 6) & 2));
+    uint32_t M = static_cast<uint32_t>((F & 1) | ((F & 0x1E) << 1) | ((F >> 6) & 2));
+    if ((Frame->State.mxcsr & 0x8000) && (M & 0x10)) {
+      M |= 0x20;
+    }
+    Frame->State.mxcsr |= M;
   }
   ~GuestFpFlags() {
-    const uint64_t M = Frame->State.mxcsr;
-    const uint64_t F = (M & 1) | ((M >> 1) & 0x1E) | ((M & 2) << 6);
-    Frame->State.mxcsr &= ~0x3Fu;
-    asm volatile("msr fpsr, %0" : : "r"(F));
+    asm volatile("msr fpsr, xzr");
   }
-
-private:
-  FEXCore::Core::CpuStateFrame* Frame;
 };
 
 class Syscalls final : public FEXCore::HLE::SyscallHandler {

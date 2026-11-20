@@ -290,6 +290,16 @@ def build(rng, n):
                       pre + 'sqrtss xmm0, dword ptr [esi]' + post, setup='jmp 9f\n' + data + '\n9:', tags='sse status'))
         t.append(Test('cvtss2si_status' + sfx, [(x,) for x in a32], '<I', 4,
                       pre + 'cvtss2si eax, dword ptr [esi]' + post, setup='jmp 9f\n' + data + '\n9:', tags='sse status'))
+    # the estimates raise nothing, whatever their operand
+    for op in ('rcpss', 'rsqrtss'):
+        t.append(Test(op + '_status', [(x,) for x in a32], '<I', 4,
+                      'ldmxcsr [mx]\n%s xmm0, dword ptr [esi]\nstmxcsr [edi]\nand dword ptr [edi], 0x3F' % op,
+                      setup='jmp 9f\n.data\nmx: .long 0x1F80\n.text\n9:', tags='sse status'))
+    # loaded flags come back as loaded, with flush-to-zero on or off, and an operation adds to them
+    t.append(Test('status_loaded', pair32, '<2I', 8,
+                  'mov eax, [esi]\nand eax, 0x803F\nor eax, 0x1F80\nmov [edi], eax\nldmxcsr [edi]\nstmxcsr [edi]\n'
+                  'movss xmm0, [esi+4]\nmulss xmm0, xmm0\nstmxcsr [edi+4]',
+                  tags='sse status'))
     # the flags stay set until cleared, and LDMXCSR sets them
     t.append(Test('status_sticky', pair32, '<2I', 8,
                   'ldmxcsr [mx]\nmovss xmm0, [esi]\ndivss xmm0, dword ptr [esi+4]\nmovss xmm1, [esi+4]\naddss xmm1, xmm1\n'
