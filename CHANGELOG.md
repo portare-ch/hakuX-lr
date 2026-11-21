@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## linux-v0.36.3 (Linux ARM64, Linux x86-64, and Android ARM64)
+
+- **Prince of Persia: The Sands of Time.** Fix a freeze during the intro movies: a polling thread now yields without resetting its scheduler quantum, so other game threads can run. In Linux x86-64 `xboxrun` tests, 2 of 7 runs froze before the fix and 0 of 12 after; a separate run reached the first room. The fix has not yet been retested in RetroArch or on ARM64. [#293](https://github.com/portare-ch/hakuX-lr/pull/293)
+- **ARM64 80-bit x87.** Handle x87 stack overflow and underflow faults like the original CPU, and make `FFREEP` free its register before popping. On the Retroid Pocket Nova, the optional full 80-bit mode (`NC_FEX_X87=80`) now passes all 15 Xbox low-level CPU tests, up from 14; the default mode remains at 12 of 15. [#292](https://github.com/portare-ch/hakuX-lr/pull/292) · [test results](https://github.com/portare-ch/hakux-lr-compat/pull/39)
+
 ## linux-v0.36.2 (Linux ARM64, Linux x86-64, and Android ARM64)
 
 FEX’s optional 80-bit x87 mode (`NC_FEX_X87=80`) now reports floating-point exceptions correctly. New guest threads start at the Xbox’s 53-bit precision, which fixes double rounding in the 80-bit mode. On the Retroid Pocket Nova, TestFloat F32, F64, and ExtF80 all pass in this mode, bringing the Xbox CPU suite from 11 to **14 of 15** passing tests. The remaining failure is MMX/x87 Aliasing & EMMS. The default FEX mode still passes 12 of 15. [#291](https://github.com/portare-ch/hakuX-lr/pull/291)
