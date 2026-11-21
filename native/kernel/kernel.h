@@ -373,6 +373,8 @@ void nc_ps_slice_end(NcKernel *k, uint64_t now);
 /* The running thread gives way (Sleep(0), polling) to a ready thread of its
  * priority or above: rescheduled at the back of its priority's queue. */
 void nc_ps_yield(NcKernel *k);
+/* The same for a thread that polls: its quantum goes on (ps.c). */
+void nc_ps_yield_poll(NcKernel *k);
 /* debug (debug.hakux.ncresume=<id>): NtResumeThread on thread t<id> */
 void nc_ps_debug_resume(NcKernel *k, unsigned id);
 void nc_ps_terminate_current(NcKernel *k, uint32_t status);

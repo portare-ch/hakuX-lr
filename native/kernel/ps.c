@@ -305,6 +305,22 @@ void nc_ps_yield(NcKernel *k)
     k->resched = true;
 }
 
+/* A polling thread gives its turn away (ke.c, poll_spin): behind the ready
+ * threads of its priority, but in the quantum it has. On the console a poll
+ * yields nothing and the quantum runs down, which ends a wait's boost. Given a
+ * new quantum with each turn, a boosted thread kept its boost for good when a
+ * thread of the boosted priority woke every millisecond: Prince of Persia: The
+ * Sands of Time's stream thread, boosted by a disc read's completion (console
+ * timing), polled above the title's thread through its movies and they
+ * stopped. */
+void nc_ps_yield_poll(NcKernel *k)
+{
+    if (k->current) {
+        k->current->run_seq = 0;    /* a new place; slice_used_ns goes on (nc_ps_schedule) */
+    }
+    k->resched = true;
+}
+
 void nc_ps_schedule(NcKernel *k, NcFrame *f)
 {
     g_nc_sched.schedules++;

@@ -632,7 +632,7 @@ static void poll_spin(NcKernel *k)
         for (unsigned i = 0; i < k->threads_hi; i++) {
             const NcThread *t = &k->threads[i];
             if (t != cur && t->state == NC_T_READY && !t->suspend && t->priority >= cur->priority) {
-                nc_ps_yield(k);     /* behind the ready thread */
+                nc_ps_yield_poll(k);    /* behind the ready thread, in its quantum */
                 break;
             }
         }
