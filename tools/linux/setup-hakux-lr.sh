@@ -336,7 +336,12 @@ trap 'exit 130' INT TERM
 
 if [ "$rakind" = appimage ]; then
     app="$prefix/retroarch/RetroArch.AppImage"
-    if [ ! -x "$app" ] || [ "$(cat "$prefix/retroarch/version" 2>/dev/null)" != "$APPIMAGE_VERSION" ]; then
+    # Ozone draws part of its icons from XMB's monochrome set (the sidebar's
+    # last entries, the button hints, the clock's battery): without it they
+    # are white boxes. An installation made before that set was unpacked is
+    # unpacked again.
+    if [ ! -x "$app" ] || [ "$(cat "$prefix/retroarch/version" 2>/dev/null)" != "$APPIMAGE_VERSION" ] ||
+        [ ! -d "$prefix/retroarch/assets/xmb/monochrome" ]; then
         have bsdtar || have 7z || have 7za || die "bsdtar or 7z is needed to unpack RetroArch's AppImage"
         say "downloading RetroArch $APPIMAGE_VERSION (AppImage, 180 MB)"
         fetch "$APPIMAGE_URL" "$tmp/RetroArch.7z" || die "couldn't download $APPIMAGE_URL"
@@ -347,11 +352,13 @@ if [ "$rakind" = appimage ]; then
         asset_root=$in/RetroArch-Linux-x86_64.AppImage.home/.config/retroarch
         if have bsdtar; then
             bsdtar -xf "$tmp/RetroArch.7z" -C "$tmp/ra" "$in/RetroArch-Linux-x86_64.AppImage" \
-                "$asset_root/assets/ozone" "$asset_root/assets/pkg" "$asset_root/assets/sounds" || die "couldn't unpack RetroArch.7z"
+                "$asset_root/assets/ozone" "$asset_root/assets/xmb/monochrome" "$asset_root/assets/pkg" \
+                "$asset_root/assets/sounds" || die "couldn't unpack RetroArch.7z"
         else
             z=$(command -v 7z || command -v 7za)
             "$z" x -y -o"$tmp/ra" "$tmp/RetroArch.7z" "$in/RetroArch-Linux-x86_64.AppImage" \
-                "$asset_root/assets/ozone" "$asset_root/assets/pkg" "$asset_root/assets/sounds" >/dev/null || die "couldn't unpack RetroArch.7z"
+                "$asset_root/assets/ozone" "$asset_root/assets/xmb/monochrome" "$asset_root/assets/pkg" \
+                "$asset_root/assets/sounds" >/dev/null || die "couldn't unpack RetroArch.7z"
         fi
         mkdir -p "$prefix/retroarch"
         rm -rf "$prefix/retroarch/assets" "$prefix/retroarch/squashfs-root"
