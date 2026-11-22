@@ -763,12 +763,16 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "layout(input_attachment_index = 0, set = 2, binding = 0) "
             "uniform subpassInput uFb;\n" : "",
         k->fbfetch & HLE_FB_ZEQ ? HLE_ZEQ_DECL_GLSL : "",
-        /* a linear texture kept to its own size (ff.h HLE_NVRECT_GLSL): the stage fog.w names */
-        k->vol & HLE_PSH_RECT ? HLE_NVRECT_GLSL : "", glc,
-        k->vol & HLE_PSH_RECT ?
+        /* Keep filtering within the linear texture's bounds. */
+        k->vol & (HLE_PSH_RECT | HLE_PSH_RECTS) ? HLE_NVRECT_GLSL : "", glc,
+        k->vol & HLE_PSH_RECTS ?
+            "  { uint r = pc.bump[s];\n"
+            "    if (r != 0u)\n"
+            "      uv = nvrect(r, uv, (pc.flags & (256u << s)) != 0u ? 0.5 / float(pc.flags >> 24) : 0.5); }\n"
+        : k->vol & HLE_PSH_RECT ?
             "  { uint r = floatBitsToUint(pc.fog.w);\n"
             "    if (r != 0u && s == ((r >> 28 & 1u) | (r >> 30 & 2u)))\n"
-            "      uv = nvrect(uv, (pc.flags & (256u << s)) != 0u ? 0.5 / float(pc.flags >> 24) : 0.5); }\n"
+            "      uv = nvrect(r, uv, (pc.flags & (256u << s)) != 0u ? 0.5 / float(pc.flags >> 24) : 0.5); }\n"
             : "",
         gl ? "glc2(s, uv)" : "uv",
         bsnap,

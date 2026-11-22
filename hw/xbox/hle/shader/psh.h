@@ -77,14 +77,10 @@ typedef struct HlePshKey {
     uint8_t shadow_fmt;
     uint8_t out_bgra;                   /* 8-bit (B8) target: it stores blue */
     uint8_t alpha_kill;                 /* stages with D3DTSS_ALPHAKILL (bits 0-3) */
-    uint8_t vol;                        /* stages whose texture is a volume (bits 0-3):
-                                           2D-coordinate modes fetch it in 3D, as the NV2A
-                                           (LLE): PROJECT2D at r = 0, bump-env at the
-                                           coordinates' r; HLE_PSH_RECT: the stage the
-                                           push block's fog.w names has its linear
-                                           texture kept to its own size, part of a
-                                           larger surface (ff.h HLE_NVRECT_GLSL); bits
-                                           5-7 free */
+    uint8_t vol;                        /* Bits 0-3 mark volume textures. PROJECT2D
+                                           samples at r = 0. Bump mapping uses the input r.
+                                           Bits 4-5 select linear texture bounds
+                                           (HLE_PSH_RECT, HLE_PSH_RECTS). Bits 6-7 free. */
     uint8_t wbuf;                       /* W-buffering: depth = vW (HLE_WBUF_*_GLSL) */
     uint8_t fbfetch;                    /* stages (bits 0-3) whose texture is the colour
                                            target drawn into: its pixel, read as the
@@ -149,7 +145,8 @@ typedef struct HlePshKey {
                                            (0 for every other draw: no split key) */
     uint8_t poly_smooth;                /* Smooth triangle edges using barycentric coverage. */
 } HlePshKey;
-#define HLE_PSH_RECT 0x10u              /* HlePshKey.vol: a linear texture kept to its size */
+#define HLE_PSH_RECT 0x10u              /* One stage, packed in fog.w. */
+#define HLE_PSH_RECTS 0x20u             /* Per-stage bounds in pc.bump. */
 
 /* The stage (2 or 3) whose DOT_ZW replaces the fragment's depth, 0 none. It
  * needs the previous stage's dot product: not on stage 0 or 1. */
