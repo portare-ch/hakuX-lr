@@ -13,7 +13,7 @@
  *
  * The watchdog reports hangs in progress and samples the vCPU once a window is overdue.
  * Attribution uses activity transitions on the decoder and render threads, GPU progress, disc
- * reads, JIT flushes and thread CPU time. Reports appear under hakuX-lr-hle-hitch in logcat and
+ * reads, guest code invalidations and thread CPU time. Reports appear under hakuX-lr-hle-hitch in logcat and
  * in the overlay.
  */
 #ifndef HW_XBOX_HLE_HITCH_H
@@ -115,10 +115,10 @@ bool hle_hitch_overlay(char *buf, size_t n);
 /* Sample the vCPU PC for the hang monitor and hle.c's performance capture. A front end can
  * supply this callback when first_cpu's env is updated only at hooks and kernel calls. On
  * success, *pc holds the guest EIP or HLE_PC_HOST | (host offset >> 4). Kernel calls and
- * hooks add HLE_PC_SYSOP to distinguish them from FEX host code. Return false if the PC is
+ * hooks add HLE_PC_SYSOP to distinguish them from other host code. Return false if the PC is
  * unavailable. A NULL callback uses env. */
 #define HLE_PC_HOST 0xF0000000u
-#define HLE_PC_SYSOP 0x08000000u    /* host code of a kernel call or hook (else FEX) */
+#define HLE_PC_SYSOP 0x08000000u    /* host code of a kernel call or hook */
 #define HLE_PC_IDLE 0xFFFFFFFFu     /* the vCPU waits for an interrupt (halted) */
 extern bool (*g_hle_pc_sampler)(uint32_t *pc);
 
