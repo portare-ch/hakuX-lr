@@ -404,6 +404,7 @@ void nc_core_cpu_backend(NcCore *c, NcCpuConfig *cfg)
     cfg->cpuid = nc_kernel_cpuid;
     cfg->hook_list = nc_hle_hook_list;
     cfg->title_image = kvm_title_image;
+    cfg->mmio_direct = nc_mmio_direct_list;
 }
 
 /* Hooked guest addresses: the HLE GPU's functions and device-access sites. */

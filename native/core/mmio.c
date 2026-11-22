@@ -31,10 +31,29 @@ static unsigned g_logged;
 static uint64_t g_total;
 static uint64_t g_other;       /* accesses whose site found no slot in a few probes */
 
+#define MAX_DIRECT 8
+static NcMmioDirect g_direct[MAX_DIRECT];
+static unsigned g_ndirect;
+
+void nc_mmio_direct(const NcMmioDirect *page)
+{
+    if (g_ndirect < MAX_DIRECT) {
+        g_direct[g_ndirect++] = *page;
+    }
+}
+
+unsigned nc_mmio_direct_list(NcMmioDirect *out, unsigned max)
+{
+    const unsigned n = g_ndirect < max ? g_ndirect : max;
+    memcpy(out, g_direct, n * sizeof(*out));
+    return n;
+}
+
 void nc_mmio_reset(void)
 {
     memset(g_devs, 0, sizeof(g_devs));
     g_ndevs = 0;
+    g_ndirect = 0;
     memset(g_sites, 0, sizeof(g_sites));
     g_logged = 0;
     g_total = g_other = 0;

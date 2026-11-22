@@ -17,6 +17,7 @@
  */
 #include "native/cpu/cpu.h"
 #include "native/core/vm.h"
+#include "native/core/mmio.h"
 #include "native/cpu/kvm_rsqrt.h"
 #include "native/cpu/kvm_rsqrt_guest.h"
 #include "native/cpu/kvm_rsqrt_scan.h"
@@ -130,6 +131,7 @@ struct NcCpu {
     uint8_t *sys;          /* host view of SYS_GPA */
     bool sync;             /* KVM_CAP_SYNC_REGS: the general registers travel in cpu->run (regs_get) */
     bool sync_valid;       /* cpu->run's copy is the vCPU's: a KVM_RUN returned, or regs_set wrote it */
+    struct kvm_coalesced_mmio_ring *quiet; /* writes KVM kept back for direct_pages' quiet registers */
     uint32_t fs_base;
     struct kvm_sregs sregs; /* the ring-3 state's, CR3 the current directory */
     bool pd1;              /* CR3 at SYS_PD1 */
@@ -159,6 +161,7 @@ struct NcCpu {
 };
 
 static void rsqrt_patch(NcCpu *cpu, uint32_t va, uint32_t len);
+static void direct_pages(NcCpu *cpu);
 static void rsqrt_emit(NcCpu *cpu, uint32_t at, bool scalar, unsigned dst, unsigned src);
 static void rsqrt_restore(NcCpu *cpu);
 
@@ -673,6 +676,7 @@ NcCpu *nc_cpu_create(const NcCpuConfig *cfg, uint32_t fs_base)
         cpu->sync = caps > 0 && (caps & KVM_SYNC_X86_REGS) && !(off && !strcmp(off, "0"));
         cpu->run->kvm_valid_regs = cpu->sync ? KVM_SYNC_X86_REGS : 0;
     }
+    direct_pages(cpu);
     /* the FPU through the XSAVE area (fpu_get, fpu_set), sized once the
      * guest's CPUID is set */
     if (ioctl(cpu->kvm, KVM_CHECK_EXTENSION, KVM_CAP_XSAVE) > 0) {
@@ -1607,6 +1611,62 @@ static bool sysop(NcCpu *cpu, enum NcSysOp op, unsigned size)
     return cpu->cfg.sysop(cpu->cfg.opaque, &cpu->frame, op, size);
 }
 
+/* Device register pages whose reads are plain memory (nc_mmio_direct): each a
+ * read-only memslot over the device's own page, so a read runs in the guest
+ * and only a write exits (KVM_EXIT_MMIO, as before). A page's quiet register
+ * is a coalesced zone: KVM notes its writes in a ring and goes back to the
+ * guest without returning here, and the ring is emptied unread
+ * (quiet_drain). Without the capabilities, where a slot is refused, or with
+ * NC_KVM_DIRECT=0 (for an A/B check), the page stays a window whose every
+ * access exits. */
+#define DIRECT_SLOT 2
+#define DIRECT_MAX  8
+
+static void direct_pages(NcCpu *cpu)
+{
+    if (!cpu->cfg.mmio_direct || ioctl(cpu->kvm, KVM_CHECK_EXTENSION, KVM_CAP_READONLY_MEM) <= 0) {
+        return;
+    }
+    const char *off = getenv("NC_KVM_DIRECT");
+    if (off && !strcmp(off, "0")) {
+        return;
+    }
+    NcMmioDirect d[DIRECT_MAX];
+    const unsigned n = cpu->cfg.mmio_direct(d, DIRECT_MAX);
+    const int ring = ioctl(cpu->kvm, KVM_CHECK_EXTENSION, KVM_CAP_COALESCED_MMIO);
+    for (unsigned i = 0; i < n; i++) {
+        if ((d[i].addr & (NC_PAGE - 1)) || ((uintptr_t)d[i].host & (NC_PAGE - 1))) {
+            continue;
+        }
+        struct kvm_userspace_memory_region slot = {.slot = DIRECT_SLOT + i, .flags = KVM_MEM_READONLY,
+                                                   .guest_phys_addr = d[i].addr, .memory_size = NC_PAGE,
+                                                   .userspace_addr = (uint64_t)(uintptr_t)d[i].host};
+        if (ioctl(cpu->vmfd, KVM_SET_USER_MEMORY_REGION, &slot) < 0) {
+            nc_log("hakuX-lr-native-kvm", "device page %08x stays a window: %s", d[i].addr, strerror(errno));
+            continue;
+        }
+        bool quiet = false;
+        if (d[i].quiet && ring > 0 && (size_t)(ring + 1) * NC_PAGE <= cpu->run_size) {
+            struct kvm_coalesced_mmio_zone zone = {.addr = d[i].quiet, .size = 4};
+            quiet = ioctl(cpu->vmfd, KVM_REGISTER_COALESCED_MMIO, &zone) == 0;
+            if (quiet) {
+                cpu->quiet = (struct kvm_coalesced_mmio_ring *)((uint8_t *)cpu->run + (size_t)ring * NC_PAGE);
+            }
+        }
+        nc_log("hakuX-lr-native-kvm", "device page %08x: read in the guest%s", d[i].addr,
+               quiet ? ", its quiet register's writes kept in KVM" : "");
+    }
+}
+
+/* The quiet registers' writes KVM noted: nothing to do for any of them. */
+static inline void quiet_drain(NcCpu *cpu)
+{
+    if (cpu->quiet) {
+        const uint32_t last = __atomic_load_n(&cpu->quiet->last, __ATOMIC_ACQUIRE);
+        __atomic_store_n(&cpu->quiet->first, last, __ATOMIC_RELEASE);
+    }
+}
+
 static void port_io(NcCpu *cpu);
 static void mmio(NcCpu *cpu);
 
@@ -1857,6 +1917,7 @@ void nc_cpu_run(NcCpu *cpu, const NcCpuContext *c)
         cpu->run->request_interrupt_window = __atomic_load_n(&cpu->irq, __ATOMIC_ACQUIRE) && !cpu->stepping;
         const int ran = ioctl(cpu->vcpu, KVM_RUN, 0);
         cpu->sync_valid = cpu->sync;
+        quiet_drain(cpu);
         __atomic_add_fetch(&cpu->exits, 1, __ATOMIC_SEQ_CST);
         __atomic_store_n(&cpu->in_guest, 0, __ATOMIC_SEQ_CST);
         if (ran < 0) {

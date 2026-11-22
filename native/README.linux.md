@@ -61,6 +61,27 @@ Cargo's locked dependencies. Release archives retain license notices and
 Rust toolchain details.
 `-DHAKUX_DSP_JIT=OFF` builds the C interpreter without requiring Rust.
 
+### Device registers read in the guest
+
+Under KVM every access to a device register leaves the guest (an exit),
+which costs microseconds where the Xbox paid nothing. A device can name
+pages of its window whose reads are plain memory (`nc_mmio_direct`,
+`native/core/mmio.h`); the backend maps each read-only into the guest, so a
+read runs in the guest and only a write exits. A page's quiet register is
+one whose writes need nothing done: KVM keeps those and returns to the
+guest without coming back to the core.
+
+The NV2A's PFB page is the first: D3D's push-buffer kick writes a
+write-combine flush bit there and reads the register until it is clear,
+then writes the channel's PUT, thousands of times a second in a game. That
+was four exits to the core per kick and is now one. In Halo's opening scene
+on a Ryzen 7 9800X3D, the guest CPU thread's time outside the guest fell
+from 24% to 17% of a core.
+
+`NC_KVM_DIRECT=0` turns it off. The startup log names each page mapped.
+`kvm-smoke` checks that a read doesn't reach the device, a write does and a
+quiet register's write doesn't.
+
 ### Experimental Intel RSQRT results on AMD
 
 AMD CPUs return different low bits from `RSQRTSS` and `RSQRTPS` than the
