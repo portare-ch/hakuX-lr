@@ -652,18 +652,17 @@ static void nv2a_write(void *opaque, uint32_t off, uint64_t value, unsigned size
             hle_pb_display_start((uint32_t)value);  /* the display shows that memory */
         }
         break;
-    case NV_PFB_WBC:
-        /* The write-combine flush D3D asks for before each kick, and then
-         * polls: never pending here, so the bit isn't kept (the register
-         * file is what the guest reads: nc_mmio_direct below). */
-        if (size == 4) {
-            value &= ~(uint64_t)NV_PFB_WBC_FLUSH;
-        }
-        break;
     default:
         break;
     }
     memcpy(g_regs + off, &value, size);
+    if (off < NV_PFB_WBC + 4 && off + size > NV_PFB_WBC) {
+        /* The write-combine flush D3D asks for before each kick, and then
+         * polls: never pending here, so the bit isn't kept, whatever the
+         * width of the write that reached it (the register file is what the
+         * guest reads: nc_mmio_direct below). */
+        __atomic_fetch_and(reg(NV_PFB_WBC), ~NV_PFB_WBC_FLUSH, __ATOMIC_RELEASE);
+    }
 }
 
 void nc_dev_nv2a_display_vsync(uint64_t ns)
