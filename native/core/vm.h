@@ -35,7 +35,7 @@ typedef struct NcVm {
     uint8_t *ram;          /* host view of all of physical RAM (== base + 0x80000000) */
     uint8_t *page_used;    /* physical page allocator: one byte per page */
     uint32_t *pte;         /* per guest page: physical address | NC_PTE_VALID, or 0 */
-    uint8_t *vprot;        /* per guest page: its host protection (PROT_*), PROT_NONE unmapped */
+    uint8_t *vprot;        /* guest permissions per page (PROT_*), PROT_NONE if unmapped */
     uint8_t *phys;         /* host view of physical RAM outside the guest space (never protected) */
     uint32_t *rmap;        /* per physical page: the user VA mapping it (besides the window), or 0 */
     uint8_t *wp;           /* per physical page: dirty tracking's (NC_WP_*); 0 not tracked */
@@ -77,14 +77,17 @@ void nc_vm_protect_pages(NcVm *vm, uint32_t pa, uint32_t n, bool ro);
 void nc_vm_noaccess(NcVm *vm, uint32_t pa, uint32_t n, bool on);
 bool nc_vm_noaccess_has(NcVm *vm, uint32_t pa);
 
-/* One guest view's host protection, [va, va+len) page-aligned (mprotect's
- * result): what dirty tracking opens and closes outside the calls above. */
+/* Update permissions for the page-aligned guest range [va, va + len). */
 int nc_vm_view_prot(NcVm *vm, uint32_t va, uint32_t len, int prot);
-/* Every change of a guest page's host protection or mapping, in the order
- * the host has them: [va, va+len) is now prot (PROT_NONE: no access, or not
- * mapped). Called with vm.c's protection lock held, from whichever thread
- * made the change. A CPU backend that keeps its own page tables (KVM)
- * mirrors vm->vprot from it; FEX runs on the host's and sets none. */
+/* KVM mirrors vm->vprot in its guest page tables. While handling a guest CPU
+ * fault, permission increases can leave the host mapping stricter.
+ * Host faults and nc_vm_will_read or nc_vm_will_write sync it on demand. */
+extern bool nc_vm_views_lazy;
+extern __thread bool nc_vm_guest_opening;
+/* Sync a deferred host mapping for va. Returns true if it was updated. */
+bool nc_vm_view_sync(NcVm *vm, uint32_t va);
+/* Report guest mapping and permission changes under the VM protection lock.
+ * PROT_NONE denotes inaccessible or unmapped pages. */
 extern void (*nc_vm_prot_hook)(uint32_t va, uint32_t len, int prot);
 
 /* Before host code writes guest memory through a system call (read/pread

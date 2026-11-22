@@ -496,7 +496,7 @@ void nc_mmio_fault_sites(char *buf, size_t len)
     memset(g_mfs, 0, sizeof(g_mfs));
 }
 
-enum NcGuestFault nc_core_guest_fault(NcCore *c, const NcGuestAccess *a, const char **why)
+static enum NcGuestFault guest_fault(NcCore *c, const NcGuestAccess *a, const char **why)
 {
     *why = NULL;
     if (!a->wrapped) {
@@ -580,6 +580,21 @@ enum NcGuestFault nc_core_guest_fault(NcCore *c, const NcGuestAccess *a, const c
         return NC_GF_DECLINED;
     }
     return NC_GF_FRAME;
+}
+
+enum NcGuestFault nc_core_guest_fault(NcCore *c, const NcGuestAccess *a, const char **why)
+{
+    /* Sync a deferred host mapping before retrying a host access. */
+    if (a->info && !a->wrapped && nc_vm_view_sync(&c->vm, a->va)) {
+        *why = NULL;
+        return NC_GF_RETRY;
+    }
+    /* Guest CPU faults can defer host permission increases. */
+    const bool was = nc_vm_guest_opening;
+    nc_vm_guest_opening = !a->info;
+    const enum NcGuestFault r = guest_fault(c, a, why);
+    nc_vm_guest_opening = was;
+    return r;
 }
 
 /* FEX's backend: a fault's guest frame and EIP, from its signal */

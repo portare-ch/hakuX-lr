@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Linux x86-64: no host protection calls for the guest's own page openings.** Under KVM the core no longer changes the host's mapping of a guest page each time the game's own access opens it, only the guest's page tables; the host's mapping catches up when host code needs it. Halo's opening scene made about 28,000 such calls a second. On a Ryzen 7 9800X3D this cut the Xbox CPU thread's emulation overhead there from 16% to 10.5% of a core. Not yet measured on a Steam Deck. `NC_KVM_LAZY_VIEWS=0` turns it off.
 - **Linux setup script: RetroArch's menu icons.** With RetroArch's AppImage (the Steam Deck's default since 0.37.1), several menu icons were white boxes: the sidebar's last entries, the button hints and the battery by the clock. The setup script unpacked only part of the menu's graphics. It now unpacks the missing icon set too; run the installer again to repair an existing installation. The footer's "No Core" is RetroArch's normal text while no game is running.
 
 ## linux-v0.37.2 (Linux ARM64, Linux x86-64, and Android ARM64)

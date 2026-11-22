@@ -50,6 +50,7 @@ static void va_load(uint32_t va, uint32_t len)
         if (pa < g_vm->ram_size) {
             stale_open(pa, false);
         }
+        nc_vm_view_sync(g_vm, a);
     }
 }
 
@@ -428,6 +429,7 @@ void hle_va_store(uint32_t va, uint32_t len)
         } else if (g_vm->wp[pa / NC_PAGE] == NC_WP_WRITTEN) {
             make_dirty(pa);             /* written already: its other views opened for the host */
         }
+        nc_vm_view_sync(g_vm, a);
     }
 }
 
