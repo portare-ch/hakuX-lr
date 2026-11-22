@@ -32,6 +32,27 @@
 #define AUDIO_PROCESSING_AUTO_DSP 0
 #endif
 
+static bool dmi_is(const char *dir, const char *file, const char *want)
+{
+    char path[256], line[64] = "";
+    snprintf(path, sizeof(path), "%s/%s", dir, file);
+    FILE *fp = fopen(path, "r");
+    if (!fp) {
+        return false;
+    }
+    const bool got = fgets(line, sizeof(line), fp) != NULL;
+    fclose(fp);
+    line[strcspn(line, "\r\n")] = 0;
+    return got && !strcmp(line, want);
+}
+
+/* Valve uses Jupiter for the LCD Deck and Galileo for the OLED Deck. */
+static bool steam_deck(const char *dir)
+{
+    return dmi_is(dir, "sys_vendor", "Valve") &&
+           (dmi_is(dir, "product_name", "Jupiter") || dmi_is(dir, "product_name", "Galileo"));
+}
+
 #if defined(__x86_64__) && !defined(__ANDROID__)
 #define COMBINER_PRECISION_DEFAULT "enabled"
 #else
@@ -146,8 +167,8 @@ static struct retro_core_option_v2_definition g_defs[OPT_COUNT + 1] = {
         "hakux_audio_processing", "Audio Processing", NULL,
         "Full DSP runs the game's Xbox reverb and other audio effects with stereo output. "
         "It uses more CPU. Fast plays the dry mix; try it if Full DSP crackles or runs slowly. "
-        "Auto uses Fast at the Potato accuracy level and where Full DSP is not available, "
-        "Full DSP otherwise." NEXT,
+        "Auto uses Fast at the Potato accuracy level, on a Steam Deck and where Full DSP is not "
+        "available, Full DSP otherwise." NEXT,
         NULL, NULL,
         {{"auto", "Auto"}, {"fast", "Fast (dry mix)"}, {"dsp", "Full DSP (experimental)"}, {NULL, NULL}},
         "auto"},
@@ -443,8 +464,9 @@ void nc_lr_options_apply(void)
      * rest, every path on, as before the level existed. */
     const HleAccuracyLevel level = (HleAccuracyLevel)g_applied[OPT_ACCURACY];
     const char *processing = g_defs[OPT_PROCESSING].values[g_applied[OPT_PROCESSING]].value;
+    const bool deck = steam_deck("/sys/class/dmi/id");
     const bool dsp = !strcmp(processing, "dsp") ||
-                     (!strcmp(processing, "auto") && AUDIO_PROCESSING_AUTO_DSP && level != HLE_ACCURACY_POTATO);
+                     (!strcmp(processing, "auto") && AUDIO_PROCESSING_AUTO_DSP && level != HLE_ACCURACY_POTATO && !deck);
     nc_dev_apu_set_dsp(dsp);
     HleGraphicsAccuracy custom = hle_accuracy_default();
     custom.precise_combiners = !strcmp(g_defs[OPT_PRECISION].values[g_applied[OPT_PRECISION]].value, "enabled");
@@ -457,7 +479,8 @@ void nc_lr_options_apply(void)
            "accuracy %s (combiners %s, signed blending %s, post-blend dithering %s)",
            scale, crop ? "cropped" : "shown", format, language,
            g_defs[OPT_LANGUAGE].values[g_applied[OPT_LANGUAGE]].value, region, rumble ? "on" : "off",
-           strcmp(network, "disabled") ? "on" : "off", resampler, dsp ? "dsp" : "fast",
+           strcmp(network, "disabled") ? "on" : "off", resampler,
+           dsp ? "dsp" : deck && !strcmp(processing, "auto") ? "fast (Auto on a Steam Deck)" : "fast",
            pace_text(g_applied[OPT_PACE]), communicator ? "on (noise gate " : "off", communicator ? gate : "",
            communicator ? ")" : "", hle_accuracy_level_name(level), precise ? "accurate" : "fast",
            acc.precise_signed_blend ? "accurate" : "approximate",

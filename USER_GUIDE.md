@@ -142,7 +142,7 @@ Crop Overscan, Rumble and Frame Pacing take effect immediately.
 | Crop Overscan | Enabled by default to hide borders. Disable it to show the whole frame. |
 | Accuracy Level | **Custom** uses the selected Combiner Precision. **Potato**, **Medium** and **High** apply the graphics settings below. Render scale is independent. |
 | Combiner Precision | Used with **Custom**. Defaults to **Accurate** on AMD64 and **Fast** on ARM64. Fast skips 9-bit combiner rounding. |
-| Audio Processing | **Auto** selects **Full DSP (experimental)** on Linux and **Fast** at Potato accuracy or on Android. Fast plays the dry mix and reduces CPU use. |
+| Audio Processing | **Auto** selects **Full DSP (experimental)** on Linux and **Fast** at Potato accuracy, on a Steam Deck or on Android. Fast plays the dry mix and reduces CPU use. |
 | Audio Resampler | **Sinc** is the default. **Linear** reduces CPU use at some cost to audio quality. |
 | Console Memory | Defaults to 64 MB. Choose 128 MB or 256 MB for homebrew and games that can use the extra RAM. |
 | Patch Games for Console Memory | Off by default. Enable it to remove a game’s 64 MB limit when extra RAM is selected. The patch applies in memory. Compatibility varies by game. |

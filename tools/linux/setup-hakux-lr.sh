@@ -579,10 +579,10 @@ log_verbosity = "true"
 log_to_file = "true"
 log_to_file_timestamp = "false"
 
-# hakuX-lr draws with Vulkan; bilinear scaling as on PortareOS.
+# Use Vulkan and bilinear scaling as on PortareOS. The core paces frames.
 video_driver = "vulkan"
 video_fullscreen = "true"
-video_vsync = "true"
+video_vsync = "false"
 video_threaded = "false"
 video_smooth = "true"
 menu_driver = "$menu"

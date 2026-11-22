@@ -266,7 +266,7 @@ except Crop Overscan, Rumble and Frame Pacing, which update immediately:
 | `hakux_communicator` | `disabled`, `enabled` (an Xbox Live Communicator in player 1's controller; experimental) | `disabled` |
 | `hakux_mic_sensitivity` | `medium`, `low`, `high`, `off` (the Communicator's noise gate: -38, -30 or -46 dBFS, or none) | `medium` |
 | `hakux_audio_resampler` | `sinc` (higher quality, 32-tap filter; NEON on ARM64, AVX2+FMA or SSE2 on x86-64), `linear` (less CPU, softer high frequencies) | `sinc` |
-| `hakux_audio_processing` | `fast` (dry mix), `dsp` (Xbox effects and stereo downmix; experimental) | `dsp` with JIT, otherwise `fast` |
+| `hakux_audio_processing` | `fast` (dry mix), `dsp` (Xbox effects and stereo downmix; experimental) | `dsp` with JIT, otherwise `fast`; `fast` on a Steam Deck |
 | `hakux_frame_pace` | `disabled`, `2` (after each frame the decoder waits for the GPU to finish the frame two before it), `1` (one before it) | `disabled` |
 
 Full DSP uses the DSP56300 JIT and is the default when compiled in. `NC_APU_DSP=0|1`
