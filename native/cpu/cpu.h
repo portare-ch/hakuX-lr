@@ -160,6 +160,13 @@ void nc_cpu_run(NcCpu *cpu, const NcCpuContext *c);
 /* Drops translations of guest code in [va, va+len) (it was replaced). */
 void nc_cpu_invalidate(NcCpu *cpu, uint32_t va, uint32_t len);
 
+/* Around a savestate's capture, on the guest CPU's thread at its pause
+ * point: begin takes the backend's own bytes out of guest memory (KVM's
+ * INT3s over the title's RSQRT instructions), so the state holds the
+ * title's code as any backend, or a later boot that arms other sites, finds
+ * it; end puts them back. */
+void nc_cpu_state_capture(NcCpu *cpu, bool begin);
+
 /* At the end of a system op: the first time the running thread's x87 control
  * word selects single precision, FEX's reduced x87 starts rounding to it
  * (translations made from now on) and every translation so far is dropped;

@@ -25,6 +25,7 @@
 #include "native/core/online.h"
 #include "native/core/xbe_patch.h"
 #include "native/dev/dev.h"
+#include "native/state/save.h"
 #include "native/hle/hle_native.h"
 #include "native/kernel/kernel.h"
 
@@ -75,9 +76,22 @@ static pthread_t g_core_thread, g_gap_thread;
 static int g_gap_quit;             /* stop_core */
 static bool g_handlers;            /* on_fault installed (g_old_segv, g_old_bus) */
 
+/* Save states and the console's network don't go together (a state can't
+ * hold a host's sockets or a peer's session): the content opened with the
+ * Network option on (g_net_opened), or any boot of it since had it on
+ * (g_net_seen), until the content closes. */
+static bool g_net_opened, g_net_seen, g_net_booted;
+static uint64_t g_runs;             /* retro_run calls (state_burst) */
+/* save states: the one taken to answer retro_serialize_size (state_taken) */
+static struct {
+    bool have;                      /* its files are in the state-save folder */
+    uint64_t runs, at_ns;           /* g_runs and the time it was taken */
+    size_t size;
+} g_taken;
+
 static void prepare_boot(bool relaunch);
 static bool can_stop(void);
-static bool boot_again(const char *why, bool relaunch);
+static bool boot_again(const char *why, bool relaunch, const char *state);
 static void cheats_forget(void);
 
 static struct {
@@ -310,7 +324,7 @@ RETRO_API void retro_reset(void)
         nc_log("hakuX-lr", "reset: not yet, while the renderer runs (M2's next part)");
         return;
     }
-    boot_again("reset", false);
+    boot_again("reset", false, NULL);
 }
 
 /* Install the bundled dashboard if needed before starting without content. */
@@ -336,6 +350,13 @@ RETRO_API bool retro_load_game(const struct retro_game_info *game)
     if (!g_env(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &fmt)) {
         nc_log("hakuX-lr", "the frontend has no XRGB8888");
         return false;
+    }
+    {   /* a state is for saving and loading by hand: seconds of a game
+         * stopped, and hundreds of MiB, not a frame's work (rewind, run-ahead,
+         * netplay) */
+        uint64_t quirks = RETRO_SERIALIZATION_QUIRK_INCOMPLETE | RETRO_SERIALIZATION_QUIRK_PLATFORM_DEPENDENT |
+                          RETRO_SERIALIZATION_QUIRK_CORE_VARIABLE_SIZE;
+        g_env(RETRO_ENVIRONMENT_SET_SERIALIZATION_QUIRKS, &quirks);
     }
     if (!data_dirs(g_hdd, g_cache, sizeof(g_hdd))) {
         return false;
@@ -386,7 +407,7 @@ bool nc_lr_start(void)
          * (context_destroy, then context_reset on its new device) */
         message(g_dash ? "RetroArch rebuilt its video driver: the dashboard starts again"
                        : "RetroArch rebuilt its video driver: the game starts again", 300);
-        return boot_again("video driver rebuilt", false);
+        return boot_again("video driver rebuilt", false, NULL);
     }
     g_started = true;
     __atomic_store_n(&g_core_state, 1, __ATOMIC_RELEASE);
@@ -448,6 +469,11 @@ static void prepare_boot(bool relaunch)
     nc_hle_set_mode("replace");
     nc_hle_set_base_path(g_cache);
     nc_lr_options_apply();                          /* the render scale, the console's settings */
+    if (nc_net_mode() != NC_NET_OFF) {
+        g_net_seen = true;
+        g_net_opened = g_net_opened || !g_net_booted;
+    }
+    g_net_booted = true;
     nc_dev_nv2a_display_period(NC_LR_FRAME_NS);    /* retro_run's: the vblank locks one to one */
     nc_hle_set_pipeline_options(true, true);   /* the app's defaults */
     handlers_install();
@@ -591,11 +617,13 @@ static void stop_core(const char *why)
     nc_log("hakuX-lr", "%s: the core stopped in %.0f ms", why, (double)(now_ns() - t0) / 1e6);
 }
 
-/* Stop and reboot the game or dashboard in process for a reset or a
- * relaunch into the XBE named by the launch data page. */
-static bool boot_again(const char *why, bool relaunch)
+/* Stop and reboot the game or dashboard in process for a reset, a relaunch
+ * into the XBE named by the launch data page, or a save state's load (state:
+ * the engine's file, whose XBE boots and which then replaces it). */
+static bool boot_again(const char *why, bool relaunch, const char *state)
 {
     stop_core(why);
+    nc_core_set_loadstate(state);       /* for this boot only: the next stop forgets it */
     g_disc_fd = g_dash ? -1 : open(g_game, O_RDONLY | O_CLOEXEC);
     if (g_disc_fd < 0 && !g_dash) {
         nc_log("hakuX-lr", "%s: %s: %s", why, g_game, strerror(errno));
@@ -776,8 +804,11 @@ RETRO_API void retro_unload_game(void)
     g_last_run_at = 0;
     cheats_forget();                /* the next game's come from RetroArch again */
     g_game[0] = 0;
+    g_taken.have = false;
+    g_taken.size = 0;
     g_dash = false;
     g_armed = false;
+    g_net_opened = g_net_seen = g_net_booted = false;   /* the next content is asked again */
 }
 
 /* HAKUX_LR_STATS=1 logs call and frame rates plus run and video timings.
@@ -837,6 +868,7 @@ static uint64_t paced(uint64_t now)
 RETRO_API void retro_run(void)
 {
     const uint64_t now = paced(now_ns());
+    g_runs++;
     nc_lr_input_run(g_input_poll, g_input_state);
     nc_lr_mic_run();
     nc_dev_nv2a_display_vsync(now);         /* RetroArch's frame tick is the display's vsync */
@@ -855,7 +887,7 @@ RETRO_API void retro_run(void)
     if (__atomic_load_n(&g_core_state, __ATOMIC_ACQUIRE) < 0 && g_core.kernel.relaunch && can_stop() &&
         !__atomic_load_n(&g_fail, __ATOMIC_ACQUIRE)) {
         nc_log("hakuX-lr", "relaunch: the %s boots again in RetroArch's process", g_dash ? "dashboard" : "game");
-        boot_again("relaunch", true);
+        boot_again("relaunch", true, NULL);
         return;
     }
     const char *why = __atomic_load_n(&g_fail, __ATOMIC_ACQUIRE);
@@ -872,19 +904,214 @@ RETRO_API unsigned retro_get_region(void)
     return RETRO_REGION_NTSC;
 }
 
+/* Save states (LIBRETRO_SPEC.md, section 11): the path-based engine's state
+ * (native/state) and its cache files, packed into RetroArch's buffer
+ * (state.c). A load boots the state's XBE again in process, as a reset
+ * does, and applies the state to it.
+ *
+ * RetroArch asks retro_serialize_size() right before each save, allocates
+ * that many bytes for every state it holds (the one saved or loaded, the
+ * undo copies of both), and writes that many to a file it keeps
+ * uncompressed. One bound for every game is hundreds of MiB each time: a
+ * state is 15 MiB (a game's first menu) to 250 MiB and more (Halo's cache
+ * drive, its maps unpacked there), and no estimate short of storing the
+ * cache files tells which. So the state is taken when RetroArch asks for
+ * the size, the answer is its length, and the retro_serialize that follows
+ * hands that state over: in the same frame for a save; for a load, whose
+ * command asks first and saves its undo copy once the file is read, some
+ * frames later, which is why a state taken is the next save's for
+ * STATE_TAKEN_NS and not for its frame only (a load ends that, as handing
+ * it over does). Asked when no state can be
+ * taken (or by a feature that asks every frame, state_burst), the answer is
+ * a nominal size, so that retro_serialize is called and says why not. */
+#define STATE_NOMINAL  ((size_t)(NC_RAM_RETAIL + (32u << 20)))
+#define STATE_TAKEN_NS 2000000000ull    /* a state taken for its size is that save's for this long */
+
+static void state_said(const char *what, const char *err)
+{
+    static char text[384];
+    snprintf(text, sizeof(text), "%s: %s", what, err);
+    nc_log("hakuX-lr", "%s", text);
+    message(text, 300);
+}
+
+/* Before a save or a load touches anything: the console has, or had since
+ * the content opened, a network (Insignia, system link, a test mode). */
+static bool state_net_blocked(const char *what)
+{
+    if (!g_net_seen && nc_net_mode() == NC_NET_OFF) {
+        return false;
+    }
+    nc_log("hakuX-lr", "%s: refused, the console's network is or was on for this content", what);
+    message("Save states require Network off. Close and reopen the game.", 300);
+    return true;
+}
+
+/* RetroArch's rewind (and run-ahead, netplay) asks for a state every frame
+ * or few, whatever the core's info file or its serialization quirks say:
+ * each one stops the game for a tenth of a second and more. A third request
+ * within half a second of frames of the one before is such a feature's, not
+ * a player's, and they are refused at once until they have stopped for a
+ * while. */
+#define STATE_BURST_GAP 30u         /* retro_runs between two requests of a burst */
+#define STATE_BURST_MAX 2u          /* requests of a burst served */
+static uint64_t g_state_asked;      /* g_runs at the last retro_serialize */
+static unsigned g_state_burst;
+
+static bool state_burst(void)
+{
+    /* (frames ran in between: saves taken while paused are a player's) */
+    if (g_state_asked && g_runs == g_state_asked && g_state_burst >= STATE_BURST_MAX) {
+        return true;                    /* this frame's request again (its size, then its state) */
+    }
+    const bool close = g_state_asked && g_runs != g_state_asked && g_runs - g_state_asked < STATE_BURST_GAP;
+    g_state_asked = g_runs ? g_runs : 1;
+    g_state_burst = close ? g_state_burst + 1 : 0;
+    if (g_state_burst < STATE_BURST_MAX) {
+        return false;
+    }
+    if (g_state_burst == STATE_BURST_MAX) {
+        nc_log("hakuX-lr", "save state: asked for every few frames (rewind, run-ahead or netplay): refused until "
+               "that stops");
+        message("hakuX-lr's save states are for saving by hand: turn off Rewind and Run-Ahead.", 600);
+    }
+    return true;
+}
+
+static void state_paths(char *dir, size_t nd, char *path, size_t np)
+{
+    snprintf(dir, nd, "%s/state-save", g_cache);
+    snprintf(path, np, "%s/" NC_LR_STATE_FILE, dir);
+}
+
+/* The size RetroArch was last told still stands: of a state taken a moment
+ * ago and not handed over yet, or handed over in this frame (asked again
+ * after it, the answer is the same). */
+static bool state_taken(void)
+{
+    return g_taken.size && (g_taken.have || g_taken.runs == g_runs) && now_ns() - g_taken.at_ns < STATE_TAKEN_NS;
+}
+
 RETRO_API size_t retro_serialize_size(void)
 {
-    return 0;
+    char dir[PATH_MAX], path[PATH_MAX + 16];
+    /* a game (not the dashboard, nor before a game is loaded) opened with
+     * the network off; one that got the network at a later boot keeps a
+     * size (it may not come back) and is refused when asked */
+    if (!g_game[0] || g_net_opened) {
+        return 0;
+    }
+    if (state_taken()) {
+        return g_taken.size;            /* RetroArch asks three times for one save */
+    }
+    g_taken.have = false;
+    g_taken.size = 0;
+    if (g_net_seen || nc_net_mode() != NC_NET_OFF || __atomic_load_n(&g_core_state, __ATOMIC_ACQUIRE) != 2 ||
+        g_core.vm.ram_size != NC_RAM_RETAIL || state_burst()) {
+        return STATE_NOMINAL;           /* retro_serialize says why not */
+    }
+    state_paths(dir, sizeof(dir), path, sizeof(path));
+    const uint64_t t0 = now_ns();
+    const char *err = nc_lr_state_dir(dir) ? nc_state_save(path) : "its folder can't be made";
+    const size_t size = err ? 0 : nc_lr_state_packed(dir);
+    if (!size) {
+        nc_lr_state_dir(dir);
+        nc_log("hakuX-lr", "save state: not taken for its size: %s", err ? err : "its files can't be read");
+        return STATE_NOMINAL;           /* retro_serialize tries again, and says */
+    }
+    g_taken.have = true;
+    g_taken.runs = g_runs;
+    g_taken.at_ns = now_ns();
+    g_taken.size = size;
+    nc_log("hakuX-lr", "save state: taken for its size, %.1f MiB, in %.0f ms", (double)size / 1048576.0,
+           (double)(g_taken.at_ns - t0) / 1e6);
+    return size;
 }
 
 RETRO_API bool retro_serialize(void *data, size_t size)
 {
-    return false;
+    char dir[PATH_MAX], path[PATH_MAX + 16];
+    const bool taken = g_taken.have && state_taken();
+    g_taken.have = false;
+    if (!taken && state_burst()) {
+        return false;
+    }
+    if (state_net_blocked("Save state")) {
+        return false;
+    }
+    if (__atomic_load_n(&g_core_state, __ATOMIC_ACQUIRE) != 2) {
+        state_said("Save state", "the game isn't running");
+        return false;
+    }
+    /* 128 MiB of RAM about doubles a state's memory part, for the few
+     * titles that use it */
+    if (g_core.vm.ram_size != NC_RAM_RETAIL) {
+        state_said("Save state", "save states need the console's standard 64 MiB (the Console Memory option)");
+        return false;
+    }
+    state_paths(dir, sizeof(dir), path, sizeof(path));
+    const uint64_t t0 = now_ns();
+    size_t used = 0;
+    /* (not taken for this size: a frontend that asked earlier, or not at
+     * all; the state has to fit what it gave) */
+    const char *err = taken ? NULL : !nc_lr_state_dir(dir) ? "its folder can't be made" : nc_state_save(path);
+    err = err ? err : nc_lr_state_pack(dir, data, size, &used);
+    nc_lr_state_dir(dir);               /* the buffer has it all */
+    if (err) {
+        state_said("Save state", err);
+        return false;
+    }
+    nc_log("hakuX-lr", "save state: %.1f MiB of %.1f, %s %.0f ms", (double)used / 1048576.0,
+           (double)size / 1048576.0, taken ? "taken with its size; handed over in" : "in",
+           (double)(now_ns() - t0) / 1e6);
+    return true;
 }
 
 RETRO_API bool retro_unserialize(const void *data, size_t size)
 {
-    return false;
+    char dir[PATH_MAX], path[PATH_MAX + 16];
+    g_taken.have = false;               /* a state taken before this load isn't a later save's */
+    g_taken.size = 0;
+    if (state_net_blocked("Load state")) {
+        return false;
+    }
+    if (!g_started || !can_stop()) {
+        state_said("Load state", "the game isn't running");
+        return false;
+    }
+    snprintf(dir, sizeof(dir), "%s/state-load", g_cache);
+    snprintf(path, sizeof(path), "%s/" NC_LR_STATE_FILE, dir);
+    const uint64_t t0 = now_ns();
+    /* everything checked before the running game stops */
+    const char *err = nc_lr_state_unpack(data, size, dir);
+    err = err ? err : __atomic_load_n(&g_core_state, __ATOMIC_ACQUIRE) == 2 ? nc_state_compat(path) : NULL;
+    err = err ? err : nc_cache_state_check(path);
+    if (err) {
+        nc_lr_state_dir(dir);
+        state_said("Load state", err);
+        return false;
+    }
+    bool ok = boot_again("load state", false, path);
+    /* the boot and the state's load are the core thread's: done when it runs */
+    int st = 1;
+    for (unsigned i = 0; ok && i < 3000 && (st = __atomic_load_n(&g_core_state, __ATOMIC_ACQUIRE)) == 1; i++) {
+        usleep(10 * 1000);
+    }
+    ok = ok && st == 2;
+    nc_lr_state_dir(dir);               /* applied, or of no use */
+    if (!ok) {
+        /* past the checks, with the game it replaced gone: the game starts
+         * again from its disc rather than end */
+        static char text[400];
+        snprintf(text, sizeof(text), "%s The game starts again.",
+                 nc_hle_fatal() ? nc_hle_fatal() : "The state did not load.");
+        nc_log("hakuX-lr", "load state: %s", text);
+        message(text, 420);
+        boot_again("load state failed", false, NULL);
+        return false;
+    }
+    nc_log("hakuX-lr", "load state: loaded in %.0f ms", (double)(now_ns() - t0) / 1e6);
+    return true;
 }
 
 /* RetroArch's cheats (its Cheats menu, a .cht's codes): the engine's

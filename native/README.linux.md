@@ -194,7 +194,7 @@ diagnostic harness uses CPU readback.
 
 Ports 1–4 map to Xbox players 1–4. Setting a port's **Device Type** to
 **None** disconnects it; changing it back reconnects it during play. Rumble
-is available but off by default. Save states are unavailable; leave
+is available but off by default. Save states are a beta (see CHANGELOG.md: the Network option off, Console Memory at 64 MB, saved and loaded by hand); leave
 run-ahead off. Closing, loading, resetting and switching game executables
 work within the same RetroArch process. A video driver rebuild restarts
 the game.

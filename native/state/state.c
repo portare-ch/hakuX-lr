@@ -193,6 +193,7 @@ static void put_info(NcBuf *b, const NcStateInfo *in)
     nc_buf_u8(&h, in->point);
     nc_buf_put(&h, in->core_version, sizeof(in->core_version));
     nc_buf_put(&h, in->core_git, sizeof(in->core_git));
+    nc_buf_u8(&h, in->disc_format);     /* (added at the end: older cores read past it, older states have none) */
     nc_buf_u32(b, (uint32_t)h.len);
     nc_buf_put(b, h.p, h.len);
     b->fail |= h.fail;
@@ -219,6 +220,9 @@ static bool get_info(NcRd *r, NcStateInfo *in)
     in->point = nc_rd_u8(&h);
     nc_rd_get(&h, in->core_version, sizeof(in->core_version));
     nc_rd_get(&h, in->core_git, sizeof(in->core_git));
+    const bool short_head = h.fail;     /* (a header cut short: checked below) */
+    in->disc_format = h.pos < h.len ? nc_rd_u8(&h) : 0;
+    h.fail = short_head;
     in->xbe_path[sizeof(in->xbe_path) - 1] = 0;
     in->core_version[sizeof(in->core_version) - 1] = 0;
     in->core_git[sizeof(in->core_git) - 1] = 0;
