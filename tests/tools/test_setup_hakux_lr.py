@@ -378,8 +378,15 @@ class SetupTest(unittest.TestCase):
                 check(update, "0.37.0", "aarch64")
             self.assertFalse((update / "pending").exists())
             self.assertEqual(core.read_bytes(), original)
-            (update / "checked").unlink()
+            checked = update / "checked"
+            checked_at = checked.stat().st_mtime
             replies[checksum_url] = archive.with_name(archive.name + ".sha256").read_bytes()
+            before_interval = checked_at - 23 * 60 * 60
+            os.utime(checked, (before_interval, before_interval))
+            check(update, "0.37.0", "aarch64")
+            self.assertFalse((update / "pending").exists())
+            after_interval = checked_at - 25 * 60 * 60
+            os.utime(checked, (after_interval, after_interval))
             check(update, "0.37.0", "aarch64")
         self.assertEqual(core.read_bytes(), original)
         self.assertTrue((update / "pending").is_dir())

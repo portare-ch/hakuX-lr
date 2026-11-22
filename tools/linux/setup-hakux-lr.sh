@@ -914,7 +914,7 @@ REPO = "portare-ch/hakuX-lr"
 LATEST = f"https://api.github.com/repos/{REPO}/releases/latest"
 CORE = "hakux-lr_libretro.so"
 INFO = "hakux-lr_libretro.info"
-CHECK_INTERVAL = 3600
+CHECK_INTERVAL = 24 * 60 * 60
 
 
 def version(value):
