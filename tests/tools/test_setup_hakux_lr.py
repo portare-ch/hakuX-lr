@@ -1,15 +1,18 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 """Installer and launcher regressions using local cores and fake external tools."""
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
+import runpy
 import shutil
 import subprocess
 import sys
 import tarfile
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -106,7 +109,8 @@ class SetupTest(unittest.TestCase):
         # Exclude host package managers and RetroArch from auto-detection.
         for name in ("sh", "tr", "head", "cut", "ls", "sort", "readlink", "stat",
                      "getent", "cat", "mkdir", "mktemp", "rm", "cp", "mv", "find",
-                     "tail", "ln", "chmod", "dirname", "tar", "gzip", "sha256sum"):
+                     "tail", "ln", "chmod", "dirname", "tar", "gzip", "sha256sum",
+                     "flock", "python3"):
             (self.bindir / name).symlink_to(shutil.which(name))
         self.env = dict(os.environ, HOME=str(self.home),
                         PATH=str(self.bindir),
@@ -345,6 +349,69 @@ class SetupTest(unittest.TestCase):
         downloads = [args[-1].rsplit("/", 1)[-1] for args in self.calls("curl")]
         self.assertIn("hakux-lr-0.34.0-aarch64.tar.gz", downloads)
         self.assertIn("hakux-0.34.0-aarch64.tar.gz", downloads)
+
+    def test_steam_deck_stages_stable_update_and_applies_it_on_next_start(self):
+        initial = self.archive("hakux-lr", "0.37.0", "hakuX-lr")
+        self.install(local_core=False, TEST_ARCHIVE=str(initial))
+        update = self.prefix / ".core-update"
+        self.assertEqual((update / "version").read_text(), "0.37.0\n")
+        settings = self.prefix / "user.cfg"
+        settings.write_text('video_smooth = "false"\n')
+        core = self.prefix / "cores/hakux-lr_libretro.so"
+        original = core.read_bytes()
+        updated = b"updated test core GLIBC_2.39\0"
+        self.core.write_bytes(updated)
+        archive = self.archive("hakux-lr", "0.38.0", "hakuX-lr")
+        updater = runpy.run_path(str(update / "update.py"))
+        latest = updater["LATEST"]
+        url = "https://github.com/portare-ch/hakuX-lr/releases/download/linux-v0.38.0/"
+        metadata = json.dumps({
+            "tag_name": "linux-v0.38.0",
+            "assets": [{"name": archive.name}, {"name": archive.name + ".sha256"}],
+        }).encode()
+        replies = {latest: metadata, url + archive.name: archive.read_bytes()}
+        checksum_url = url + archive.name + ".sha256"
+        replies[checksum_url] = b"0" * 64
+        check = updater["check"]
+        with patch.dict(check.__globals__, open_url=lambda url: io.BytesIO(replies[url])):
+            with self.assertRaisesRegex(ValueError, "checksum mismatch"):
+                check(update, "0.37.0", "aarch64")
+            self.assertFalse((update / "pending").exists())
+            self.assertEqual(core.read_bytes(), original)
+            checked = update / "checked"
+            checked_at = checked.stat().st_mtime
+            replies[checksum_url] = archive.with_name(archive.name + ".sha256").read_bytes()
+            before_interval = checked_at - 23 * 60 * 60
+            os.utime(checked, (before_interval, before_interval))
+            check(update, "0.37.0", "aarch64")
+            self.assertFalse((update / "pending").exists())
+            after_interval = checked_at - 25 * 60 * 60
+            os.utime(checked, (after_interval, after_interval))
+            check(update, "0.37.0", "aarch64")
+        self.assertEqual(core.read_bytes(), original)
+        self.assertTrue((update / "pending").is_dir())
+
+        with core.open("rb") as old_core:
+            self.launch(SteamGameId="1")
+            self.assertEqual(old_core.read(), original)
+        self.assertEqual(core.read_bytes(), updated)
+        self.assertEqual((update / "version").read_text(), "0.38.0\n")
+        self.assertFalse((update / "pending").exists())
+        self.assertEqual(settings.read_text(), 'video_smooth = "false"\n')
+
+    def test_automatic_core_updates_leave_pinned_and_local_builds_alone(self):
+        archive = self.archive("hakux-lr", "0.37.0", "hakuX-lr")
+        env = {"local_core": False, "TEST_ARCHIVE": str(archive)}
+        version = self.prefix / ".core-update/version"
+        self.install(**env)
+        self.assertTrue(version.exists())
+        self.install("--version", "0.37.0", **env)
+        self.assertFalse(version.exists())
+        self.install("--no-auto-update", **env)
+        self.assertFalse(version.exists())
+        self.install(**env)
+        self.install()
+        self.assertFalse(version.exists())
 
     def test_update_preserves_saves_and_prior_launcher(self):
         self.install()
