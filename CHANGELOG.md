@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Linux setup script: RetroArch's AppImage, no Flatpak.** On SteamOS, and on AMD64 systems without a package manager, the setup script now installs RetroArch's AppImage into its own folder. Flatpak support is removed, and `--retroarch flatpak` is refused. The AppImage runs as an ordinary program of the host: it uses the host's graphics driver, `/dev/kvm` and controllers directly, and Steam sees its process and window as the game it started. Run the installer again to switch an existing Steam Deck installation; it says how to remove the Flatpak if nothing else needs it. Tested on CachyOS (install, and Halo at 30 fps through the launcher); not yet on a Steam Deck.
+
 ## linux-v0.37.0 (Linux ARM64, Linux x86-64, and Android ARM64)
 
 - **Save states (beta).** Save and load manually with RetroArch’s slots and hotkeys. Set **Network** to **Off (no cable)** before starting the game, use the standard **64 MB** memory setting, and load the same disc dump (ISO or its CHD). Save states include the game’s disc cache and can load in a fresh session. The game’s own save files stay separate. Rewind, run-ahead, netplay, and states from older builds are unsupported. Tested on Linux x86-64 with AMD KVM in Dead or Alive 3, Halo, and Burnout 3. [#295](https://github.com/portare-ch/hakuX-lr/pull/295)

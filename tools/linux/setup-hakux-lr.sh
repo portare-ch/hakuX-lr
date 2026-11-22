@@ -14,11 +14,10 @@
 #   --games <dir>     where the games are (default: ~/roms/xbox)
 #   --prefix <dir>    where everything goes (default: ~/.local/share/hakux-lr)
 #   --no-packages     don't install distribution packages
-#   --retroarch <k>   system, flatpak or appimage (AppImage is AMD64 only).
+#   --retroarch <k>   system or appimage (AppImage is AMD64 only).
 #                     Defaults to RetroArch in PATH, then the distribution's
-#                     package.
-#                     On SteamOS or without a package manager, prefers
-#                     Flatpak, with AppImage as the AMD64 fallback.
+#                     package. On SteamOS or without a package manager,
+#                     RetroArch's AppImage.
 #   --no-steam        on SteamOS, don't add hakuX-lr to the Steam library
 #   --no-auto-update  on SteamOS, disable automatic core updates
 #
@@ -29,7 +28,7 @@
 # left alone. On AMD64 it checks KVM (/dev/kvm, TSC scaling, UMIP). Run it
 # again to update the setup. Your own settings go in <prefix>/user.cfg.
 #
-# On SteamOS, installs RetroArch as a user Flatpak and adds hakuX-lr to Steam.
+# On SteamOS, installs RetroArch's AppImage in the prefix and adds hakuX-lr to Steam.
 # Uses EmuDeck's roms/xbox folder when present. Setup does not request root;
 # missing KVM access needs a separate fix before games can run.
 #
@@ -40,7 +39,6 @@
 set -eu
 
 REPO=portare-ch/hakuX-lr
-FLATPAK_ID=org.libretro.RetroArch
 # Pin the AMD64 AppImage archive; upstream provides no checksum file.
 APPIMAGE_VERSION=1.22.2
 APPIMAGE_URL=https://buildbot.libretro.com/stable/$APPIMAGE_VERSION/linux/x86_64/RetroArch.7z
@@ -85,8 +83,9 @@ done
 [ -z "$tarball" ] || [ -f "$tarball" ] || die "no such file: $tarball"
 [ -z "$corefile" ] || [ -f "$corefile" ] || die "no such file: $corefile"
 case $rakind in
-    ''|system|flatpak|appimage) ;;
-    *) die "--retroarch takes system, flatpak or appimage" ;;
+    ''|system|appimage) ;;
+    flatpak) die "RetroArch's Flatpak is no longer supported: use --retroarch appimage (AMD64) or system" ;;
+    *) die "--retroarch takes system or appimage" ;;
 esac
 os_id=$(sed -n 's/^ID=//p' /etc/os-release 2>/dev/null | tr -d '"' | head -n1)
 if [ -z "$games" ]; then
@@ -203,16 +202,14 @@ install_packages() {
     fi
 }
 
-# SteamOS has a read-only system. The Flathub package can access /dev/kvm
-# and files in the home folder without installing distribution packages.
+# SteamOS has a read-only system: RetroArch's AppImage goes in the prefix,
+# without distribution packages or root. It runs as an ordinary program of
+# the host: the host's graphics driver, /dev/kvm and controllers as they
+# are, and a process and window Steam sees as the game it started.
 have_pm() { have pacman || have apt-get || have dnf || have zypper; }
-flatpak_has() { have flatpak && flatpak info "$FLATPAK_ID" >/dev/null 2>&1; }
 if [ -z "$rakind" ]; then
     if have retroarch; then rakind=system
-    elif [ "$os_id" = steamos ] || ! have_pm || [ $packages = 0 ]; then
-        if have flatpak; then rakind=flatpak
-        elif [ "$arch" = x86_64 ]; then rakind=appimage
-        else rakind=system; fi
+    elif { [ "$os_id" = steamos ] || ! have_pm || [ $packages = 0 ]; } && [ "$arch" = x86_64 ]; then rakind=appimage
     else rakind=system
     fi
 fi
@@ -222,42 +219,22 @@ case $rakind in
         if [ $packages = 1 ] && [ "$os_id" != steamos ]; then
             install_packages
         fi
-        have retroarch || die "RetroArch isn't installed (retroarch is not in PATH); try --retroarch flatpak"
+        have retroarch || die "RetroArch isn't installed (retroarch is not in PATH); on AMD64 try --retroarch appimage"
         retroarch=$(command -v retroarch)
         ;;
-    flatpak)
-        have flatpak || die "Flatpak isn't installed; try --retroarch appimage"
-        if ! flatpak_has; then
-            say "installing RetroArch from Flathub for $(id -un) (no root needed)"
-            flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo ||
-                die "couldn't add Flathub"
-            flatpak install --user --noninteractive flathub "$FLATPAK_ID" ||
-                die "installing $FLATPAK_ID failed; try --retroarch appimage"
-        fi
-        ;;
     appimage)
-        [ "$arch" = x86_64 ] || die "RetroArch's AppImage is AMD64 only; use --retroarch flatpak or system"
+        [ "$arch" = x86_64 ] || die "RetroArch's AppImage is AMD64 only; install RetroArch and use --retroarch system"
         ;;
 esac
 # The AppImage path is assigned after downloading it.
-ra() {
-    case $rakind in
-        flatpak) flatpak run "$FLATPAK_ID" "$@" ;;
-        *) "$retroarch" "$@" ;;
-    esac
-}
-# Flatpak supplies its own Vulkan loader and graphics drivers.
-if [ "$rakind" = flatpak ]; then
-    :
-elif [ -z "$(vulkan_icds)" ]; then
+ra() { "$retroarch" "$@"; }
+if [ -z "$(vulkan_icds)" ]; then
     case $(gpu_vendors) in
         *0x10de*) warn "no Vulkan driver found: install NVIDIA's driver (nvidia-utils or your distribution's equivalent)" ;;
         *) warn "no hardware Vulkan driver found; hakuX-lr needs Vulkan 1.2 or newer (1.3 recommended)" ;;
     esac
 fi
-if [ "$rakind" = flatpak ]; then
-    :
-elif loader=$(libvulkan); then
+if loader=$(libvulkan); then
     # Read the version from the symlink target (libvulkan.so.1.3.275).
     lmin=$(readlink -f "$loader" | sed -n 's/.*libvulkan\.so\.1\.\([0-9][0-9]*\)\..*/\1/p')
     if [ -n "$lmin" ] && [ "$lmin" -lt 3 ]; then
@@ -391,9 +368,10 @@ if [ "$rakind" = appimage ]; then
         # Fall back to extraction when FUSE mounting is unavailable.
         say "unpacking the AppImage (it couldn't be mounted)"
         (cd "$prefix/retroarch" && "$app" --appimage-extract >/dev/null 2>&1) ||
-            die "RetroArch's AppImage doesn't run here; try --retroarch flatpak"
+            die "RetroArch's AppImage doesn't run here; install RetroArch and use --retroarch system"
         retroarch="$prefix/retroarch/squashfs-root/AppRun"
-        "$retroarch" --version >/dev/null 2>&1 || die "RetroArch's AppImage doesn't run here; try --retroarch flatpak"
+        "$retroarch" --version >/dev/null 2>&1 ||
+            die "RetroArch's AppImage doesn't run here; install RetroArch and use --retroarch system"
     fi
 fi
 if ! ra --features 2>/dev/null | grep -i vulkan | grep -q -i yes; then
@@ -464,12 +442,8 @@ else
         cp "$rel/BUILD-INFO" "$prefix/licenses/" 2>/dev/null || true
     fi
 fi
-# Check the libc used by RetroArch, which is inside the runtime for Flatpak.
-if [ "$rakind" = flatpak ]; then
-    libc_version=$(flatpak run --command=ldd "$FLATPAK_ID" --version 2>/dev/null || true)
-else
-    libc_version=$(ldd --version 2>/dev/null || true)
-fi
+# Check the libc RetroArch and the core run with: the host's.
+libc_version=$(ldd --version 2>/dev/null || true)
 glibc=$(printf '%s\n' "$libc_version" | sed -n '1s/.* \([0-9][0-9]*\.[0-9][0-9]*\)$/\1/p')
 need=$(LC_ALL=C grep -ao 'GLIBC_2\.[0-9][0-9]*' "$tmp/hakux-lr_libretro.so" | sort -u -t. -k2,2n | tail -n1)
 need=${need#GLIBC_2.}
@@ -517,13 +491,6 @@ cfgval() { # <key> <file>: an uncommented value from a RetroArch config
 # Our --config replaces RetroArch's defaults, so set its asset path explicitly.
 assets=
 case $rakind in
-    flatpak)
-        # These paths exist inside the sandbox, not on the host.
-        assets=$(flatpak run --command=sh "$FLATPAK_ID" -c '
-            for d in /app/share/libretro/assets /app/share/retroarch/assets; do
-                [ -d "$d/ozone" ] && { echo "$d"; exit 0; }
-            done' 2>/dev/null || true)
-        ;;
     appimage) assets="$prefix/retroarch/assets" ;;
     *)
         for sys in /etc/retroarch.cfg /usr/local/etc/retroarch.cfg; do
@@ -544,7 +511,7 @@ if [ -z "$assets" ] && [ "$rakind" = system ]; then
 fi
 menu=rgui
 if [ -n "$assets" ]; then
-    if [ "$rakind" = flatpak ] || [ -d "$assets/ozone" ]; then menu=ozone
+    if [ -d "$assets/ozone" ]; then menu=ozone
     elif [ -d "$assets/xmb" ]; then menu=xmb
     fi
 fi
@@ -630,9 +597,12 @@ fi
 
 # ------------------------------------------------------------- the launcher
 
-printf "RETROARCH='%s'\nRA_KIND='%s'\nFLATPAK_ID='%s'\nGAMES='%s'\nARCH='%s'\nOS_ID='%s'\nVIA_STEAM='%s'\n" \
+# An installation from when SteamOS got RetroArch as a Flatpak.
+was_flatpak=0
+! grep -qs "^RA_KIND='flatpak'" "$prefix/hakux-lr.env" || was_flatpak=1
+printf "RETROARCH='%s'\nRA_KIND='%s'\nGAMES='%s'\nARCH='%s'\nOS_ID='%s'\nVIA_STEAM='%s'\n" \
     "$(printf '%s' "$retroarch" | sed "s/'/'\\\\''/g")" \
-    "$rakind" "$FLATPAK_ID" \
+    "$rakind" \
     "$(printf '%s' "$games" | sed "s/'/'\\\\''/g")" \
     "$arch" "$(printf '%s' "$os_id" | tr -cd 'a-z0-9._-')" "$steam" > "$prefix/hakux-lr.env"
 
@@ -879,9 +849,6 @@ mkdir -p "$here/logs"
 [ ! -f "$corelog" ] || mv -f "$corelog" "$corelog.1"
 echo "start-hakux-lr: ${game:-RetroArch menu} ($mode, $audio)"
 echo "start-hakux-lr: logs: $corelog (the core), $here/logs/retroarch.log (RetroArch)"
-if [ "${RA_KIND:-system}" = flatpak ]; then
-    exec flatpak run "$FLATPAK_ID" "$@" 2>"$corelog"
-fi
 exec "$RETROARCH" "$@" 2>"$corelog"
 LAUNCHER
 chmod +x "$prefix/start-hakux-lr.sh"
@@ -1056,7 +1023,7 @@ if [ -n "${XDG_CURRENT_DESKTOP:-}" ] || [ "$os_id" = steamos ] ||
     mkdir -p "$apps"
     desktop="$apps/hakux-lr.desktop"
     icon=retroarch
-    [ "$rakind" != flatpak ] || icon=$FLATPAK_ID
+    [ "$rakind" != appimage ] || icon=applications-games
     cat > "$desktop" <<EOF
 [Desktop Entry]
 Type=Application
@@ -1101,6 +1068,11 @@ cat <<EOF
     saves:     $prefix/saves (the Xbox hard disk is hdd/)
     logs:      $prefix/logs/hakux-lr.log (the core), retroarch.log (RetroArch)
 EOF
+if [ $was_flatpak = 1 ]; then
+    echo
+    echo "hakuX-lr no longer uses RetroArch's Flatpak. If nothing else needs it:"
+    echo "    flatpak uninstall --user org.libretro.RetroArch"
+fi
 case $steam_added in
     now)
         echo
