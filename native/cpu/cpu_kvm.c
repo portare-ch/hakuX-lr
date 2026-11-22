@@ -128,6 +128,8 @@ struct NcCpu {
     size_t xsave_size;
     bool xsave2;           /* KVM_GET_XSAVE2 reads it (larger than struct kvm_xsave) */
     uint8_t *sys;          /* host view of SYS_GPA */
+    bool sync;             /* KVM_CAP_SYNC_REGS: the general registers travel in cpu->run (regs_get) */
+    bool sync_valid;       /* cpu->run's copy is the vCPU's: a KVM_RUN returned, or regs_set wrote it */
     uint32_t fs_base;
     struct kvm_sregs sregs; /* the ring-3 state's, CR3 the current directory */
     bool pd1;              /* CR3 at SYS_PD1 */
@@ -171,11 +173,37 @@ static inline uint64_t host_tsc(void)
     return ((uint64_t)hi << 32) | lo;
 }
 
+/* The vCPU's general registers. With KVM_CAP_SYNC_REGS they are in cpu->run:
+ * KVM stores them there whenever KVM_RUN returns and takes them back from
+ * there, marked dirty, at the next one, so an exit that reads and writes
+ * them (every stub exit: a system instruction, a page fault) makes no
+ * system call for it. Otherwise KVM_GET_REGS and KVM_SET_REGS, as before
+ * the first KVM_RUN in any case. */
+static bool regs_get(NcCpu *cpu, struct kvm_regs *r)
+{
+    if (cpu->sync_valid) {
+        *r = cpu->run->s.regs.regs;
+        return true;
+    }
+    return ioctl(cpu->vcpu, KVM_GET_REGS, r) == 0;
+}
+
+static bool regs_set(NcCpu *cpu, const struct kvm_regs *r)
+{
+    if (cpu->sync) {
+        cpu->run->s.regs.regs = *r;
+        cpu->run->kvm_dirty_regs |= KVM_SYNC_X86_REGS;
+        cpu->sync_valid = true;
+        return true;
+    }
+    return ioctl(cpu->vcpu, KVM_SET_REGS, r) == 0;
+}
+
 static void fatal(NcCpu *cpu, const char *what)
 {
     struct kvm_regs r;
     memset(&r, 0, sizeof(r));
-    ioctl(cpu->vcpu, KVM_GET_REGS, &r);
+    regs_get(cpu, &r);
     nc_log("hakuX-lr-native-kvm", "%s: eip %08llx esp %08llx eflags %08llx eax %08llx (%s)", what,
            (unsigned long long)r.rip, (unsigned long long)r.rsp, (unsigned long long)r.rflags,
            (unsigned long long)r.rax, strerror(errno));
@@ -639,6 +667,12 @@ NcCpu *nc_cpu_create(const NcCpuConfig *cfg, uint32_t fs_base)
     if (!set_cpuid(cpu)) {
         return refuse(cpu, "KVM_SET_CPUID2"), NULL;
     }
+    {
+        const char *off = getenv("NC_KVM_SYNC_REGS");
+        const int caps = ioctl(cpu->kvm, KVM_CHECK_EXTENSION, KVM_CAP_SYNC_REGS);
+        cpu->sync = caps > 0 && (caps & KVM_SYNC_X86_REGS) && !(off && !strcmp(off, "0"));
+        cpu->run->kvm_valid_regs = cpu->sync ? KVM_SYNC_X86_REGS : 0;
+    }
     /* the FPU through the XSAVE area (fpu_get, fpu_set), sized once the
      * guest's CPUID is set */
     if (ioctl(cpu->kvm, KVM_CHECK_EXTENSION, KVM_CAP_XSAVE) > 0) {
@@ -975,7 +1009,7 @@ static void frame_to_regs(const NcFrame *f, struct kvm_regs *r)
 static void frame_read(NcCpu *cpu, bool stub, uint32_t *vector, uint32_t *err)
 {
     struct kvm_regs r;
-    if (ioctl(cpu->vcpu, KVM_GET_REGS, &r) < 0) {
+    if (!regs_get(cpu, &r)) {
         fatal(cpu, "KVM_GET_REGS");
     }
     NcFrame *f = &cpu->frame;
@@ -1001,7 +1035,7 @@ static void frame_write(NcCpu *cpu)
 {
     NcFrame *f = &cpu->frame;
     struct kvm_regs r;
-    if (ioctl(cpu->vcpu, KVM_GET_REGS, &r) < 0) {
+    if (!regs_get(cpu, &r)) {
         fatal(cpu, "KVM_GET_REGS");
     }
     frame_to_regs(f, &r);
@@ -1019,7 +1053,7 @@ static void frame_write(NcCpu *cpu)
         r.rsp = (uint32_t)f->regs[NC_ESP];
         r.rflags = eflags;
     }
-    if (ioctl(cpu->vcpu, KVM_SET_REGS, &r) < 0) {
+    if (!regs_set(cpu, &r)) {
         fatal(cpu, "KVM_SET_REGS");
     }
     if (f->fpu_dirty && !fpu_set(cpu, &f->fpu)) {
@@ -1584,7 +1618,9 @@ static void complete(NcCpu *cpu)
 {
     __atomic_store_n(&cpu->run->immediate_exit, 1, __ATOMIC_RELEASE);
     for (;;) {
-        if (ioctl(cpu->vcpu, KVM_RUN, 0) < 0) {
+        const int ran = ioctl(cpu->vcpu, KVM_RUN, 0);
+        cpu->sync_valid = cpu->sync;
+        if (ran < 0) {
             if (errno != EINTR) {
                 fatal(cpu, "completing an I/O exit");
             }
@@ -1792,7 +1828,7 @@ static void load_context(NcCpu *cpu, const NcCpuContext *c)
     r.rip = (uint32_t)f->rip;
     r.rsp = (uint32_t)f->regs[NC_ESP];
     r.rflags = (f->eflags | EFL_IOPL | 2) & ~EFL_TF;
-    if (ioctl(cpu->vcpu, KVM_SET_REGS, &r) < 0 || !fpu_set(cpu, &f->fpu)) {
+    if (!regs_set(cpu, &r) || !fpu_set(cpu, &f->fpu)) {
         fatal(cpu, "loading the context");
     }
     f->fpu_dirty = false;
@@ -1820,6 +1856,7 @@ void nc_cpu_run(NcCpu *cpu, const NcCpuContext *c)
          * shadow; none while a hooked instruction runs once (TF) */
         cpu->run->request_interrupt_window = __atomic_load_n(&cpu->irq, __ATOMIC_ACQUIRE) && !cpu->stepping;
         const int ran = ioctl(cpu->vcpu, KVM_RUN, 0);
+        cpu->sync_valid = cpu->sync;
         __atomic_add_fetch(&cpu->exits, 1, __ATOMIC_SEQ_CST);
         __atomic_store_n(&cpu->in_guest, 0, __ATOMIC_SEQ_CST);
         if (ran < 0) {
@@ -1833,7 +1870,7 @@ void nc_cpu_run(NcCpu *cpu, const NcCpuContext *c)
         switch (cpu->run->exit_reason) {
         case KVM_EXIT_HLT: {
             struct kvm_regs r;
-            if (ioctl(cpu->vcpu, KVM_GET_REGS, &r) < 0 || (r.rip - LIN_STUBS) % 16 != STUB_HLT ||
+            if (!regs_get(cpu, &r) || (r.rip - LIN_STUBS) % 16 != STUB_HLT ||
                 !in_stub_code(r.rip)) {
                 fatal(cpu, "a HLT outside the stubs");
             }
