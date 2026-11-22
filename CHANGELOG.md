@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Linux setup script: RetroArch's menu icons.** With RetroArch's AppImage (the Steam Deck's default since 0.37.1), several menu icons were white boxes: the sidebar's last entries, the button hints and the battery by the clock. The setup script unpacked only part of the menu's graphics. It now unpacks the missing icon set too; run the installer again to repair an existing installation. The footer's "No Core" is RetroArch's normal text while no game is running.
+
 ## linux-v0.37.2 (Linux ARM64, Linux x86-64, and Android ARM64)
 
 - **Linux x86-64 KVM performance.** D3D push-buffer kicks now make one exit to userspace instead of four when direct MMIO is available. In Halo on a Ryzen 7 9800X3D, device exits fell from about 36,000 to 12,600 per second, and vCPU time outside the guest dropped from 24.1–24.3% to 16.8% of one core. The scene held 30 fps before and after. Performance on Steam Deck still needs a retest. `NC_KVM_DIRECT=0` disables the optimization. [#300](https://github.com/portare-ch/hakuX-lr/pull/300)
