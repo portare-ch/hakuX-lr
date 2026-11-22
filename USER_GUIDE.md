@@ -54,6 +54,7 @@ it uses the user Flatpak, installing it if needed. It looks for EmuDeck’s `Emu
 including on SD cards, and falls back to `~/roms/xbox`.
 
 - Hold **L1 + R1 + Start + Select** for RetroArch’s in-game menu.
+- In Desktop Mode, **hakuX-lr (Xbox)** in the application menu starts through Steam when the signed-in Steam account has the hakuX-lr shortcut, so the Deck’s controls work as a controller. If the shortcut is missing or Steam doesn’t start it within 20 seconds, RetroArch starts directly and a notification says so; the Deck’s controls then act as Desktop Mode’s keyboard and mouse, as they do for a start from Konsole or with `HAKUX_VIA_STEAM=0`. Start it from the Steam library instead, or add the shortcut as described below.
 - To add a missing Steam shortcut, choose **Steam → Add a Game → Add a Non-Steam Game → hakuX-lr (Xbox)** in Desktop Mode.
 - If a game fails to launch, run `~/.local/bin/start-hakux-lr.sh` in Konsole to see the error. Check the installer output for KVM access instructions.
 - To uninstall, back up your saves, remove `~/.local/share/hakux-lr`, `~/.local/bin/start-hakux-lr.sh` and `~/.local/share/applications/hakux-lr.desktop`, then remove the shortcut from Steam.

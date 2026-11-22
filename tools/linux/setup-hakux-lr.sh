@@ -620,11 +620,11 @@ fi
 
 # ------------------------------------------------------------- the launcher
 
-printf "RETROARCH='%s'\nRA_KIND='%s'\nFLATPAK_ID='%s'\nGAMES='%s'\nARCH='%s'\n" \
+printf "RETROARCH='%s'\nRA_KIND='%s'\nFLATPAK_ID='%s'\nGAMES='%s'\nARCH='%s'\nOS_ID='%s'\nVIA_STEAM='%s'\n" \
     "$(printf '%s' "$retroarch" | sed "s/'/'\\\\''/g")" \
     "$rakind" "$FLATPAK_ID" \
     "$(printf '%s' "$games" | sed "s/'/'\\\\''/g")" \
-    "$arch" > "$prefix/hakux-lr.env"
+    "$arch" "$(printf '%s' "$os_id" | tr -cd 'a-z0-9._-')" "$steam" > "$prefix/hakux-lr.env"
 
 cat > "$prefix/start-hakux-lr.sh" <<'LAUNCHER'
 #!/bin/sh
@@ -639,6 +639,9 @@ cat > "$prefix/start-hakux-lr.sh" <<'LAUNCHER'
 # display server (no WAYLAND_DISPLAY or DISPLAY) RetroArch draws straight
 # through KMS. HAKUX_DISPLAY=kms or desktop overrides that. The core's
 # diagnostics go to logs/hakux-lr.log, RetroArch's to logs/retroarch.log.
+#
+# On SteamOS, desktop launches use the library shortcut for Steam Input.
+# Terminal launches, --no-steam installs and HAKUX_VIA_STEAM=0 run directly.
 set -eu
 
 here=$(CDPATH='' cd -- "$(dirname -- "$(readlink -f -- "$0")")" && pwd)
@@ -693,6 +696,101 @@ if [ $# -eq 1 ]; then
             1) game=$matches ;;
             *) printf '%s\n' "$matches" >&2; die "\"$1\" matches $n games; be more specific" ;;
         esac
+    fi
+fi
+
+# Find this launcher's shortcut in the active Steam profile. If there is no
+# MostRecent entry, use the most recently modified profile. The binary
+# shortcut record stores a four-byte app ID before its AppName.
+steam_shortcut() {
+    python3 -c '
+import glob, os, re, sys
+home = sys.argv[1]
+roots = [r for r in (home + "/.steam/steam", home + "/.local/share/Steam") if os.path.isdir(r + "/userdata")]
+for root in roots[:1]:
+    account = None
+    try:
+        users = open(root + "/config/loginusers.vdf", errors="replace").read()
+        for steamid, body in re.findall(r"\"(\d{17})\"\s*\{(.*?)\}", users, re.S):
+            if re.search(r"\"MostRecent\"\s*\"1\"", body, re.I):
+                account = int(steamid) - 76561197960265728
+    except OSError:
+        pass
+    if account is not None:
+        profiles = [root + "/userdata/" + str(account)]
+    else:
+        profiles = sorted(glob.glob(root + "/userdata/*"), key=os.path.getmtime, reverse=True)[:1]
+    for profile in profiles:
+        try:
+            data = open(profile + "/config/shortcuts.vdf", "rb").read()
+        except OSError:
+            continue
+        for m in re.finditer(rb"\x02appid\x00(.{4})\x01appname\x00hakuX-lr \(Xbox\)\x00", data, re.S | re.I):
+            end = data.find(b"\x02appid\x00", m.end())
+            rest = data[m.end():end if end >= 0 else len(data)].lower()
+            if b"start-hakux" in rest or b"hakux-lr.desktop" in rest:
+                print((int.from_bytes(m.group(1), "little") << 32) | 0x02000000)
+                sys.exit(0)
+' "$HOME" 2>/dev/null || true
+}
+
+# Show fallback instructions to desktop users.
+tell() {
+    warn "$1"
+    if command -v kdialog >/dev/null 2>&1; then
+        kdialog --title "hakuX-lr" --passivepopup "$1" 20 >/dev/null 2>&1 &
+    elif command -v notify-send >/dev/null 2>&1; then
+        notify-send -t 20000 "hakuX-lr" "$1" >/dev/null 2>&1 &
+    fi
+}
+recover="The Deck's controls act as keyboard and mouse here. For a controller, start hakuX-lr (Xbox) from the Steam library (Non-Steam); if it isn't there: Steam, Add a Game, Add a Non-Steam Game."
+
+by_steam=${SteamGameId:-}${SteamClientLaunch:-}
+if [ -n "$by_steam" ] && [ -n "$(find "$here/handoff.late" -mmin -2 2>/dev/null)" ]; then
+    # The fallback already started RetroArch. Ignore Steam's late launch.
+    rm -f "$here/handoff.late"
+    exit 0
+fi
+rm -f "$here/handoff.late"
+if [ -n "$by_steam" ] && [ -f "$here/handoff" ]; then
+    # Read the game and options, then acknowledge the Steam launch.
+    {
+        IFS= read -r handed || handed=
+        IFS= read -r opts || opts=
+    } < "$here/handoff"
+    [ -n "$game" ] || game=$handed
+    case " $opts " in *" windowed "*) windowed=1 ;; esac
+    case " $opts " in *" verbose "*) verbose=1 ;; esac
+    rm -f "$here/handoff"
+    : > "$here/handoff.ack"
+elif [ -z "$by_steam" ] && [ "${OS_ID:-}" = steamos ] && [ "${HAKUX_VIA_STEAM:-${VIA_STEAM:-1}}" != 0 ] && [ ! -t 2 ] &&
+    { [ -n "${WAYLAND_DISPLAY:-}" ] || [ -n "${DISPLAY:-}" ]; }; then
+    id=
+    if command -v steam >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
+        id=$(steam_shortcut)
+    fi
+    if [ -n "$id" ]; then
+        opts=
+        [ $windowed = 0 ] || opts="$opts windowed"
+        [ $verbose = 0 ] || opts="$opts verbose"
+        rm -f "$here/handoff.ack"
+        printf '%s\n%s\n' "$game" "$opts" > "$here/handoff"
+        steam "steam://rungameid/$id" >/dev/null 2>&1 &
+        n=0
+        while [ $n -lt "${HAKUX_STEAM_WAIT:-20}" ] && [ ! -f "$here/handoff.ack" ]; do
+            sleep 1
+            n=$((n + 1))
+        done
+        if [ -f "$here/handoff.ack" ]; then
+            rm -f "$here/handoff.ack"
+            exit 0
+        fi
+        # Mark the timeout so a late Steam launch does not open RetroArch.
+        rm -f "$here/handoff"
+        : > "$here/handoff.late"
+        tell "Steam didn't start hakuX-lr in time, so RetroArch starts without it. $recover"
+    else
+        tell "hakuX-lr (Xbox) isn't in this Steam account's library, so RetroArch starts without Steam. $recover"
     fi
 fi
 
@@ -833,7 +931,8 @@ case $steam_added in
     now)
         echo
         echo "Sent hakuX-lr (Xbox) to Steam. Check Non-Steam in your library, then start it in"
-        echo "Gaming Mode and choose Load Content to pick a game."
+        echo "Gaming Mode and choose Load Content to pick a game. In Desktop Mode, hakuX-lr (Xbox)"
+        echo "in the application menu starts through Steam too."
         ;;
     failed)
         echo

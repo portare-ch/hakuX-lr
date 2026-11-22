@@ -61,6 +61,14 @@ elif name == "pgrep":
     sys.exit(0 if os.environ.get("STEAM_RUNNING", "1") == "1" else 1)
 elif name == "steamos-add-to-steam":
     sys.exit(int(os.environ.get("STEAM_RESULT", "0")))
+elif name == "kdialog":
+    pass
+elif name == "steam":
+    # Simulate the Steam-launched instance acknowledging the handoff.
+    if os.environ.get("STEAM_STARTS", "1") == "1":
+        prefix = Path(os.environ["HOME"]) / ".local/share/hakux-lr"
+        Path(os.environ["HANDOFF_SEEN"]).write_text((prefix / "handoff").read_text())
+        (prefix / "handoff.ack").touch()
 elif name == "curl" and "TEST_ARCHIVE" in os.environ:
     archive = Path(os.environ["TEST_ARCHIVE"])
     url = args[-1]
@@ -206,6 +214,121 @@ class SetupTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn(str(games / "Halo.iso"), self.calls("flatpak")[-1])
         self.assertIn(str(self.prefix / "cores/hakux-lr_libretro.so"), self.calls("flatpak")[-1])
+
+    def steam_shortcut(self, appid=0x9ABCDEF0, account=42, exe=None, recent=True):
+        """A shortcuts.vdf as Steam writes it, with another shortcut before ours."""
+        exe = exe or f'"{self.prefix}/start-hakux-lr.sh"'
+        def entry(index, appid, name, exe):
+            return (b"\x00" + str(index).encode() + b"\x00\x02appid\x00" + appid.to_bytes(4, "little") +
+                    b"\x01AppName\x00" + name + b"\x00\x01Exe\x00" + exe.encode() + b"\x00\x08")
+        steam = self.home / ".steam/steam"
+        config = steam / f"userdata/{account}/config"
+        config.mkdir(parents=True)
+        (config / "shortcuts.vdf").write_bytes(
+            b"\x00shortcuts\x00" + entry(0, 0x11223344, b"Other", '"/x"') +
+            entry(1, appid, b"hakuX-lr (Xbox)", exe) + b"\x08\x08")
+        if recent:
+            (steam / "config").mkdir(exist_ok=True)
+            (steam / "config/loginusers.vdf").write_text(
+                '"users"\n{\n\t"76561197960265729"\n\t{\n\t\t"MostRecent"\t\t"0"\n\t}\n'
+                f'\t"{76561197960265728 + account}"\n\t{{\n\t\t"AccountName"\t\t"deck"\n\t\t"MostRecent"\t\t"1"\n\t}}\n}}\n')
+        for name in ("python3", "sleep"):
+            if not (self.bindir / name).exists():
+                (self.bindir / name).symlink_to(shutil.which(name))
+        for name in ("steam", "kdialog"):
+            tool = self.bindir / name
+            tool.write_text(FAKE_TOOL.replace("PYTHON", sys.executable, 1))
+            tool.chmod(0o755)
+        return (appid << 32) | 0x02000000
+
+    def launch(self, *args, **env):
+        result = subprocess.run([str(self.prefix / "start-hakux-lr.sh"), *args],
+                                env=dict(self.env, HANDOFF_SEEN=str(self.root / "handoff-seen"), **env),
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        return result
+
+    def test_steamos_desktop_start_goes_through_steam(self):
+        self.install()
+        gameid = self.steam_shortcut()
+        game = self.home / "roms/xbox/Halo.iso"
+        game.touch()
+        self.log.write_text("")
+        self.launch("--windowed", "--verbose", "halo")
+        self.assertEqual(self.calls("steam"), [[f"steam://rungameid/{gameid}"]])
+        self.assertEqual((self.root / "handoff-seen").read_text(), f"{game}\n windowed verbose\n")
+        self.assertFalse(self.calls("flatpak"))
+        self.assertFalse(self.calls("kdialog"))
+        self.assertFalse((self.prefix / "handoff.ack").exists())
+
+    def test_steam_started_launcher_takes_the_handed_game_and_options(self):
+        self.install()
+        self.steam_shortcut()
+        game = self.home / "roms/xbox/Halo.iso"
+        game.touch()
+        (self.prefix / "handoff").write_text(f"{game}\n windowed verbose\n")
+        self.log.write_text("")
+        self.launch(SteamGameId="1")
+        self.assertFalse(self.calls("steam"))
+        self.assertIn(str(game), self.calls("flatpak")[-1])
+        self.assertIn("--verbose", self.calls("flatpak")[-1])
+        self.assertIn('video_fullscreen = "false"', (self.prefix / "session.cfg").read_text())
+        self.assertTrue((self.prefix / "handoff.ack").exists())
+        self.assertFalse((self.prefix / "handoff").exists())
+
+    def test_steam_not_starting_falls_back_and_a_late_start_ends(self):
+        self.install()
+        self.steam_shortcut()
+        self.log.write_text("")
+        result = self.launch(STEAM_STARTS="0", HAKUX_STEAM_WAIT="1")
+        self.assertTrue(self.calls("steam"))
+        self.assertEqual(len(self.calls("flatpak")), 1)
+        self.assertIn("in time", result.stderr)
+        self.assertIn("Add a Non-Steam Game", self.calls("kdialog")[-1][-2])
+        self.assertFalse((self.prefix / "handoff").exists())
+        # A late Steam launch exits after the direct fallback.
+        self.launch(SteamGameId="1")
+        self.assertEqual(len(self.calls("flatpak")), 1)
+        # The next Steam library launch works normally.
+        self.launch(SteamGameId="1")
+        self.assertEqual(len(self.calls("flatpak")), 2)
+
+    def test_shortcut_is_the_signed_in_accounts_and_this_launchers(self):
+        self.install()
+        self.steam_shortcut(appid=0x80000001, account=1, recent=False)
+        gameid = self.steam_shortcut(appid=0x80000042, account=42)
+        self.log.write_text("")
+        self.launch()
+        self.assertEqual(self.calls("steam"), [[f"steam://rungameid/{gameid}"]])
+        # Reject a same-name shortcut that points to a different executable.
+        shutil.rmtree(self.home / ".steam")
+        self.steam_shortcut(exe='"/somewhere/else"')
+        self.log.write_text("")
+        result = self.launch()
+        self.assertFalse(self.calls("steam"))
+        self.assertTrue(self.calls("flatpak"))
+        self.assertIn("isn't in this Steam account's library", result.stderr)
+        self.assertTrue(self.calls("kdialog"))
+
+    def test_direct_start_when_asked_or_not_steamos(self):
+        self.install()
+        self.steam_shortcut()
+        self.log.write_text("")
+        self.launch(HAKUX_VIA_STEAM="0")
+        self.assertFalse(self.calls("steam"))
+        self.assertFalse(self.calls("kdialog"))
+        self.assertTrue(self.calls("flatpak"))
+        env_file = self.prefix / "hakux-lr.env"
+        self.assertIn("OS_ID='steamos'", env_file.read_text())
+        env_file.write_text(env_file.read_text().replace("OS_ID='steamos'", "OS_ID='arch'"))
+        self.log.write_text("")
+        self.launch()
+        self.assertFalse(self.calls("steam"))
+        self.install("--no-steam")
+        self.log.write_text("")
+        result = self.launch()
+        self.assertFalse(self.calls("steam"))
+        self.assertNotIn("Steam", result.stderr)
 
     def test_latest_release_handles_both_archive_names(self):
         for project, version, core_name in (("hakux", "0.34.0", "hakuX"), ("hakux-lr", "0.35.0", "hakuX-lr")):

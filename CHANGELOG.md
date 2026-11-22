@@ -10,6 +10,10 @@
   - **Size.** A state takes what its game needs, and RetroArch reserves that much memory for each save and load. Games that copy disc files to the cache keep a reference to the disc instead (Dead or Alive 3: about 27 MiB). Games that unpack data into the cache carry it (Halo: about 254 MiB). With RetroArch's save state compression off, the file is that size too.
   - **States from earlier builds do not load.** The Android app's states of games run from a CHD name their disc differently and are refused.
   - **Tested** on Linux x86-64 (KVM, AMD) in a headless RetroArch with Dead or Alive 3, Halo and Burnout 3, from CHD and from ISO, with RetroArch's save state compression on and off: save, load, load in a fresh session with an empty cache, and refusal of damaged, truncated and foreign states with the running game untouched. A load that fails partway leaves the cache as it was. **Not yet tested** on Linux ARM64, Android, an Intel host, or with RetroArch's own menus and a controller.
+- **Steam Deck: controls in Desktop Mode.** Starting hakuX-lr from the desktop's application menu now goes through Steam, as the library's Non-Steam shortcut does. Started outside Steam, the Deck's own controls are Desktop Mode's keyboard and mouse: A was Enter (Start in a game) and the right stick moved the pointer. Not yet tested on a Steam Deck; if Steam does not start the shortcut within 20 seconds, RetroArch starts directly as before.
+- **Steam Deck: controls in Desktop Mode.** Starting hakuX-lr from the desktop's application menu now goes through Steam, as the library's Non-Steam shortcut does. Started outside Steam, the Deck's own controls are Desktop Mode's keyboard and mouse: A was Enter (Start in a game) and the right stick moved the pointer. If the shortcut is missing from the signed-in Steam account, or Steam does not start it within 20 seconds, RetroArch starts directly as before and a notification says how to get controller input. Not yet tested on a Steam Deck.
+
+
 
 ## linux-v0.36.3 (Linux ARM64, Linux x86-64, and Android ARM64)
 
