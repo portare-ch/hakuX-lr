@@ -54,7 +54,7 @@ typedef struct NcCacheFile {
 #include "native/state/def.h"
 #include "native/state/sections.h"
 
-#define E_CACHE "CACHE"             /* partition 1's folder of cache files */
+#define E_CACHE "CACHE"             /* partition 1's folder of cache files, as the Xbox Live library names it */
 #define RAW_MAX 0x80000u    /* io.c RAW_KEEP: the partition head a raw file holds */
 
 static uint64_t mono_ns(void)
@@ -510,8 +510,12 @@ static bool disc_named(const NcDisc *d, const char *path, uint64_t size, NcDiscF
 
 /* src against the disc file df, chunk by chunk, into the store as a disc
  * copy: hashed, the chunks that are the disc's left out. False (nothing
- * stored) where none is, or it can't be read or written. */
-static bool store_disc(const char *src, const char *bdir, const NcDisc *d, const NcDiscFile *df, uint8_t hash[16],
+ * stored) where none is, or it can't be read or written. The store has one
+ * disc copy per content, named by its hash: where that content is there
+ * already as a copy of another disc file (two cache files alike, the disc's
+ * files they were copied from apart), that one stays and df becomes its
+ * disc file, for the state's record to name the copy the store has. */
+static bool store_disc(const char *src, const char *bdir, const NcDisc *d, NcDiscFile *df, uint8_t hash[16],
                        uint64_t *same)
 {
     char tmp[700], final[700];
@@ -559,8 +563,15 @@ static bool store_disc(const char *src, const char *bdir, const NcDisc *d, const
         XXH128_canonical_t c;
         XXH128_canonicalFromHash(&c, XXH3_128bits_digest(st));
         memcpy(hash, c.digest, 16);
-        dz_path(bdir, hash, final, sizeof(final));
-        ok = rename(tmp, final) == 0;
+        DzHead have;
+        if (dz_find(bdir, hash, size, final, sizeof(final), &have)) {
+            df->sector = have.sector;
+            df->size = have.disc_size;
+            unlink(tmp);
+        } else {
+            dz_path(bdir, hash, final, sizeof(final));
+            ok = rename(tmp, final) == 0;
+        }
     } else {
         ok = false;
     }
@@ -758,7 +769,42 @@ static uint32_t raw_read(int part, uint8_t *buf)
     return n > 0 ? (uint32_t)n : 0;
 }
 
+#define TREE_NEW ".state-new"       /* a load's trees beside the live ones (tree_root) */
+#define TREE_OLD ".state-old"
+
 static void swap_recover(uint32_t part);
+
+/* Partition 1's folder of cache files as the host has it: the guest's names
+ * are found whatever their case, and a folder keeps the spelling it was
+ * made with (io.c host_path), so it may be "Cache" or "cache" here. Where
+ * there is none, the spelling of what a load's swap cut short left of it
+ * (swap_recover), or E_CACHE. */
+static void e_cache_name(char out[sizeof(E_CACHE)])
+{
+    char root[600];
+    snprintf(root, sizeof(root), "%s/Partition1", nc_io_hdd_root());
+    memcpy(out, E_CACHE, sizeof(E_CACHE));
+    DIR *d = opendir(root);
+    for (const struct dirent *de; d && (de = readdir(d));) {
+        struct stat sb;
+        char full[900];
+        snprintf(full, sizeof(full), "%s/%s", root, de->d_name);
+        if (stat(full, &sb) != 0 || !S_ISDIR(sb.st_mode) || strncasecmp(de->d_name, E_CACHE, sizeof(E_CACHE) - 1)) {
+            continue;
+        }
+        const char *rest = de->d_name + sizeof(E_CACHE) - 1;
+        if (!rest[0]) {
+            memcpy(out, de->d_name, sizeof(E_CACHE));
+            break;                      /* the folder itself */
+        }
+        if (!strcmp(rest, TREE_OLD) || !strcmp(rest, TREE_NEW)) {
+            memcpy(out, de->d_name, sizeof(E_CACHE) - 1);
+        }
+    }
+    if (d) {
+        closedir(d);
+    }
+}
 
 bool nc_cache_state_save(NcBuf *b)
 {
@@ -767,9 +813,10 @@ bool nc_cache_state_save(NcBuf *b)
      * Xbox Live library keeps its own cache files (E:\CACHE\LocalCache*.bin,
      * open and written all session in Burnout 3) */
     struct stat e_cache;
-    char e_cache_dir[600];
+    char e_cache_dir[600], e_name[sizeof(E_CACHE)];
     swap_recover(1);
-    snprintf(e_cache_dir, sizeof(e_cache_dir), "%s/Partition1/" E_CACHE, nc_io_hdd_root());
+    e_cache_name(e_name);
+    snprintf(e_cache_dir, sizeof(e_cache_dir), "%s/Partition1/%s", nc_io_hdd_root(), e_name);
     const unsigned mask = nc_io_cache_partitions() | 1u |
                           (stat(e_cache_dir, &e_cache) == 0 && S_ISDIR(e_cache.st_mode) ? 2u : 0u);
     char bdir[600];
@@ -795,7 +842,7 @@ bool nc_cache_state_save(NcBuf *b)
         if (p >= 3) {
             walk(proot, "", &w);
         } else if (p == 1) {
-            walk(proot, E_CACHE, &w);       /* that folder only: the rest is the player's saves */
+            walk(proot, e_name, &w);        /* that folder only: the rest is the player's saves */
         }
         if (w.fail) {
             nc_log("hakuX-lr-native-state", "cache: out of memory listing %s", proot);
@@ -874,13 +921,13 @@ static bool file_as_saved(const char *key, const char *full, const NcCacheFile *
  * (<tree>.state-old in between), and the old ones removed. A failure before
  * the swap leaves the drives as they were; a swap cut short (the process
  * killed) is put right at the next save or load (swap_recover). */
-#define TREE_NEW ".state-new"
-#define TREE_OLD ".state-old"
 
 static void tree_root(uint32_t part, char *out, size_t n)
 {
     if (part == 1) {
-        snprintf(out, n, "%s/Partition1/" E_CACHE, nc_io_hdd_root());
+        char e_name[sizeof(E_CACHE)];
+        e_cache_name(e_name);
+        snprintf(out, n, "%s/Partition1/%s", nc_io_hdd_root(), e_name);
     } else {
         snprintf(out, n, "%s/Partition%u", nc_io_hdd_root(), part);
     }
@@ -1405,11 +1452,15 @@ void nc_cache_gc(const char *state_path)
     uint64_t freed = 0;
     while (b && (de = readdir(b))) {
         const size_t len = strlen(de->d_name);
-        if (len != 32 && (len != 35 || strcmp(de->d_name + 32, ".gz"))) {
-            continue;                       /* <hash>, <hash>.gz only */
+        /* <hash>, <hash>.gz, <hash>.dz (a disc copy), and <hash>.staged: what
+         * a check left for a load that didn't come, of no use to any state */
+        const bool staged = len == 39 && !strcmp(de->d_name + 32, ".staged");
+        if (len != 32 && (len != 35 || (strcmp(de->d_name + 32, ".gz") && strcmp(de->d_name + 32, ".dz"))) &&
+            !staged) {
+            continue;
         }
         bool used = false;
-        for (unsigned i = 0; i < refs.n && !used; i++) {
+        for (unsigned i = 0; i < refs.n && !used && !staged; i++) {
             char x[33];
             hex(refs.h[i], x);
             used = !memcmp(x, de->d_name, 32);

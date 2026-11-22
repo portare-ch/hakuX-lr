@@ -27,7 +27,7 @@
 #define LR_STATE_MAGIC   0x524C5848u    /* "HXLR" */
 #define LR_STATE_VERSION 1u
 #define LR_STATE_HEAD    16u
-#define LR_STATE_FILES   4096u
+#define LR_STATE_FILES   65536u        /* a state's files: the engine's, and its distinct cache files */
 
 static char g_why[256];
 
@@ -152,6 +152,12 @@ const char *nc_lr_state_pack(const char *dir, void *data, size_t size, size_t *u
     err = err ? err : put_files(&o, dir, "blobs");
     if (err) {
         return err;
+    }
+    if (o.files > LR_STATE_FILES) {
+        /* (what unpack takes: a state it would refuse isn't one saved) */
+        snprintf(g_why, sizeof(g_why), "the state has %u cache files, more than the %u a save state may have", o.files - 1,
+                 LR_STATE_FILES - 1);
+        return g_why;
     }
     if (o.full) {
         snprintf(g_why, sizeof(g_why), "the state takes %.0f MiB, the frontend gave it %.0f MiB. Save again.",
