@@ -27,8 +27,9 @@ run `sudo apt install --install-recommends linux-generic-hwe-22.04` and reboot.
 
 The script installs RetroArch and the hakuX-lr release for your CPU, sets up
 a separate RetroArch configuration, and checks KVM access on AMD64. It supports
-apt, dnf, pacman and zypper. `--retroarch flatpak` selects Flatpak.
-`--retroarch appimage` selects the AMD64 AppImage and needs `bsdtar`, `7z` or `7za`.
+apt, dnf, pacman and zypper. `--retroarch appimage` selects RetroArch’s AMD64
+AppImage, kept in the script’s own folder, and needs `bsdtar`, `7z` or `7za`.
+RetroArch’s Flatpak is no longer supported.
 
 ```sh
 curl -fsSLO https://raw.githubusercontent.com/portare-ch/hakuX-lr/master/tools/linux/setup-hakux-lr.sh
@@ -50,7 +51,7 @@ personal RetroArch settings in its `user.cfg` to carry them across updates.
 The [Steam Deck installer](README.md#steam-deck) runs the same setup script
 in Desktop Mode. To use the terminal, run the two commands above in Konsole.
 On SteamOS the script uses RetroArch from your path when available. Otherwise
-it uses the user Flatpak, installing it if needed. It looks for EmuDeck’s `Emulation/roms/xbox` directory,
+it downloads RetroArch’s AppImage into its own folder. It looks for EmuDeck’s `Emulation/roms/xbox` directory,
 including on SD cards, and falls back to `~/roms/xbox`.
 
 - The launcher checks for stable core releases in the background at startup,

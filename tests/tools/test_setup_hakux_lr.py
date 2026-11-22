@@ -44,17 +44,6 @@ elif name == "grep":
     os.execv("/usr/bin/grep", ["grep", *args])
 elif name == "ldd":
     print("ldd (GNU libc) 2.17")
-elif name == "flatpak":
-    if args[0] == "info":
-        sys.exit(0 if os.environ.get("FLATPAK_INSTALLED", "1") == "1" else 1)
-    if args[:2] == ["run", "--command=sh"]:
-        print("/app/share/libretro/assets")
-    elif args[:2] == ["run", "--command=ldd"]:
-        print("ldd (GNU libc) 2.40")
-    elif "--features" in args:
-        print("Vulkan: yes")
-    elif "--version" in args:
-        print("Version: 1.22.2")
 elif name == "retroarch":
     if "--features" in args:
         print("Vulkan: yes")
@@ -101,7 +90,8 @@ class SetupTest(unittest.TestCase):
         self.bindir = self.root / "bin"
         self.bindir.mkdir()
         self.log = self.root / "calls.jsonl"
-        for name in ("sed", "uname", "id", "grep", "ldd", "flatpak", "curl",
+        # RetroArch in PATH is the one used, on SteamOS too: the tests' stand-in.
+        for name in ("sed", "uname", "id", "grep", "ldd", "retroarch", "curl",
                      "sudo", "pacman", "pgrep", "steamos-add-to-steam"):
             tool = self.bindir / name
             tool.write_text(FAKE_TOOL.replace("PYTHON", sys.executable, 1))
@@ -150,7 +140,7 @@ class SetupTest(unittest.TestCase):
         return [call[1:] for line in self.log.read_text().splitlines()
                 if (call := json.loads(line))[0] == name]
 
-    def test_steamos_uses_flatpak_without_root(self):
+    def test_steamos_needs_no_root(self):
         # Force the missing-KVM path even when the test host has /dev/kvm.
         if Path("/dev/kvm").exists():
             self.skipTest("requires a host without /dev/kvm")
@@ -158,31 +148,36 @@ class SetupTest(unittest.TestCase):
         self.assertFalse(self.calls("sudo"))
         self.assertFalse(self.calls("pacman"))
         self.assertIn("sudo modprobe kvm_amd", result.stderr)
-        self.assertIn("RA_KIND='flatpak'", (self.prefix / "hakux-lr.env").read_text())
 
-    def test_flatpak_checks_runtime_libc(self):
+    def run_setup(self, *args, **env):
+        return subprocess.run(["sh", str(SCRIPT), "--core", str(self.core), *args],
+                              env=dict(self.env, **env), capture_output=True, text=True)
+
+    def test_steamos_without_retroarch_takes_the_appimage(self):
+        (self.bindir / "retroarch").unlink()
+        result = self.run_setup(TEST_ARCH="x86_64")
+        # (no unpacker or network here: as far as wanting them for it)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("RetroArch's AppImage", result.stderr)
+        self.assertFalse(self.calls("sudo"))
+        self.assertFalse(self.calls("pacman"))
+
+    def test_flatpak_is_no_longer_taken(self):
+        result = self.run_setup("--retroarch", "flatpak")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("no longer supported", result.stderr)
+        # an installation made with it is told what it leaves behind
+        self.prefix.mkdir(parents=True)
+        (self.prefix / "hakux-lr.env").write_text("RETROARCH=''\nRA_KIND='flatpak'\n")
         result = self.install()
-        self.assertNotIn("glibc 2.17 is older", result.stderr)
-        self.assertIn(["run", "--command=ldd", "org.libretro.RetroArch", "--version"],
-                      self.calls("flatpak"))
-        self.assertFalse(self.calls("ldd"))
-        cfg = (self.prefix / "retroarch.cfg").read_text()
-        self.assertIn('assets_directory = "/app/share/libretro/assets"', cfg)
-        self.assertIn('menu_driver = "ozone"', cfg)
-
-    def test_new_flatpak_is_installed_for_user(self):
-        self.install(FLATPAK_INSTALLED="0")
-        self.assertIn(["install", "--user", "--noninteractive", "flathub", "org.libretro.RetroArch"],
-                      self.calls("flatpak"))
+        self.assertIn("flatpak uninstall --user org.libretro.RetroArch", result.stdout)
+        self.assertIn("RA_KIND='system'", (self.prefix / "hakux-lr.env").read_text())
+        self.assertNotIn("flatpak uninstall", self.install().stdout)
 
     def test_system_retroarch_still_checks_host_libc(self):
-        tool = self.bindir / "retroarch"
-        tool.write_text(FAKE_TOOL.replace("PYTHON", sys.executable, 1))
-        tool.chmod(0o755)
         result = self.install("--no-packages", TEST_OS="arch")
         self.assertIn("glibc 2.17 is older", result.stderr)
         self.assertIn("RA_KIND='system'", (self.prefix / "hakux-lr.env").read_text())
-        self.assertFalse(self.calls("flatpak"))
 
     def test_steam_shortcut_is_added_once(self):
         self.install()
@@ -216,8 +211,8 @@ class SetupTest(unittest.TestCase):
         result = subprocess.run([str(self.prefix / "start-hakux-lr.sh"), "halo"],
                                 env=self.env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn(str(games / "Halo.iso"), self.calls("flatpak")[-1])
-        self.assertIn(str(self.prefix / "cores/hakux-lr_libretro.so"), self.calls("flatpak")[-1])
+        self.assertIn(str(games / "Halo.iso"), self.calls("retroarch")[-1])
+        self.assertIn(str(self.prefix / "cores/hakux-lr_libretro.so"), self.calls("retroarch")[-1])
 
     def steam_shortcut(self, appid=0x9ABCDEF0, account=42, exe=None, recent=True):
         """A shortcuts.vdf as Steam writes it, with another shortcut before ours."""
@@ -261,7 +256,7 @@ class SetupTest(unittest.TestCase):
         self.launch("--windowed", "--verbose", "halo")
         self.assertEqual(self.calls("steam"), [[f"steam://rungameid/{gameid}"]])
         self.assertEqual((self.root / "handoff-seen").read_text(), f"{game}\n windowed verbose\n")
-        self.assertFalse(self.calls("flatpak"))
+        self.assertFalse(self.calls("retroarch"))
         self.assertFalse(self.calls("kdialog"))
         self.assertFalse((self.prefix / "handoff.ack").exists())
 
@@ -274,8 +269,8 @@ class SetupTest(unittest.TestCase):
         self.log.write_text("")
         self.launch(SteamGameId="1")
         self.assertFalse(self.calls("steam"))
-        self.assertIn(str(game), self.calls("flatpak")[-1])
-        self.assertIn("--verbose", self.calls("flatpak")[-1])
+        self.assertIn(str(game), self.calls("retroarch")[-1])
+        self.assertIn("--verbose", self.calls("retroarch")[-1])
         self.assertIn('video_fullscreen = "false"', (self.prefix / "session.cfg").read_text())
         self.assertTrue((self.prefix / "handoff.ack").exists())
         self.assertFalse((self.prefix / "handoff").exists())
@@ -286,16 +281,16 @@ class SetupTest(unittest.TestCase):
         self.log.write_text("")
         result = self.launch(STEAM_STARTS="0", HAKUX_STEAM_WAIT="1")
         self.assertTrue(self.calls("steam"))
-        self.assertEqual(len(self.calls("flatpak")), 1)
+        self.assertEqual(len(self.calls("retroarch")), 1)
         self.assertIn("in time", result.stderr)
         self.assertIn("Add a Non-Steam Game", self.calls("kdialog")[-1][-2])
         self.assertFalse((self.prefix / "handoff").exists())
         # A late Steam launch exits after the direct fallback.
         self.launch(SteamGameId="1")
-        self.assertEqual(len(self.calls("flatpak")), 1)
+        self.assertEqual(len(self.calls("retroarch")), 1)
         # The next Steam library launch works normally.
         self.launch(SteamGameId="1")
-        self.assertEqual(len(self.calls("flatpak")), 2)
+        self.assertEqual(len(self.calls("retroarch")), 2)
 
     def test_shortcut_is_the_signed_in_accounts_and_this_launchers(self):
         self.install()
@@ -310,7 +305,7 @@ class SetupTest(unittest.TestCase):
         self.log.write_text("")
         result = self.launch()
         self.assertFalse(self.calls("steam"))
-        self.assertTrue(self.calls("flatpak"))
+        self.assertTrue(self.calls("retroarch"))
         self.assertIn("isn't in this Steam account's library", result.stderr)
         self.assertTrue(self.calls("kdialog"))
 
@@ -321,7 +316,7 @@ class SetupTest(unittest.TestCase):
         self.launch(HAKUX_VIA_STEAM="0")
         self.assertFalse(self.calls("steam"))
         self.assertFalse(self.calls("kdialog"))
-        self.assertTrue(self.calls("flatpak"))
+        self.assertTrue(self.calls("retroarch"))
         env_file = self.prefix / "hakux-lr.env"
         self.assertIn("OS_ID='steamos'", env_file.read_text())
         env_file.write_text(env_file.read_text().replace("OS_ID='steamos'", "OS_ID='arch'"))
