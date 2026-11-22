@@ -20,13 +20,14 @@
 #                     On SteamOS or without a package manager, prefers
 #                     Flatpak, with AppImage as the AMD64 fallback.
 #   --no-steam        on SteamOS, don't add hakuX-lr to the Steam library
+#   --no-auto-update  on SteamOS, disable automatic core updates
 #
 # It installs RetroArch, Vulkan and menu assets with the distribution's
 # package manager (pacman, apt, dnf or zypper; asks for the sudo password),
 # downloads the core and controller profiles, and gives hakuX-lr its own
 # RetroArch configuration in the prefix, so an existing RetroArch setup is
 # left alone. On AMD64 it checks KVM (/dev/kvm, TSC scaling, UMIP). Run it
-# again to update the core; your own settings go in <prefix>/user.cfg.
+# again to update the setup. Your own settings go in <prefix>/user.cfg.
 #
 # On SteamOS, installs RetroArch as a user Flatpak and adds hakuX-lr to Steam.
 # Uses EmuDeck's roms/xbox folder when present. Setup does not request root;
@@ -62,6 +63,7 @@ corefile=
 games=
 rakind=
 steam=1
+auto_update=1
 prefix="${XDG_DATA_HOME:-$HOME/.local/share}/hakux-lr"
 packages=1
 while [ $# -gt 0 ]; do
@@ -74,6 +76,7 @@ while [ $# -gt 0 ]; do
         --no-packages) packages=0 ;;
         --retroarch) [ $# -ge 2 ] || die "$1 needs a value"; rakind=$2; shift ;;
         --no-steam) steam=0 ;;
+        --no-auto-update) auto_update=0 ;;
         -h|--help) usage; exit 0 ;;
         *) die "unknown option: $1 (see --help)" ;;
     esac
@@ -344,6 +347,10 @@ mkdir -p "$prefix" "$prefix/cores" "$prefix/info" "$prefix/saves" \
     "$games"
 prefix=$(CDPATH='' cd -- "$prefix" && pwd)
 games=$(CDPATH='' cd -- "$games" && pwd)
+if [ "$os_id" = steamos ] && have flock; then
+    exec 9>"$prefix/.core-update.lock"
+    flock 9
+fi
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/hakux-lr-setup.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 trap 'exit 130' INT TERM
@@ -393,6 +400,7 @@ if ! ra --features 2>/dev/null | grep -i vulkan | grep -q -i yes; then
     warn "RetroArch ($rakind) reports no Vulkan support; hakuX-lr needs RetroArch's vulkan driver"
 fi
 
+auto_version=
 if [ -n "$corefile" ]; then
     say "installing $corefile"
     cp "$corefile" "$tmp/hakux-lr_libretro.so"
@@ -415,6 +423,8 @@ else
                 grep -Eo "https://github.com/$REPO/releases/download/linux-v[0-9][0-9.]*/hakux(-lr)?-[0-9][0-9.]*-$arch\.tar\.gz\"" |
                 head -n1 | tr -d '"')
             [ -n "$url" ] || die "no $arch release found at https://github.com/$REPO/releases"
+            tag=${url%/*}
+            auto_version=${tag##*/linux-v}
         else
             url="https://github.com/$REPO/releases/download/linux-v$version/hakux-lr-$version-$arch.tar.gz"
         fi
@@ -810,6 +820,15 @@ if [ -S "$rt/pulse/native" ]; then audio=pulse
 elif [ -S "$rt/pipewire-0" ]; then audio=pipewire
 else audio=alsa; fi
 
+update="$here/.core-update"
+if [ "${HAKUX_AUTO_UPDATE:-1}" != 0 ] && [ -f "$update/version" ] &&
+    command -v python3 >/dev/null 2>&1; then
+    if [ -d "$update/pending" ]; then
+        python3 "$update/update.py" apply "$here" "$ARCH" >>"$here/logs/update.log" 2>&1 || true
+    fi
+    python3 "$update/update.py" check "$here" "$ARCH" </dev/null >>"$here/logs/update.log" 2>&1 &
+fi
+
 session="$here/session.cfg"
 {
     echo "# written by start-hakux-lr.sh for each start"
@@ -866,6 +885,161 @@ fi
 exec "$RETROARCH" "$@" 2>"$corelog"
 LAUNCHER
 chmod +x "$prefix/start-hakux-lr.sh"
+
+if [ "$os_id" = steamos ]; then
+    update="$prefix/.core-update"
+    rm -f "$update/version" "$update/checked"
+    rm -rf "$update/pending"
+    if [ "$auto_update" = 1 ] && have python3 && have flock &&
+        printf '%s\n' "$auto_version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+        mkdir -p "$update"
+        cat > "$update/update.py" <<'UPDATER'
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-or-later
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import sys
+import tarfile
+import tempfile
+import time
+from urllib.request import Request, urlopen
+
+
+REPO = "portare-ch/hakuX-lr"
+LATEST = f"https://api.github.com/repos/{REPO}/releases/latest"
+CORE = "hakux-lr_libretro.so"
+INFO = "hakux-lr_libretro.info"
+CHECK_INTERVAL = 3600
+
+
+def version(value):
+    if re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", value):
+        return tuple(map(int, value.split(".")))
+    raise ValueError(f"invalid release version {value!r}")
+
+
+def open_url(url):
+    return urlopen(Request(url, headers={"User-Agent": "hakuX-lr-update"}), timeout=10)
+
+
+def check(update, installed, arch):
+    checked = update / "checked"
+    if checked.exists() and time.time() - checked.stat().st_mtime < CHECK_INTERVAL:
+        return
+    checked.touch()
+    with open_url(LATEST) as response:
+        release = json.load(response)
+    tag = release.get("tag_name", "")
+    if release.get("draft") or release.get("prerelease") or not tag.startswith("linux-v"):
+        return
+    candidate = tag[len("linux-v"):]
+    if version(candidate) <= version(installed):
+        return
+    folder = f"hakux-lr-{candidate}"
+    name = f"{folder}-{arch}.tar.gz"
+    assets = {asset["name"] for asset in release.get("assets", [])}
+    if not {name, name + ".sha256"} <= assets:
+        return
+    url = f"https://github.com/{REPO}/releases/download/{tag}/{name}"
+    with open_url(url + ".sha256") as response:
+        checksum = response.read(256).decode("ascii").split()
+    if not checksum or not re.fullmatch(r"[0-9a-fA-F]{64}", checksum[0]):
+        raise ValueError("invalid release checksum")
+
+    with tempfile.TemporaryDirectory(dir=update) as temporary:
+        work = Path(temporary)
+        archive = work / name
+        digest = hashlib.sha256()
+        with open_url(url) as response, archive.open("wb") as output:
+            for chunk in iter(lambda: response.read(65536), b""):
+                digest.update(chunk)
+                output.write(chunk)
+        if digest.hexdigest() != checksum[0].lower():
+            raise ValueError(f"checksum mismatch for {name}")
+        staged = work / "pending"
+        staged.mkdir()
+        with tarfile.open(archive, "r:gz") as package:
+            for member, target in (
+                (f"{folder}/lib/libretro/{CORE}", CORE),
+                (f"{folder}/lib/libretro/{INFO}", INFO),
+                (f"{folder}/BUILD-INFO", "BUILD-INFO"),
+            ):
+                entry = package.getmember(member)
+                if not entry.isfile() or not entry.size:
+                    raise ValueError(f"invalid package member {member}")
+                with package.extractfile(entry) as source, (staged / target).open("wb") as output:
+                    shutil.copyfileobj(source, output)
+        build = (staged / "BUILD-INFO").read_text().splitlines()
+        if build[:1] != [f"hakuX-lr {candidate}"] or f"architecture {arch}" not in build:
+            raise ValueError("release manifest does not match the version or architecture")
+        (staged / "version").write_text(candidate + "\n")
+        staged.rename(update / "pending")
+        print(f"Downloaded hakuX-lr {candidate} for the next launch")
+
+
+def replace_file(source, destination):
+    with tempfile.TemporaryDirectory(dir=destination.parent) as directory:
+        temporary = Path(directory) / destination.name
+        shutil.copyfile(source, temporary)
+        os.replace(temporary, destination)
+
+
+def apply(prefix, update, installed):
+    pending = update / "pending"
+    candidate = (pending / "version").read_text().strip()
+    if version(candidate) > version(installed):
+        info = prefix / "info" / INFO
+        with tempfile.TemporaryDirectory(dir=update) as temporary:
+            backup = Path(temporary) / INFO
+            shutil.copyfile(info, backup)
+            replace_file(pending / INFO, info)
+            try:
+                # RetroArch can keep reading an older core it has already mapped.
+                replace_file(pending / CORE, prefix / "cores" / CORE)
+            except OSError:
+                replace_file(backup, info)
+                raise
+        (prefix / "info" / "core_info.cache").unlink(missing_ok=True)
+        replace_file(pending / "BUILD-INFO", update / "BUILD-INFO")
+        replace_file(pending / "version", update / "version")
+        print(f"Installed hakuX-lr {candidate}")
+    shutil.rmtree(pending)
+
+
+def main():
+    mode, directory, arch = sys.argv[1:]
+    prefix = Path(directory)
+    update = prefix / ".core-update"
+    with (prefix / ".core-update.lock").open("a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return
+        installed = (update / "version").read_text().strip()
+        pending = (update / "pending").is_dir()
+        if mode == "apply" and pending:
+            apply(prefix, update, installed)
+        elif mode == "check" and not pending:
+            check(update, installed, arch)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, ValueError, KeyError, tarfile.TarError) as error:
+        print(f"hakuX-lr update: {error}", file=sys.stderr)
+UPDATER
+        printf '%s\n' "$auto_version" > "$update/version"
+    fi
+    if have flock; then
+        exec 9>&-
+    fi
+fi
 
 # Existing Steam shortcuts and shell links still point to the old launcher.
 if [ -f "$prefix/start-hakux.sh" ]; then
