@@ -193,11 +193,9 @@ typedef struct HleFfPush {
                                          scr.xy + scr.zw (XYZRHW: the vertex's;
                                          transformed: NDC), the screen-space offset
                                          included */
-    uint32_t bump[4];                 /* pixel shaders: BUMPENVMAT 00, 01 | 10, 11
-                                         (half-float pairs) of stage 1 (xy) and
-                                         stage 2 (zw); each stage has its own
-                                         (Halo 2's water distorts its reflection
-                                         a quarter as much as the rest) */
+    uint32_t bump[4];                 /* BUMPENVMAT (00, 01 | 10, 11) as half-float
+                                         pairs for stages 1 (xy) and 2 (zw), or
+                                         per-stage bounds with HLE_PSH_RECTS. */
 } HleFfPush;
 
 #define HLE_PUSH_MEMBERS_GLSL \
@@ -215,17 +213,18 @@ typedef struct HleFfPush {
 /* The block in a storage buffer (set by the back end before any shader is made) */
 extern bool g_hle_push_ssbo;
 
-/* Apply the stage's address modes within the linear texture's own extent before sampling a
- * larger image. Munch's Oddysee uses the top 128 rows of a 128 x 2048 shadow target as a 128
- * x 128 texture. Clamping at the image edge sampled the black rows below it.
+/* Apply address modes within the bounds of a linear texture backed by a
+ * larger image. In Munch's Oddysee, this keeps a 128 x 128 shadow texture
+ * from sampling the rows below it in a 128 x 2048 target.
  *
- * For the one affected stage, vk/draw.c packs width - 1 in fog.w bits 0–11 and height - 1 in
- * 12–23. U and V modes use 24–25 and 26–27 (clamp, border, wrap, mirror). Bits 28 and 31
- * encode the stage. Bit 29 is set and bit 30 clear so the float stays normal and finite.
+ * Pack width - 1 in bits 0–11, height - 1 in 12–23, and U/V
+ * address modes in 24–25 and 26–27 (clamp, border, wrap, mirror).
+ * HLE_PSH_RECT uses fog.w with the stage in bits 28 and 31. Bits 29 and 30
+ * are fixed at 1 and 0 to keep the float normal and finite. HLE_PSH_RECTS
+ * uses pc.bump[stage], ignores the stage bits, and treats zero as no bounds.
  *
- * Border coordinates outside the extent are sent outside the image. Clamp in-range samples to
- * half an image texel inside the extent to keep filtering within it. This makes a wrap seam
- * blend with its edge texel. Emit this code for HLE_PSH_RECT keys only. */
+ * Send out-of-range border coordinates outside the image. Inset other
+ * taps to keep filtering within the texture, including at wrap seams. */
 #define HLE_NVRECT_GLSL \
     "float nvaxis(float u, float n, uint m, float e) {\n" \
     "  if (m == 1u && (u < 0.0 || u > n)) return -65536.0;\n" \
@@ -233,8 +232,7 @@ extern bool g_hle_push_ssbo;
     "  else if (m == 3u) { u -= 2.0 * n * floor(u / (2.0 * n)); u = u < n ? u : 2.0 * n - u; }\n" \
     "  return clamp(u, e, n - e);\n" \
     "}\n" \
-    "vec2 nvrect(vec2 uv, float e) {\n" \
-    "  uint r = floatBitsToUint(pc.fog.w);\n" \
+    "vec2 nvrect(uint r, vec2 uv, float e) {\n" \
     "  return vec2(nvaxis(uv.x, float((r & 0xFFFu) + 1u), (r >> 24) & 3u, e),\n" \
     "              nvaxis(uv.y, float(((r >> 12) & 0xFFFu) + 1u), (r >> 26) & 3u, e));\n" \
     "}\n"
