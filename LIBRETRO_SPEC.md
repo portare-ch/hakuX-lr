@@ -2,7 +2,7 @@
 
 Status: design targets. The initial core and Vulkan handoff merged in PR #10.
 The core stops, unloads and loads again in RetroArch's process (M2); ports
-1-4 are players 1-4; rumble and save states remain unfinished. See [native/README.linux.md](native/README.linux.md) for current usage.
+1-4 are players 1-4; rumble remains unfinished, save states are a beta (section 11). See [native/README.linux.md](native/README.linux.md) for current usage.
 Written: 2026-10-24, from the owner's draft and its review against the source.
 Target: Retroid Pocket Nova (SM8550), AArch64 Linux, PortareOS, RetroArch
 Vulkan on KMS.
@@ -67,8 +67,8 @@ pause; PortareOS's hotkeys; VRR and fixed-refresh checks.
 Integration: controller ports 0-3, reset and title relaunch in process, the
 data location settled, the package and the launcher entry.
 
-Save states: a separate milestone (section 11). Until it passes, the core
-reports serialization unsupported.
+Save states: a separate milestone (section 11), in beta: saved and loaded by
+hand, with the console's network off and its standard 64 MiB of memory.
 
 Out of scope: strict lockstep, run-ahead (never, for the Xbox), rewind,
 netplay, exact frame advance, fast-forward beyond what the phase lock gives,
@@ -342,7 +342,8 @@ Home + Start stays PortareOS's; the core adds no exit chord.
 | memory, special content | unsupported |
 
 Run-ahead stays off for hakuX-lr, now and after section 11:
-`hakux-lr_libretro.info` declares `savestate = "false"` until states work, and
+`hakux-lr_libretro.info` declares `savestate_features = "basic"` (saving and
+loading by hand; the core refuses a state asked for every few frames), and
 the Xbox system ships a RetroArch override with `run_ahead_enabled =
 "false"`. RetroArch must never load a second hakuX-lr instance into the process.
 
@@ -417,12 +418,14 @@ set through `nc_hle_set_mode` and `nc_hle_set_base_path`. A title's relaunch sta
 
 ## 11. Save states
 
-Unsupported in the first playable core. To enable them: a stream/buffer form
+A beta (CHANGELOG.md has its rules and what is tested). What they take: a stream/buffer form
 of capture and restore below the path-based one; capture from the pause
 without an extra frame; restore by booting the state's XBE in process and
 applying the checked sections; a self-contained buffer with every cache blob
-it needs (the disc stays external, identified and checked); a size bound for
-the session; checks before anything live changes; derived GPU and JIT state
+it needs (the disc stays external, identified and checked); the size each
+state takes, not one bound for the session (the state is taken when the
+frontend asks for its size, `retro_serialize_size` in `native/libretro/core.c`);
+checks before anything live changes; derived GPU and JIT state
 rebuilt, queues cleared. Prove it in a fresh process with a fresh cache
 folder. Run-ahead stays off (section 10).
 

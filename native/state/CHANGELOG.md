@@ -78,3 +78,9 @@ One entry per section version (tools/native/statelock.py).
 
 - HlePbState.clip2d, beta: the 2D clip rectangle (class 0x19) and beta factor (class 0x12) the blits use; v1..v2 states: what the subchannels' objects of those classes were last given
 - upgraded: v1..v2 states load
+
+## CACHE v2 (2026-11-22, after d35c1fbd4d)
+
+- NcCacheFile.disc_sector, disc_size: a cache file the title copied from its disc is stored as a reference to the disc file (its first sector and size) and what differs from it, not as its content (v1 states: 0, stored whole)
+- partition 1's CACHE folder (E:\CACHE, the Xbox Live library's LocalCache files) is held like the cache drives' files, without a partition head (v1 states: none of it; a state of a title that had one open and written could not be saved)
+- upgraded: v1..v1 states load

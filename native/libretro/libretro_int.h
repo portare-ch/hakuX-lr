@@ -29,6 +29,17 @@ bool nc_lr_env(unsigned cmd, void *data);
 bool nc_lr_dashboard(void);
 void nc_lr_fail(const char *why);
 bool nc_lr_start(void);
+
+/* state.c: a save state's buffer. dir holds the engine's state file and its
+ * blobs folder (nc_lr_state_dir makes and empties it). Pack: dir's files
+ * into data (size long; *used: what they take, the rest zeroed), packed:
+ * the size that takes (0: dir can't be read). Unpack:
+ * data's files into dir, the whole buffer checked first. NULL, or why not. */
+#define NC_LR_STATE_FILE "state.hxs"
+bool nc_lr_state_dir(const char *dir);
+size_t nc_lr_state_packed(const char *dir);
+const char *nc_lr_state_pack(const char *dir, void *data, size_t size, size_t *used);
+const char *nc_lr_state_unpack(const void *data, size_t size, const char *dir);
 void nc_lr_end(const char *why);
 
 /* audio.c — one period's samples to RetroArch (retro_run), with player 1's

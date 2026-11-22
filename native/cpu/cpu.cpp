@@ -507,6 +507,8 @@ extern "C" void nc_cpu_invalidate(NcCpu* cpu, uint32_t va, uint32_t len) {
   cpu->CTX->InvalidateThreadCachedCodeRange(cpu->Thread, va, len);
 }
 
+extern "C" void nc_cpu_state_capture(NcCpu*, bool) {}  // nothing of FEX's is in guest memory
+
 extern "C" bool nc_cpu_x87_single_check(NcCpu* cpu) {
   if (!cpu->X87Watch || cpu->X87Single) {
     return false;

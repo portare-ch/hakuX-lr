@@ -16,6 +16,9 @@
  *                    swaps in this process: after loadstate=, since the load)
  *   frames=N         the run ends after frame N (exit 0), the shader and
  *                    pipeline caches written first
+ *   savestate=N:FILE at frame N the running game is saved to FILE (as the
+ *                    app's menu saves: native/state); its result is logged,
+ *                    and a failure ends the run with exit 8
  *   hang=S           no new frame for S seconds: the guest's state reported
  *                    and exit 6 (from the start: a load's first frame too)
  * NC_TIMEOUT=S (default 30, 0 none) ends any run after S seconds.
@@ -33,6 +36,7 @@
 #include "native/core/mmio.h"
 #include "native/core/options.h"
 #include "native/hle/hle_native.h"
+#include "native/state/save.h"
 #include "hw/xbox/hle/vk/back.h"
 
 #include <dlfcn.h>
@@ -279,6 +283,24 @@ static void *watchdog(void *arg)
     return NULL;
 }
 
+/* savestate=N:FILE */
+static uint64_t g_save_at;
+static const char *g_save_path;
+
+static void *saver(void *arg)
+{
+    while (hle_back_swap_count() < g_save_at) {
+        usleep(5 * 1000);
+    }
+    const char *err = nc_state_save(g_save_path);
+    nc_log("hakuX-lr-native", "savestate at frame %llu to %s: %s", (unsigned long long)hle_back_swap_count(),
+           g_save_path, err ? err : "saved");
+    if (err) {
+        _exit(8);
+    }
+    return NULL;
+}
+
 int main(int argc, char **argv)
 {
 #ifndef __ANDROID__
@@ -380,6 +402,9 @@ int main(int argc, char **argv)
             capture = argv[i] + 8;
         } else if (!strncmp(argv[i], "frames=", 7)) {
             stop = strtoull(argv[i] + 7, NULL, 10);
+        } else if (!strncmp(argv[i], "savestate=", 10) && strchr(argv[i], ':')) {
+            g_save_at = strtoull(argv[i] + 10, NULL, 10);
+            g_save_path = strchr(argv[i], ':') + 1;
         } else if (!strncmp(argv[i], "hang=", 5)) {
             g_hang_s = (unsigned)atoi(argv[i] + 5);
         } else {
@@ -404,6 +429,11 @@ int main(int argc, char **argv)
     pthread_t wd;
     pthread_create(&wd, NULL, watchdog, NULL);
     pthread_detach(wd);
+    if (g_save_path) {
+        pthread_t sv;
+        pthread_create(&sv, NULL, saver, NULL);
+        pthread_detach(sv);
+    }
     alarm(g_timeout);
     nc_core_run(&g_core);
     const NcKernel *k = &g_core.kernel;

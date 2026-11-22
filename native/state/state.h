@@ -132,15 +132,21 @@ typedef struct NcStateInfo {
     uint32_t title_id;
     char xbe_path[128];          /* the image running (relaunched titles: not default.xbe) */
     uint8_t xbe_sha1[20];        /* its header and certificate */
-    uint64_t disc_size;
-    uint32_t disc_hash;          /* its first sector's */
+    uint64_t disc_size;          /* the disc's own (a CHD's content, not its file) */
+    uint32_t disc_hash;          /* its XDVDFS header sector's, as the disc has it */
     uint32_t ram_size;
     uint64_t guest_ns;           /* the guest's time at the save */
     int64_t wall_time;           /* the save's (unix seconds) */
     uint8_t point;               /* NC_STATE_AT_* */
     char core_version[32];       /* the app's version name */
     char core_git[48];           /* its commit (+dirty): for diagnosis only */
+    uint8_t disc_format;         /* NC_STATE_DISC_*: the image the disc was (0: a state from
+                                    before it was noted). A state loads with any image of
+                                    the same content; this names the image when another
+                                    disc's is tried */
 } NcStateInfo;
+
+enum { NC_STATE_DISC_ISO = 1, NC_STATE_DISC_CHD = 2 };
 
 enum { NC_STATE_AT_ENTRY = 1, NC_STATE_AT_IDLE = 2 };
 

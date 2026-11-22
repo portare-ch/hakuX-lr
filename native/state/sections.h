@@ -14,6 +14,9 @@ extern "C" {
 struct NcKernel;
 /* The kernel a save or load works on (save.c). */
 struct NcKernel *nc_state_kernel(void);
+/* The running game's disc (NULL: none, the dashboard). */
+struct NcDisc;
+const struct NcDisc *nc_state_disc(void);
 
 #define NC_SECTION_FNS(x)                                                                          \
     bool nc_##x##_state_save(NcBuf *b);                                                            \

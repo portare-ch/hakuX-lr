@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Save states (beta).** Save and load a game by hand with RetroArch's save state slots and hotkeys. A state holds the console's memory, CPU, devices and open files, and the cache files the game keeps on the Xbox hard disk, so it loads in a new session with an empty cache.
+  - **Network must be off.** Open the game with the **Network** option at **Off (no cable)**. It defaults to On, and a game opened with it on has no save states. Turning the network on later in the same session refuses both saving and loading until the game is closed and opened again. A state cannot hold a connection to Insignia or to another console.
+  - **Console Memory must be 64 MB.** A game running with 128 MB is refused a save.
+  - **The same disc.** A state loads with the disc it was made from, as an ISO or as the CHD made of that ISO. Another dump, or a rebuilt or trimmed image, is refused. The game's own saves on the Xbox hard disk are not part of a state.
+  - **No rewind, run-ahead or netplay.** RetroArch asks for a state every frame for these. The core refuses such requests at once and says so; turn them off. A save stops the game for about 0.1 to 1 second and a load for about 0.3 to 1 second.
+  - **Size.** A state takes what its game needs, and RetroArch reserves that much memory for each save and load. Games that copy disc files to the cache keep a reference to the disc instead (Dead or Alive 3: about 27 MiB). Games that unpack data into the cache carry it (Halo: about 254 MiB). With RetroArch's save state compression off, the file is that size too.
+  - **States from earlier builds do not load.** The Android app's states of games run from a CHD name their disc differently and are refused.
+  - **Tested** on Linux x86-64 (KVM, AMD) in a headless RetroArch with Dead or Alive 3, Halo and Burnout 3, from CHD and from ISO, with RetroArch's save state compression on and off: save, load, load in a fresh session with an empty cache, and refusal of damaged, truncated and foreign states with the running game untouched. A load that fails partway leaves the cache as it was. **Not yet tested** on Linux ARM64, Android, an Intel host, or with RetroArch's own menus and a controller.
+
 ## linux-v0.36.3 (Linux ARM64, Linux x86-64, and Android ARM64)
 
 - **Prince of Persia: The Sands of Time.** Fix a freeze during the intro movies: a polling thread now yields without resetting its scheduler quantum, so other game threads can run. In Linux x86-64 `xboxrun` tests, 2 of 7 runs froze before the fix and 0 of 12 after; a separate run reached the first room. The fix has not yet been retested in RetroArch or on ARM64. [#293](https://github.com/portare-ch/hakuX-lr/pull/293)

@@ -35,6 +35,11 @@ const char *nc_state_compat(const char *path);
 /* The state file being saved or loaded (its folder holds the game's blob
  * store, cache.c). */
 const char *nc_state_path(void);
+/* The cache files the state at path needs are in its folder's blob store,
+ * each with the content the state names (read and hashed: a few hundred
+ * milliseconds for a few hundred MiB): NULL, or which isn't. Nothing live is
+ * touched. */
+const char *nc_cache_state_check(const char *state_path);
 /* After a save: the blob store keeps what the folder's states use. */
 void nc_cache_gc(const char *state_path);
 

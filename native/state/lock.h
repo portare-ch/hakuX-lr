@@ -12,9 +12,9 @@
 #define NC_STATE_V_APU 1
 #define NC_STATE_MIN_APU 1
 #define NC_STATE_H_APU 0x74f8c298u
-#define NC_STATE_V_CACHE 1
+#define NC_STATE_V_CACHE 2
 #define NC_STATE_MIN_CACHE 1
-#define NC_STATE_H_CACHE 0x41cfc66au
+#define NC_STATE_H_CACHE 0x66a653f4u
 #define NC_STATE_V_FILE 4
 #define NC_STATE_MIN_FILE 1
 #define NC_STATE_H_FILE 0x61366af7u

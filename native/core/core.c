@@ -112,7 +112,8 @@ static bool boot_failed(const char *why)
 
 /* NC_BOOT_FAIL_AT=<stage> (the tests): the boot fails once it is past that
  * stage, leaving what it made by then to the stop: kernel, disc, xbe, cpu,
- * thread, hle (the HLE GPU started). */
+ * thread, hle (the HLE GPU started); state: a savestate's load fails (only a
+ * boot into one). */
 static bool fail_at(const char *stage)
 {
     const char *e = getenv("NC_BOOT_FAIL_AT");
@@ -296,7 +297,7 @@ bool nc_core_boot(NcCore *c, int disc_fd)
     }
     nc_state_attach(c);
     if (g_loadstate[0]) {
-        const char *err = nc_state_load(g_loadstate);
+        const char *err = fail_at("state") ? "refused for a test" : nc_state_load(g_loadstate);
         if (err) {
             char why[384];
             snprintf(why, sizeof(why), "The savestate couldn't be loaded: %s.", err);

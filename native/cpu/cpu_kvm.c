@@ -1899,6 +1899,31 @@ void nc_cpu_invalidate(NcCpu *cpu, uint32_t va, uint32_t len)
     rsqrt_patch(cpu, va, len);
 }
 
+/* What this backend writes into guest memory, and nothing else of it is
+ * there (its tables and routines are in its own pages, SYS_GPA): the INT3s
+ * over the title's RSQRT instructions, and those of the HLE layer's debug
+ * probes (HAKUX_HLE_PROBE; none in a normal run). */
+void nc_cpu_state_capture(NcCpu *cpu, bool begin)
+{
+    if (!cpu) {
+        return;
+    }
+    if (begin) {
+        for (unsigned i = 0; i < cpu->nhooks; i++) {
+            uint8_t b;
+            if (guest_read(cpu, cpu->hooks[i].eip, &b, 1) && b == 0xCC) {
+                guest_write(cpu, cpu->hooks[i].eip, &cpu->hooks[i].orig, 1);
+            }
+        }
+        if (cpu->rsqrt_on) {
+            rsqrt_restore(cpu);
+        }
+    } else {
+        hooks_patch(cpu, 0, 0xFFFFFFFFu);
+        rsqrt_patch(cpu, 0, UINT32_MAX);
+    }
+}
+
 bool nc_cpu_x87_single_check(NcCpu *cpu) { return false; }
 bool nc_cpu_x87_single(NcCpu *cpu) { return false; }
 void nc_cpu_x87_single_restore(NcCpu *cpu) {}

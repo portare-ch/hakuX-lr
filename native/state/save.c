@@ -12,6 +12,7 @@
  */
 #include "native/state/save.h"
 #include "native/state/sections.h"
+#include "native/core/chd.h"
 #include "native/core/core.h"
 #include "native/core/irq.h"
 #include "hw/xbox/hle/host.h"
@@ -43,6 +44,11 @@ const char *nc_state_path(void)
 struct NcKernel *nc_state_kernel(void)
 {
     return &g_core->kernel;
+}
+
+const struct NcDisc *nc_state_disc(void)
+{
+    return g_core && g_core->disc.fd >= 0 ? &g_core->disc : NULL;
 }
 
 void nc_state_attach(NcCore *c)
@@ -92,6 +98,14 @@ static uint64_t mono_ns(void)
     return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
 }
 
+/* The state's disc is the running one (want: identity's): the same content,
+ * whichever of ISO and CHD holds it. (A state of a CHD from a core before
+ * this named the image file's size and bytes instead, and is refused.) */
+static bool disc_same(const NcStateInfo *info, const NcStateInfo *want)
+{
+    return info->disc_hash == want->disc_hash && info->disc_size == want->disc_size;
+}
+
 /* What identifies the running title: its XBE (the first 4 KiB of its file
  * and its size) and its disc (the size, the XDVDFS header's sector). The XBE
  * as the disc has it: a mod that patches or replaces it (native/core/mods.c)
@@ -117,12 +131,14 @@ static void identity(NcStateInfo *in)
     memcpy(in->xbe_sha1, &crc, 4);
     memcpy(in->xbe_sha1 + 4, &xf.size, 4);
     struct stat st;
-    in->disc_size = fstat(c->disc.fd, &st) == 0 ? (uint64_t)st.st_size : 0;
+    /* the disc's own size and header sector (the XDVDFS header's): a CHD's
+     * content, not its file's: an ISO and the CHD made of it are one disc */
+    in->disc_size = c->disc.chd ? nc_chd_size(c->disc.chd) : fstat(c->disc.fd, &st) == 0 ? (uint64_t)st.st_size : 0;
     uint8_t sec[2048];
-    in->disc_hash = pread(c->disc.fd, sec, sizeof(sec), (off_t)(c->disc.part_off + 32 * 2048)) == (ssize_t)sizeof(sec)
-                        ? (uint32_t)crc32(0, sec, sizeof(sec))
-                        : 0;
+    const NcDiscFile head = {32, sizeof(sec), 0};
+    in->disc_hash = nc_disc_read_orig(&c->disc, &head, 0, sec, sizeof(sec)) ? (uint32_t)crc32(0, sec, sizeof(sec)) : 0;
     in->ram_size = c->vm.ram_size;
+    in->disc_format = c->disc.chd ? NC_STATE_DISC_CHD : NC_STATE_DISC_ISO;
 }
 
 /* ------------------------------------------------------------------ save */
@@ -172,7 +188,9 @@ static const char *capture(NcKernel *k, const NcFrame *f, bool idle)
     snprintf(info.core_git, sizeof(info.core_git), "%s", NC_GIT);
     const uint64_t t1 = mono_ns();
     snprintf(g_path, sizeof(g_path), "%s", g_req.path);
+    nc_cpu_state_capture(k->cpu, true);     /* the title's code as it is, without the backend's patches */
     err = nc_state_write(g_req.path, &info, k_sections, NSECTIONS);
+    nc_cpu_state_capture(k->cpu, false);
     if (!err) {
         nc_cache_gc(g_req.path);            /* the copies only replaced states used */
     }
@@ -216,10 +234,14 @@ const char *nc_state_save(const char *path)
     const bool was_paused = nc_paused();
     /* the frame before the next flip: the decoder stops at its stall, the
      * guest runs on to its next kernel entry (paused meanwhile: for that) */
-    if (was_paused) {
+    /* paused with the decoder already at a flip stall (a frontend's pause
+     * comes between frames): taken where it stands, the guest not run */
+    bool parked = was_paused && hle_pb_park(true, 50000000ull);
+    const bool stood = parked;
+    if (was_paused && !parked) {
         nc_pause_set(false);
     }
-    bool parked = hle_pb_park(true, 500000000ull);
+    parked = parked || hle_pb_park(true, 500000000ull);
     if (!parked) {
         nc_log("hakuX-lr-native-state", "no flip within 500 ms: the decoder stops where it is");
         parked = hle_pb_park(false, 1000000000ull);
@@ -255,7 +277,8 @@ const char *nc_state_save(const char *path)
     }
     hle_pb_unpark();
     nc_pause_set(was_paused);
-    nc_log("hakuX-lr-native-state", "save: %s in %.0f ms", result ? result : "saved", (mono_ns() - t0) / 1e6);
+    nc_log("hakuX-lr-native-state", "save: %s in %.0f ms%s", result ? result : "saved", (mono_ns() - t0) / 1e6,
+           !was_paused ? "" : stood ? " (paused: taken where the game stood)" : " (paused: the game ran to its next flip)");
     return result;
 }
 
@@ -269,6 +292,23 @@ static const char *ram_mismatch(uint32_t state, uint32_t console)
     return why;
 }
 
+/* A state of another disc than the running one: why, naming the images
+ * where the state is of this title in the other format (the same content
+ * in the other format is the same disc: disc_same). */
+static const char *other_disc(const NcStateInfo *info, const NcStateInfo *want, const char *plain)
+{
+    static const char *const k_name[] = {"", "an ISO image", "a CHD image"};
+    static const char *const k_the[] = {"", "the ISO image", "the CHD image"};
+    static char why[200];
+    if (info->title_id != want->title_id || !info->disc_format || info->disc_format > NC_STATE_DISC_CHD ||
+        info->disc_format == want->disc_format) {
+        return plain;
+    }
+    snprintf(why, sizeof(why), "the state was made from %s of this game whose content is not that of %s it runs "
+             "from here (another dump, or a rebuilt image)", k_name[info->disc_format], k_the[want->disc_format]);
+    return why;
+}
+
 /* Check the savestate's identity against the running game. */
 static const char *identity_check(const NcStateInfo *info, const NcStateInfo *want)
 {
@@ -277,8 +317,8 @@ static const char *identity_check(const NcStateInfo *info, const NcStateInfo *wa
         snprintf(why, sizeof(why), "the state is of another game (%08x, this is %08x)", info->title_id, want->title_id);
         return why;
     }
-    if (info->disc_size != want->disc_size || info->disc_hash != want->disc_hash) {
-        return "the state was made with another copy of this game's disc";
+    if (!disc_same(info, want)) {
+        return other_disc(info, want, "the state was made with another copy of this game's disc");
     }
     if (info->ram_size != want->ram_size) {
         return ram_mismatch(info->ram_size, want->ram_size);
@@ -297,8 +337,8 @@ const char *nc_state_compat(const char *path)
          * load boots the state's) */
         memset(&want, 0, sizeof(want));
         identity(&want);
-        if (info.disc_size != want.disc_size || info.disc_hash != want.disc_hash) {
-            return "the state was made with another game's disc (or another copy of it)";
+        if (!disc_same(&info, &want)) {
+            return other_disc(&info, &want, "the state was made with another game's disc (or another copy of it)");
         }
         if (info.ram_size != want.ram_size) {
             return ram_mismatch(info.ram_size, want.ram_size);

@@ -3301,7 +3301,10 @@ const char *nc_io_state_drain(NcKernel *k, uint64_t timeout_ns)
     /* the game's own save on E: half written: not a state to come back to */
     for (unsigned i = 0; i < MAX_FILES; i++) {
         const NcFile *nf = &g_files[i];
-        if (nf->used && nf->kind == F_HOST && nf->partition == 1 && nf->wrote) {
+        /* (not E:\CACHE's: the Xbox Live library's cache files, which the
+         * state holds as it does the cache drives', cache.c) */
+        static const char e_cache[] = "\\Device\\Harddisk0\\Partition1\\CACHE\\";
+        if (nf->used && nf->kind == F_HOST && nf->partition == 1 && nf->wrote && !prefix_ci(nf->path, e_cache)) {
             nc_log("hakuX-lr-native-state", "%s is being written", nf->path);
             return "the game is writing its save; try again in a moment";
         }
