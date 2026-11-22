@@ -28,6 +28,22 @@ typedef struct NcMmioDev {
 } NcMmioDev;
 
 void nc_mmio_register(const NcMmioDev *dev);
+
+/* A page of a device's window whose reads are plain memory: what the read
+ * handler would return for every register on it is at host (page aligned,
+ * the device's own register file), always. A backend that runs the guest on
+ * the host CPU (KVM) maps it read-only into the guest, and a read costs
+ * nothing; writes reach the device as before. quiet (0: none): a 4-byte
+ * register on the page whose writes the device has nothing to do for, which
+ * the backend may drop without telling it. FEX's backend ignores all this:
+ * its accesses are calls, not exits. */
+typedef struct NcMmioDirect {
+    uint32_t addr;
+    uint8_t *host;
+    uint32_t quiet;
+} NcMmioDirect;
+void nc_mmio_direct(const NcMmioDirect *page);
+unsigned nc_mmio_direct_list(NcMmioDirect *out, unsigned max);
 /* Every device unregistered and the access log cleared (the core stopped). */
 void nc_mmio_reset(void);
 

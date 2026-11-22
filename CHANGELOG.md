@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Linux x86-64: fewer exits per draw.** Under KVM, each access to a graphics register left the guest, and a game's push-buffer kick made four of them, thousands of times a second. The register page D3D polls is now read inside the guest and its flush write stays in the kernel, leaving one exit per kick. In Halo's opening scene on a Ryzen 7 9800X3D this cut the Xbox CPU thread's emulation overhead from 24% to 17% of a core. A Steam Deck log showed that thread saturated in the same scene (10 to 22 fps); the gain there is not yet measured. `NC_KVM_DIRECT=0` turns it off.
+
 ## linux-v0.37.1 (Linux ARM64, Linux x86-64, and Android ARM64)
 
 - **Linux setup script: RetroArch's AppImage, no Flatpak.** On SteamOS, and on AMD64 systems without a package manager, the setup script now installs RetroArch's AppImage into its own folder. Flatpak support is removed, and `--retroarch flatpak` is refused. The AppImage runs as an ordinary program of the host: it uses the host's graphics driver, `/dev/kvm` and controllers directly, and Steam sees its process and window as the game it started. Run the installer again to switch an existing Steam Deck installation; it says how to remove the Flatpak if nothing else needs it. Tested on CachyOS (install, and Halo at 30 fps through the launcher); not yet on a Steam Deck.

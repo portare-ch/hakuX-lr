@@ -167,6 +167,25 @@ static void mmio_write(void *opaque, uint32_t off, uint64_t value, unsigned size
     }
 }
 
+/* A device whose page the guest reads directly (nc_mmio_direct): its read
+ * handler must never run, its write handler only for the register that
+ * isn't quiet. */
+#define MMIO_DIRECT 0xFE100000u
+static uint8_t *direct_page;
+static unsigned direct_reads, direct_writes;
+
+static uint64_t direct_read(void *opaque, uint32_t off, unsigned size)
+{
+    direct_reads++;
+    return 0xBAD0BAD0u;
+}
+
+static void direct_write(void *opaque, uint32_t off, uint64_t value, unsigned size)
+{
+    direct_writes++;
+    memcpy(direct_page + off, &value, size);
+}
+
 /* A page the guest touches first maps on its fault; the rest is the core's. */
 static int fault(void *opaque, NcFrame *f, uint32_t va, bool write, const char **why)
 {
@@ -233,6 +252,11 @@ int main(void)
     }
     NcMmioDev dev = {"kvm-smoke", MMIO, NC_PAGE, mmio_read, mmio_write, NULL};
     nc_mmio_register(&dev);
+    direct_page = nc_big_alloc(NC_PAGE);
+    NcMmioDev ddev = {"kvm-direct", MMIO_DIRECT, NC_PAGE, direct_read, direct_write, NULL};
+    nc_mmio_register(&ddev);
+    const NcMmioDirect dpage = {MMIO_DIRECT, direct_page, MMIO_DIRECT + 0x10};
+    nc_mmio_direct(&dpage);
     NcCpuConfig cfg = {.membase = core.vm.base, .sysop = system_op, .idt_base = IDT, .idt_limit = 0x7FF};
     nc_core_cpu_backend(&core, &cfg);
     core_fault = cfg.fault;
@@ -437,6 +461,27 @@ int main(void)
         }
     }
     check(got_lo == lo && got_hi == hi, "16-byte MMIO store: both halves reach the device");
+
+    /* A device page read in the guest: a write reaches the device, the read
+     * of it comes from the page without the device's handler, and a write
+     * to the page's quiet register is dropped. */
+    const uint8_t direct[] = {
+        0xC7, 0x05, 0x20, 0x00, 0x10, 0xFE, 0x44, 0x33, 0x22, 0x11, /* mov dword [0xFE100020], 0x11223344 */
+        0xA1, 0x20, 0x00, 0x10, 0xFE, 0xCD, 0x42,                   /* mov eax, [0xFE100020]; int 42h */
+        0xC7, 0x05, 0x10, 0x00, 0x10, 0xFE, 0x00, 0x00, 0x01, 0x00, /* mov dword [0xFE100010], 0x10000 */
+        0xA1, 0x10, 0x00, 0x10, 0xFE, 0xCD, 0x42,                   /* mov eax, [0xFE100010]; int 42h */
+        0xF4,
+    };
+    const uint32_t quiet_was = 0x5A5A0000u;
+    memcpy(direct_page + 0x10, &quiet_was, 4);
+    put(CODE + 0xF00, direct, sizeof(direct));
+    nreports = 0;
+    direct_reads = direct_writes = 0;
+    run_at(CODE + 0xF00);
+    printf("  direct page: %u reports (%08x, %08x), handler reads %u, writes %u\n", nreports,
+           nreports > 0 ? reports[0] : 0, nreports > 1 ? reports[1] : 0, direct_reads, direct_writes);
+    check(nreports == 2 && reports[0] == 0x11223344u && reports[1] == quiet_was && direct_reads == 0 &&
+          direct_writes == 1, "device page read in the guest: writes reach the device, a quiet register's don't");
 
     /* x87 mid-calculation through a savestate: fld1, then export and import
      * (int 45h), then fld1; faddp; fistp. TOP lost would make it garbage. */

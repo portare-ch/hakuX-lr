@@ -105,6 +105,7 @@ void nc_frame_set_if(NcFrame *f, bool on);
  * is the instruction, size its length). Returns false if it can't handle it. */
 typedef bool (*NcSysOpFn)(void *opaque, NcFrame *f, enum NcSysOp op, unsigned size);
 
+struct NcMmioDirect;
 typedef struct NcCpuConfig {
     uint8_t *membase;   /* host address of guest VA 0 */
     NcSysOpFn sysop;
@@ -130,6 +131,10 @@ typedef struct NcCpuConfig {
     /* The hooked addresses, all of them (hook_query answers one at a time,
      * which a backend that never translates can't use). */
     unsigned (*hook_list)(void *opaque, uint32_t *eips, unsigned max);
+    /* Device register pages the guest reads straight from host memory
+     * (NcMmioDirect, mmio.h): up to max of them, the count returned
+     * (optional). */
+    unsigned (*mmio_direct)(struct NcMmioDirect *out, unsigned max);
     /* The title's XBE file, whole (malloc'd, the caller's to free; NULL:
      * none): an AMD host looks for its RSQRT instructions (optional). */
     uint8_t *(*title_image)(void *opaque, uint32_t *size);

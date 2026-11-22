@@ -76,6 +76,7 @@
 #define NV_PFB_CFG0         0x100200u
 #define NV_PFB_CSTATUS      0x10020Cu
 #define NV_PFB_WBC          0x100410u
+#define NV_PFB_WBC_FLUSH    0x00010000u
 #define NV_PRAMDAC_NVPLL_COEFF 0x680500u
 #define NV_PCRTC_INTR_0     0x600100u
 #define NV_PCRTC_INTR_EN_0  0x600140u
@@ -442,7 +443,8 @@ static uint64_t nv2a_read_reg(uint32_t off, unsigned size)
             v = ld(word - NV_USER_DMA_PUT + NV_PFIFO_CACHE1_DMA_PUT);
             break;
         case NV_PFB_WBC:
-            v = 0; /* no write-combine flush pending (Riddick spins on it) */
+            /* no write-combine flush pending (Riddick spins on it) */
+            v = ld(word) & ~NV_PFB_WBC_FLUSH;
             break;
         default:
             goto plain;
@@ -654,6 +656,13 @@ static void nv2a_write(void *opaque, uint32_t off, uint64_t value, unsigned size
         break;
     }
     memcpy(g_regs + off, &value, size);
+    if (off < NV_PFB_WBC + 4 && off + size > NV_PFB_WBC) {
+        /* The write-combine flush D3D asks for before each kick, and then
+         * polls: never pending here, so the bit isn't kept, whatever the
+         * width of the write that reached it (the register file is what the
+         * guest reads: nc_mmio_direct below). */
+        __atomic_fetch_and(reg(NV_PFB_WBC), ~NV_PFB_WBC_FLUSH, __ATOMIC_RELEASE);
+    }
 }
 
 void nc_dev_nv2a_display_vsync(uint64_t ns)
@@ -858,6 +867,14 @@ void nc_dev_nv2a_init(uint32_t ram)
     g_census.on = !strcmp(v, "1") || (e && !strcmp(e, "1"));
     const NcMmioDev dev = {"nv2a", NV2A_BASE, NV2A_SIZE, nv2a_read, nv2a_write, NULL};
     nc_mmio_register(&dev);
+    /* PFB's page: every register on it reads as stored. D3D's kick writes
+     * WBC's flush bit and reads the register until it is clear, then writes
+     * the channel's PUT: thousands of times a second in a game, and under
+     * KVM each access an exit. The reads go straight to this page, and the
+     * flush write needs nothing done. */
+    const NcMmioDirect pfb = {NV2A_BASE + (NV_PFB_WBC & ~0xFFFu), g_regs + (NV_PFB_WBC & ~0xFFFu),
+                              NV2A_BASE + NV_PFB_WBC};
+    nc_mmio_direct(&pfb);
     g_vbt.quit = 0;
     g_vbt.started = pthread_create(&g_vbt.th, NULL, vblank_thread, NULL) == 0;
 }
@@ -1101,6 +1118,9 @@ bool nc_nv2a_state_load(NcRd *r, unsigned v)
     if (!pages_get(r, g_regs, NV2A_SIZE, st.npages)) {
         return false;
     }
+    /* (a state from before the flush bit stopped being kept: the guest
+     * reads the register file, and would wait on the bit for good) */
+    nc_wr32(g_regs + NV_PFB_WBC, nc_rd32(g_regs + NV_PFB_WBC) & ~NV_PFB_WBC_FLUSH);
     __atomic_store_n(&g_vblanks, st.vblanks, __ATOMIC_RELAXED);
     /* the state's video mode (50 Hz: a 20 ms frame), at this run's rate (the
      * mods on now: a state saved with or without them) */
