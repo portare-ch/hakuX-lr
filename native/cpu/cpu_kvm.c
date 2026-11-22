@@ -1858,8 +1858,14 @@ void nc_cpu_run(NcCpu *cpu, const NcCpuContext *c)
             complete(cpu);
             break;
         case KVM_EXIT_MMIO:
+            /* Not completed here with a KVM_RUN of its own (complete): the
+             * loop's next KVM_RUN finishes the access before it runs guest
+             * code or opens the interrupt window, and nothing between here
+             * and there loads another frame (that happens in a stub's HLT
+             * exit or after a window exit). An access KVM splits comes back
+             * to this case for its next part. A device register costs one
+             * entry, not two. */
             mmio(cpu);
-            complete(cpu);
             break;
         case KVM_EXIT_IRQ_WINDOW_OPEN:
             if (__atomic_load_n(&cpu->irq, __ATOMIC_ACQUIRE) && !cpu->stepping && cpu->run->ready_for_interrupt_injection) {
