@@ -1,8 +1,9 @@
 # Changelog
 
-## Unreleased
+## linux-v0.37.1 (Linux ARM64, Linux x86-64, and Android ARM64)
 
 - **Linux setup script: RetroArch's AppImage, no Flatpak.** On SteamOS, and on AMD64 systems without a package manager, the setup script now installs RetroArch's AppImage into its own folder. Flatpak support is removed, and `--retroarch flatpak` is refused. The AppImage runs as an ordinary program of the host: it uses the host's graphics driver, `/dev/kvm` and controllers directly, and Steam sees its process and window as the game it started. Run the installer again to switch an existing Steam Deck installation; it says how to remove the Flatpak if nothing else needs it. Tested on CachyOS (install, and Halo at 30 fps through the launcher); not yet on a Steam Deck.
+- **Steam Deck automatic core updates.** The launcher checks for stable core releases in the background at most once every 24 hours. It verifies the download and activates it on the next launch. Pinned releases and local builds stay on the selected version. Run the installer once to get the updater. Use `--no-auto-update` to opt out. [#297](https://github.com/portare-ch/hakuX-lr/pull/297)
 
 ## linux-v0.37.0 (Linux ARM64, Linux x86-64, and Android ARM64)
 
