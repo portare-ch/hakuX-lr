@@ -692,7 +692,9 @@ static uint64_t g_kcalls, g_sysops, g_sysop_kind[32];
 static uint64_t g_clock_ticks; /* the clock's interrupts for the time alone (clock_thread) */
 NcSchedStats g_nc_sched;
 
-static void dump_int_samples(NcKernel *k);
+#ifdef __ANDROID__
+static void dump_int_samples(NcKernel *k);     /* the dump on demand's (debug.hakux.ncdump) */
+#endif
 
 /* debug: NC_PEEK="va:len,*va:len" logs guest memory with the stats line:
  * hakuX-lr-native-peek, up to 256 bytes each (hex); *va reads the pointer at
@@ -1658,6 +1660,7 @@ static void int_sample(uint32_t eip)
     }
 }
 
+#ifdef __ANDROID__
 static void dump_int_samples(NcKernel *k)
 {
     uint32_t total = 0;
@@ -1686,6 +1689,7 @@ static void dump_int_samples(NcKernel *k)
     }
     memset(g_int_eips, 0, sizeof(g_int_eips));
 }
+#endif
 
 static bool sysop(void *opaque, NcFrame *f, enum NcSysOp op, unsigned size);
 
