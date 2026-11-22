@@ -1,8 +1,10 @@
 # Changelog
 
-## Unreleased
+## linux-v0.37.2 (Linux ARM64, Linux x86-64, and Android ARM64)
 
-- **Linux x86-64: fewer exits per draw.** Under KVM, each access to a graphics register left the guest, and a game's push-buffer kick made four of them, thousands of times a second. The register page D3D polls is now read inside the guest and its flush write stays in the kernel, leaving one exit per kick. In Halo's opening scene on a Ryzen 7 9800X3D this cut the Xbox CPU thread's emulation overhead from 24% to 17% of a core. A Steam Deck log showed that thread saturated in the same scene (10 to 22 fps); the gain there is not yet measured. `NC_KVM_DIRECT=0` turns it off.
+- **Linux x86-64 KVM performance.** D3D push-buffer kicks now make one exit to userspace instead of four when direct MMIO is available. In Halo on a Ryzen 7 9800X3D, device exits fell from about 36,000 to 12,600 per second, and vCPU time outside the guest dropped from 24.1–24.3% to 16.8% of one core. The scene held 30 fps before and after. Performance on Steam Deck still needs a retest. `NC_KVM_DIRECT=0` disables the optimization. [#300](https://github.com/portare-ch/hakuX-lr/pull/300)
+- **Fewer KVM system calls.** Synchronize general registers through the shared KVM run structure where supported and complete MMIO accesses on the next guest entry. [#301](https://github.com/portare-ch/hakuX-lr/pull/301) · [#302](https://github.com/portare-ch/hakuX-lr/pull/302)
+- **Hitch diagnostics.** Label host CPU samples accurately in KVM logs. [#299](https://github.com/portare-ch/hakuX-lr/pull/299)
 
 ## linux-v0.37.1 (Linux ARM64, Linux x86-64, and Android ARM64)
 
