@@ -82,6 +82,27 @@ from 24% to 17% of a core.
 `kvm-smoke` checks that a read doesn't reach the device, a write does and a
 quiet register's write doesn't.
 
+### Lazy host views of guest memory
+
+The core protects pages of guest memory to notice the title's stores and to
+keep it off memory an image is newer than. Each change was an `mprotect` of
+the host's mappings of the page (its "views"), which FEX's guest runs
+through. Under KVM the guest runs on page tables of the backend's own, and
+those calls only cost: about 10 us each, with a TLB shootdown for every
+thread, and a page a render target shares with data the title rewrites is
+opened and closed thousands of times a second (28,000 calls a second in
+Halo's opening scene).
+
+With lazy views (`nc_vm_views_lazy`, `native/core/vm.h`), a view that gains
+access while the guest CPU's own fault is handled changes the guest's page
+tables only. The host's mapping keeps the protection it has, so it may allow
+less than the guest has, never more, and it catches up when host code needs
+it: on a host fault there, or before a system call reads or writes guest
+memory. Taking the access away again then needs no call either.
+
+In that scene on a Ryzen 7 9800X3D, the guest CPU thread's time outside the
+guest fell from 16% to 10.5% of a core. `NC_KVM_LAZY_VIEWS=0` turns it off.
+
 ### Experimental Intel RSQRT results on AMD
 
 AMD CPUs return different low bits from `RSQRTSS` and `RSQRTPS` than the

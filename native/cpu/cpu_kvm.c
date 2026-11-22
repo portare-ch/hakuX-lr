@@ -733,6 +733,10 @@ NcCpu *nc_cpu_create(const NcCpuConfig *cfg, uint32_t fs_base)
     g_cpu = cpu;
     g_prev_hook = nc_vm_prot_hook;
     nc_vm_prot_hook = prot_hook;
+    {   /* Set NC_KVM_LAZY_VIEWS=0 to apply host permission increases eagerly. */
+        const char *off = getenv("NC_KVM_LAZY_VIEWS");
+        nc_vm_views_lazy = !(off && !strcmp(off, "0"));
+    }
     nc_log("hakuX-lr-native-kvm", "guest CPU: KVM, CPL 3 with IOPL 3, TSC %u kHz on a %u kHz host", GUEST_KHZ,
            cpu->host_khz);
     return cpu;

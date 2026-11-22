@@ -15,9 +15,13 @@
 #include <unistd.h>
 
 static uint8_t *g_na;   /* per physical page: no guest access (nc_vm_noaccess), made on first use */
-/* Every change of a guest view's host protection, with vm->vprot and
- * nc_vm_prot_hook: the guest's thread opening a view (dirty.c) and the
- * decode thread closing it again must leave the table as the host has it. */
+bool nc_vm_views_lazy;
+__thread bool nc_vm_guest_opening;
+/* Per guest page: zero if host permissions match vm->vprot, otherwise
+ * HLAG | the current host permissions. Allocated on first use. */
+#define HLAG 0x80u
+static uint8_t *g_hlag;
+/* Serializes mapping changes, permission tracking, and hook calls. */
 static pthread_mutex_t g_prot_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* Large-PDE RAM aliases stay outside rmap and share page protections.
@@ -157,6 +161,9 @@ void nc_vm_destroy(NcVm *vm)
     free(vm->pin);
     free(g_na);
     g_na = NULL;
+    nc_big_free(g_hlag, VPROT_BYTES);
+    g_hlag = NULL;
+    nc_vm_views_lazy = false;
     g_nalias = 0;
     memset(vm, 0, sizeof(*vm));
     vm->ram_fd = -1;
@@ -177,15 +184,64 @@ static void prot_set(NcVm *vm, uint32_t va, uint32_t len, int prot)
     }
 }
 
-/* A guest view's protection: mprotect, the table and the hook together.
- * Under g_prot_lock. */
+/* Updates guest permissions and the host mapping as needed.
+ * The caller holds g_prot_lock. */
 static int view_prot(NcVm *vm, uint32_t va, uint32_t len, int prot)
 {
+    const uint32_t p0 = va / NC_PAGE, p1 = p0 + len / NC_PAGE;
+    if (nc_vm_views_lazy && nc_vm_guest_opening && !g_hlag) {
+        g_hlag = nc_big_alloc(VPROT_BYTES);
+    }
+    if (g_hlag) {
+        /* Check whether host permissions match or are a subset of prot. */
+        bool has = true, within = true;
+        for (uint32_t p = p0; p < p1; p++) {
+            const uint8_t host = g_hlag[p] ? g_hlag[p] & ~HLAG : vm->vprot[p];
+            has = has && host == (uint8_t)prot;
+            within = within && !(host & ~(uint8_t)prot);
+        }
+        if (has) {
+            memset(g_hlag + p0, 0, p1 - p0);
+            prot_set(vm, va, len, prot);
+            return 0;
+        }
+        if (within && nc_vm_views_lazy && nc_vm_guest_opening) {
+            /* Keep the host permissions until host code needs access. */
+            for (uint32_t p = p0; p < p1; p++) {
+                if (!g_hlag[p]) {
+                    g_hlag[p] = HLAG | vm->vprot[p];
+                }
+            }
+            prot_set(vm, va, len, prot);
+            return 0;
+        }
+    }
     const int r = mprotect(vm->base + va, len, prot);
     if (r == 0) {
+        if (g_hlag) {
+            memset(g_hlag + p0, 0, p1 - p0);
+        }
         prot_set(vm, va, len, prot);
     }
     return r;
+}
+
+bool nc_vm_view_sync(NcVm *vm, uint32_t va)
+{
+    const uint32_t p = va / NC_PAGE;
+    if (!g_hlag || !__atomic_load_n(&g_hlag[p], __ATOMIC_RELAXED)) {
+        return false;
+    }
+    bool synced = false;
+    pthread_mutex_lock(&g_prot_lock);
+    if (g_hlag && vm->vprot && g_hlag[p]) {
+        synced = mprotect(vm->base + (va & ~(NC_PAGE - 1)), NC_PAGE, vm->vprot[p]) == 0;
+        if (synced) {
+            g_hlag[p] = 0;
+        }
+    }
+    pthread_mutex_unlock(&g_prot_lock);
+    return synced;
 }
 
 /* nc_vm_prot_hook told about [va, va + len) as vm->vprot has it, in runs of
@@ -285,6 +341,9 @@ static bool map_range(NcVm *vm, uint32_t va, uint32_t pa, uint32_t len, bool vie
             mprotect(vm->base + va + off, NC_PAGE, prot);
         }
         vm->vprot[(va + off) / NC_PAGE] = (uint8_t)prot;
+        if (g_hlag) {
+            g_hlag[(va + off) / NC_PAGE] = 0;
+        }
     }
     /* the hook hears each page once, as it ends up: frame and protection */
     notify_runs(vm, va, len);
@@ -456,6 +515,9 @@ bool nc_vm_unmap(NcVm *vm, uint32_t va, uint32_t len)
         vm->pte[(va + off) / NC_PAGE] = 0;
     }
     alias_drop(va, len);
+    if (g_hlag) {
+        memset(g_hlag + va / NC_PAGE, 0, len / NC_PAGE);
+    }
     prot_set(vm, va, len, PROT_NONE);
     pthread_mutex_unlock(&g_prot_lock);
     return true;
