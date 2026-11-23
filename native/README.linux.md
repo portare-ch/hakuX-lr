@@ -82,6 +82,18 @@ from 24% to 17% of a core.
 `kvm-smoke` checks that a read doesn't reach the device, a write does and a
 quiet register's write doesn't.
 
+The USB controller's register page is the second. A title's USB driver takes
+an interrupt about every other millisecond and reads the interrupt status
+and enable registers in it: about 1,000 reads a second, each an exit before.
+The controller keeps the page current under its lock, before the lock is
+given up and before the interrupt line changes, so the handler reads what
+raised the interrupt. One register can't be kept exactly: HcFmRemaining, the
+time left in the 1 ms frame, holds its value at the page's last update. None
+of eight titles from 2001 to 2005 read it (Halo, Dead or Alive 3, Panzer
+Dragoon Orta, Project Gotham Racing 2, Crimson Skies, Burnout 3, Ninja
+Gaiden, Forza Motorsport); a Communicator's isochronous transfers were not
+part of that check. The writes (four per interrupt) exit as before.
+
 ### Lazy host views of guest memory
 
 The core protects pages of guest memory to notice the title's stores and to

@@ -29,6 +29,14 @@ typedef struct NcMmioDev {
 static void nc_mmio_register(const NcMmioDev *dev)
 {
 }
+typedef struct NcMmioDirect {
+    uint32_t addr;
+    uint8_t *host;
+    uint32_t quiet;
+} NcMmioDirect;
+static void nc_mmio_direct(const NcMmioDirect *page)
+{
+}
 static int g_irq_level;
 static void nc_irq_set(unsigned line, bool level)
 {
@@ -111,9 +119,23 @@ static void wr(uint32_t pa, uint32_t v)
 {
     nc_wr32(g_ram + pa, v);
 }
+/* A register, and the page a KVM guest reads it from (nc_mmio_direct): the
+ * same, whatever was done since (HcFmRemaining runs with the clock). */
 static uint32_t reg(uint32_t off)
 {
-    return (uint32_t)ohci_read(o, off, 4);
+    const uint32_t v = (uint32_t)ohci_read(o, off, 4);
+    if (off != 0x38) {
+        CHECK(nc_rd32(g_page + off) == v);
+    }
+    return v;
+}
+static void page_check(void)
+{
+    for (uint32_t off = 0; off < OHCI_SIZE; off += 4) {
+        if (off != 0x38) {
+            CHECK(nc_rd32(g_page + off) == (uint32_t)ohci_read(o, off, 4));
+        }
+    }
 }
 static void set_reg(uint32_t off, uint32_t v)
 {
@@ -417,6 +439,7 @@ int main(void)
     soft_reset(o);
     o->ctl = 0;
     roothub_reset(o);
+    page_update(o);             /* as nc_dev_ohci_init */
 
     /* Controller bring-up, as XAPI does it. */
     CHECK(reg(0x00) == 0x10);
@@ -509,6 +532,7 @@ int main(void)
     nc_dev_ohci_set_pads(3);     /* the Android front end: players 1 and 2 */
     nc_dev_ohci_init(&g_vm);
     nc_dev_ohci_stop();          /* the frames run here */
+    page_check();
     set_reg(0x08, CS_HCR);
     set_reg(0x18, HCCA);
     set_reg(0x10, INT_MIE | INT_WDH | INT_RHSC);
@@ -573,6 +597,7 @@ int main(void)
     nc_dev_ohci_free();
     nc_dev_ohci_init(&g_vm);
     nc_dev_ohci_stop();
+    page_check();
     CHECK(o->dev[2] && o->dev[3] && o->dev[0] && !o->dev[1]);
     nc_dev_ohci_free();
 
@@ -585,6 +610,7 @@ int main(void)
     nc_xblc_set_gate("off");
     nc_dev_ohci_init(&g_vm);
     nc_dev_ohci_stop();
+    page_check();
     set_reg(0x08, CS_HCR);
     set_reg(0x18, HCCA);
     set_reg(0x10, INT_MIE | INT_WDH | INT_RHSC);

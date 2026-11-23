@@ -13,9 +13,13 @@
  * - Check hook dispatch and execution of the following guest instruction.
  * - Verify split 16-byte MMIO stores, x87 state round trips and restoration of the kick
  * signal handler.
+ * - Check the real OHCI register page under KVM: reads without exits, trapped writes,
+ *   and an interrupt's status visible to guest code before it acknowledges the IRQ.
  */
 #include "native/core/core.h"
 #include "native/core/mmio.h"
+#include "native/core/irq.h"
+#include "native/dev/usb.h"
 #include "native/hle/hle_native.h"
 #include "native/cpu/kvm_rsqrt.h"
 
@@ -33,6 +37,10 @@
 #define LATE  0x30000u /* unmapped until the guest touches it */
 #define IDT   0x8001F000u
 #define MMIO  0xFE000000u
+#define OHCI  0xFED00000u
+#define OHCI_IRQ 1
+#define OHCI_RHSC (1u << 6)
+#define OHCI_MIE (1u << 31)
 #define HOOK  (CODE + 0x805)
 #define WP    0x40000u
 #define WPFLAG (DATA + 0x204)
@@ -291,6 +299,12 @@ int main(void)
     nc_mmio_register(&ddev);
     const NcMmioDirect dpage = {MMIO_DIRECT, direct_page, MMIO_DIRECT + 0x10};
     nc_mmio_direct(&dpage);
+    /* Register OHCI before creating the vCPU so KVM installs its read-only slot.
+     * Stop its timer thread: the test controls state through guest writes and hotplug. */
+    nc_dev_ohci_set_pads(1);
+    nc_dev_ohci_set_voice(0);
+    nc_dev_ohci_init(&core.vm);
+    nc_dev_ohci_stop();
     NcCpuConfig cfg = {.membase = core.vm.base, .sysop = system_op, .idt_base = IDT, .idt_limit = 0x7FF};
     nc_core_cpu_backend(&core, &cfg);
     core_fault = cfg.fault;
@@ -583,6 +597,74 @@ int main(void)
     check(wp_faults == 2 && wp_v0 == wp_v1 && nc_vm_rd32(&core.vm, WP) == wp_v0 + 1,
           "a page protected under the running guest: no store after it");
     check(saw(NC_SYSOP_INT, 2, CODE + 0x1000 + sizeof(wp) - 3), "INT 2: the title's, a system op");
+
+    /* Real OHCI, not the synthetic direct device above. The guest must see
+     * the controller's registers without invoking an MMIO read handler.
+     * HcInterruptEnable writes must still reach the emulated controller. */
+    const uint8_t ohci_setup[] = {
+        0xA1, 0x0C, 0x00, 0xD0, 0xFE, 0xCD, 0x42, /* read HcInterruptStatus */
+        0xA1, 0x10, 0x00, 0xD0, 0xFE, 0xCD, 0x42, /* read HcInterruptEnable */
+        0xC7, 0x05, 0x10, 0x00, 0xD0, 0xFE, 0x40, 0x00, 0x00, 0x80, /* enable RHSC + MIE */
+        0xA1, 0x10, 0x00, 0xD0, 0xFE, 0xCD, 0x42, /* read the changed enable mask */
+        0xF4,
+    };
+    put(CODE + 0xB00, ohci_setup, sizeof(ohci_setup));
+    nreports = 0;
+    uint64_t ohci_mmio_before = nc_mmio_total();
+    run_at(CODE + 0xB00);
+    check(nreports == 3 && reports[0] == 0 && reports[1] == OHCI_MIE &&
+          reports[2] == (OHCI_MIE | OHCI_RHSC),
+          "OHCI: guest reads the initial and written interrupt registers");
+    check(nc_mmio_total() - ohci_mmio_before == 1,
+          "OHCI: only the register write exits; three guest reads stay in KVM");
+
+    /* Unplug player 1 while the controller's root-hub interrupt is enabled.
+     * OHCI publishes the register page before raising IRQ 1. Deliver that
+     * interrupt to the vCPU, read status in guest code, and acknowledge it. */
+    nc_irq_attach(cpu);
+    nc_irq_enable(OHCI_IRQ, true);
+    nc_pad_plug(0, false);
+    check((nc_irq_lines() & (1u << OHCI_IRQ)) != 0, "OHCI: hotplug asserts IRQ 1");
+    const uint8_t ohci_irq[] = {
+        0xA1, 0x0C, 0x00, 0xD0, 0xFE, 0xCD, 0x42, /* status: RHSC */
+        0xA1, 0x10, 0x00, 0xD0, 0xFE, 0xCD, 0x42, /* enable: RHSC + MIE */
+        0xA1, 0x5C, 0x00, 0xD0, 0xFE, 0xCD, 0x42, /* player 1 root port: unplugged */
+        0xC7, 0x05, 0x0C, 0x00, 0xD0, 0xFE, 0x40, 0x00, 0x00, 0x00, /* acknowledge RHSC */
+        0xA1, 0x0C, 0x00, 0xD0, 0xFE, 0xCD, 0x42, /* status: cleared */
+        0xF4,
+    };
+    put(CODE + 0xB80, ohci_irq, sizeof(ohci_irq));
+    nreports = 0;
+    irqs = 0;
+    ohci_mmio_before = nc_mmio_total();
+    run_at(CODE + 0xB80);
+    check(irqs == 1 && nreports == 4 && reports[0] == OHCI_RHSC &&
+          reports[1] == (OHCI_MIE | OHCI_RHSC) &&
+          (reports[2] & (1u << 16)) && !(reports[2] & 1u) && reports[3] == 0 &&
+          !(nc_irq_lines() & (1u << OHCI_IRQ)),
+          "OHCI: KVM delivers IRQ with current status; guest acknowledgement lowers it");
+    check(nc_mmio_total() - ohci_mmio_before == 1,
+          "OHCI: interrupt status and port reads stay in KVM; acknowledge exits");
+
+    /* Replug with delivery masked; guest code must still see the new port and
+     * interrupt status directly, without another userspace MMIO read. */
+    nc_irq_enable(OHCI_IRQ, false);
+    nc_pad_plug(0, true);
+    const uint8_t ohci_hotplug[] = {
+        0xA1, 0x5C, 0x00, 0xD0, 0xFE, 0xCD, 0x42, /* player 1 root port */
+        0xA1, 0x0C, 0x00, 0xD0, 0xFE, 0xCD, 0x42, /* RHSC */
+        0xF4,
+    };
+    put(CODE + 0xC00, ohci_hotplug, sizeof(ohci_hotplug));
+    nreports = 0;
+    ohci_mmio_before = nc_mmio_total();
+    run_at(CODE + 0xC00);
+    check(nreports == 2 && (reports[0] & 1u) && (reports[0] & (1u << 16)) &&
+          reports[1] == OHCI_RHSC,
+          "OHCI: a replug updates the guest-visible port and interrupt status");
+    check(nc_mmio_total() == ohci_mmio_before, "OHCI: guest hotplug reads cause no MMIO exits");
+    nc_irq_reset();
+    nc_dev_ohci_free();
 
     nc_cpu_destroy(cpu);
     check(*(uint8_t *)nc_vm_host(&core.vm, CODE + 0xA0E) == 0xF3 &&
