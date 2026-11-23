@@ -2,7 +2,10 @@
 
 ## Unreleased
 
-- **Xbox Live game updates.** A game's updater ("Get Update" in Halo 2) no longer crashes on a console without the original dashboard. It draws with the dashboard's system fonts on C:, which a hakuX-lr hard disk did not have. The core now installs an open font (Roboto Mono, SIL Open Font License) as `C:\\Xbox.xtf` and `C:\\XBox Book.xtf` when the disk has neither, and the updater accepts it. Original fonts already on C: are left alone and still used.
+## linux-v0.37.5 (Linux ARM64, Linux x86-64, and Android ARM64)
+
+- **Xbox Live game updates.** A game's updater ("Get Update" in Halo 2) no longer crashes on a console without the original dashboard. It draws with the dashboard's system fonts on C:, which a hakuX-lr hard disk did not have. The core now installs an open font (Roboto Mono, SIL Open Font License) as `C:\\Xbox.xtf` and `C:\\XBox Book.xtf` when the disk has neither, and the updater accepts it. Original fonts already on C: are left alone and still used. [#309](https://github.com/portare-ch/hakuX-lr/pull/309)
+
 ## linux-v0.37.4 (Linux ARM64, Linux x86-64, and Android ARM64)
 
 - **Linux x86-64 KVM performance.** Read the USB controller's registers in the guest. A title's USB interrupt handler no longer exits to the core for its two register reads, about 1,000 exits a second in Halo and seven other titles checked. vCPU time outside the guest did not change measurably on a Ryzen 7 9800X3D (10.6% of one core against 10.7–10.8%). `NC_KVM_DIRECT=0` disables it together with the NV2A page. [#307](https://github.com/portare-ch/hakuX-lr/pull/307)
