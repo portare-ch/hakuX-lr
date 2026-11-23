@@ -12,6 +12,7 @@
 #include <strings.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <zlib.h>
 
 #define TITLE "hakux-dash"
 
@@ -188,6 +189,87 @@ static bool mkdirs(const char *path)
     return mkdir(p, 0775) == 0 || errno == EEXIST;
 }
 
+/* The open system font under one of its two names (book: "Xbox Book",
+ * else "xbox"): inflated once, then the 32-byte name at offset 8. NULL if
+ * the bundled font can't be inflated. */
+const uint8_t *nc_dash_font(bool book, size_t *size)
+{
+    static uint8_t *g_font[2];
+    static size_t g_size;
+    if (!g_font[0]) {
+        size_t gz_size;
+        const uint8_t *gz = nc_dash_font_gz(&gz_size);
+        const size_t cap = 4u << 20;
+        uint8_t *out = malloc(cap), *copy = NULL;
+        z_stream z = {0};
+        bool ok = out && inflateInit2(&z, 16 + MAX_WBITS) == Z_OK;
+        if (ok) {
+            z.next_in = (Bytef *)gz;
+            z.avail_in = (uInt)gz_size;
+            z.next_out = out;
+            z.avail_out = (uInt)cap;
+            ok = inflate(&z, Z_FINISH) == Z_STREAM_END && z.total_out > 40 && !memcmp(out, "XTF0", 4);
+            g_size = z.total_out;
+            inflateEnd(&z);
+        }
+        if (ok && (copy = malloc(g_size))) {
+            memcpy(copy, out, g_size);
+            memset(copy + 8, 0, 32);
+            memcpy(copy + 8, "Xbox Book", 9);
+            memset(out + 8, 0, 32);
+            memcpy(out + 8, "xbox", 4);
+            g_font[0] = out;
+            g_font[1] = copy;
+        } else {
+            free(out);
+            nc_log("hakuX-lr-native", "dash: the bundled system font can't be unpacked");
+            return NULL;
+        }
+    }
+    *size = g_size;
+    return g_font[book ? 1 : 0];
+}
+
+bool nc_dash_font_is_ours(const char *path, bool book)
+{
+    size_t size;
+    const uint8_t *font = nc_dash_font(book, &size);
+    return font && same_as(path, font, size);
+}
+
+/* The console's two system fonts, where the hard disk has neither in C:\ nor
+ * in C:\fonts (the original dashboards' places): the open font under both
+ * names, its licence beside it. Fonts that are there stay, whoever's. */
+static void place_fonts(const char *c_drive)
+{
+    static const char *const k_name[2] = { "Xbox.xtf", "XBox Book.xtf" };
+    char fonts[600], host[620];
+    const bool have_dir = find(c_drive, "fonts", true, fonts, sizeof(fonts));
+    bool wrote = false;
+    for (int book = 0; book < 2; book++) {
+        if (find(c_drive, k_name[book], false, host, sizeof(host)) ||
+            (have_dir && find(fonts, k_name[book], false, host, sizeof(host)))) {
+            continue;
+        }
+        size_t size;
+        const uint8_t *font = nc_dash_font(book, &size);
+        if (!font) {
+            return;
+        }
+        snprintf(host, sizeof(host), "%s/%s", c_drive, k_name[book]);
+        if (write_xbe(host, font, size, 0)) {
+            nc_log("hakuX-lr-native", "dash: installed the open system font as %s", host);
+            wrote = true;
+        }
+    }
+    if (wrote && !find(c_drive, "RobotoMono-LICENSE.txt", false, host, sizeof(host))) {
+        size_t size;
+        const uint8_t *text = nc_dash_font_license(&size);
+        snprintf(host, sizeof(host), "%s/RobotoMono-LICENSE.txt", c_drive);
+        write_xbe(host, text, size, 0);
+    }
+}
+
 bool nc_dash_install(const char *hdd)
 {
     /* Let tests keep their own dashboard XBEs. */
@@ -209,5 +291,6 @@ bool nc_dash_install(const char *hdd)
         bool online_ok = true;
         place(online, "xonlinedash.xbe", xbe, size, &online_ok);
     }
+    place_fonts(c_drive);
     return ok;
 }

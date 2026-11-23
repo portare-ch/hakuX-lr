@@ -119,6 +119,19 @@ int main(void)
     path(p, sizeof(p), "xboxdash.xbe");
     CHECK(nc_dash_is_ours(p), "it reads as hakuX-lr's (its certificate's title)");
 
+    /* The open system fonts: both names on a C: with none, the same but for the name. */
+    size_t fn, bn;
+    const uint8_t *font = nc_dash_font(false, &fn), *book = nc_dash_font(true, &bn);
+    char fp[512], bp[512];
+    path(fp, sizeof(fp), "Xbox.xtf");
+    path(bp, sizeof(bp), "XBox Book.xtf");
+    CHECK(font && book && fn == 1084952 && bn == fn && !memcmp(font, "XTF0", 4) && !strcmp((const char *)font + 8, "xbox") &&
+              !strcmp((const char *)book + 8, "Xbox Book") && !memcmp(font + 40, book + 40, fn - 40),
+          "the core embeds the open system font (%zu bytes) under its two names", fn);
+    CHECK(size_of("Xbox.xtf") == (long)fn && size_of("XBox Book.xtf") == (long)fn && nc_dash_font_is_ours(fp, false) &&
+              nc_dash_font_is_ours(bp, true) && !nc_dash_font_is_ours(fp, true) && size_of("RobotoMono-LICENSE.txt") > 1000,
+          "an empty C: gets Xbox.xtf and XBox Book.xtf with the font's licence");
+
     const ino_t dash = inode_of("xboxdash.xbe"), online = inode_of("xodash/xonlinedash.xbe");
     nc_dash_install(g_hdd);
     CHECK(inode_of("xboxdash.xbe") == dash && inode_of("xodash/xonlinedash.xbe") == online,
@@ -146,8 +159,8 @@ int main(void)
     put("fonts/Xbox.xtf", (const uint8_t *)"font", 4);
     nc_dash_install(g_hdd);
     CHECK(embedded("XBOXDASH.XBE") && size_of("xboxdash.xbe") < 0 && embedded("xodash/xonlinedash.xbe") &&
-              size_of("fonts/Xbox.xtf") == 4,
-          "someone else's XBOXDASH.XBE: replaced under its name, its other files kept");
+              size_of("fonts/Xbox.xtf") == 4 && size_of("Xbox.xtf") < 0 && size_of("XBox Book.xtf") > 4,
+          "someone else's XBOXDASH.XBE: replaced under its name, its other files kept, a font it has not added again");
 
     /* Reuse an existing XODash folder and replace another XBE in it. */
     fresh();
@@ -194,10 +207,11 @@ int main(void)
             waitpid(kids[i], &status, 0);
             whole &= WIFEXITED(status) && WEXITSTATUS(status) == 0;
         }
-        whole &= embedded("xboxdash.xbe") && embedded("xodash/xonlinedash.xbe") && entries("") == 2 &&
+        whole &= embedded("xboxdash.xbe") && embedded("xodash/xonlinedash.xbe") && entries("") == 5 &&
+                 size_of("Xbox.xtf") == (long)fn && size_of("XBox Book.xtf") == (long)fn &&
                  entries("xodash") == 1;
     }
-    CHECK(whole, "eight boots installing at once: one whole copy, nothing else on C:");
+    CHECK(whole, "eight boots installing at once: one whole copy with the fonts and their licence, nothing else on C:");
 
     free(old);
     free(theirs);

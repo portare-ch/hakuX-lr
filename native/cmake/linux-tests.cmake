@@ -113,6 +113,7 @@ set_tests_properties(contig-run-test PROPERTIES TIMEOUT 10)
 add_executable(dash-install-test "${NC_REPO}/tests/native/linux/dash_install.c" "${NC_REPO}/native/core/dash.c"
   "${NC_REPO}/native/core/dash_blob.c" "${NC_REPO}/native/core/log.c")
 target_include_directories(dash-install-test PRIVATE "${NC_REPO}")
+target_link_libraries(dash-install-test PRIVATE z)
 add_test(NAME dash-install-test COMMAND dash-install-test)
 set_tests_properties(dash-install-test PROPERTIES TIMEOUT 10)
 

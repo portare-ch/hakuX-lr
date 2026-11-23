@@ -3,6 +3,7 @@
  */
 #include "native/core/core.h"
 #include "native/core/dash.h"
+#include "native/core/sysfont.h"
 #include "native/core/hostctx.h"
 #include "native/dev/dev.h"
 #include "native/dev/usb.h"
@@ -242,6 +243,10 @@ bool nc_core_boot(NcCore *c, int disc_fd)
         nc_mods_xbe_patches(disc_fd >= 0 ? &c->disc : NULL, xbe_path);
     } else {
         nc_mods_boot_title(disc_fd >= 0 ? &c->disc : NULL, xbe_path);
+    }
+    /* an Xbox Live updater on the disc and the open system fonts (sysfont.h) */
+    if (!g_loadstate[0] && disc_fd >= 0) {
+        nc_sysfont_accept(&c->disc, xbe_path, nc_io_hdd_root());
     }
     if (!nc_xbe_load(&c->vm, &c->disc, xbe_path, &c->kernel, &c->xbe)) {
         char why[256], host[512];
