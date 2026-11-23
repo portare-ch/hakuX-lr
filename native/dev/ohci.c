@@ -194,11 +194,75 @@ static void wr_words(Ohci *o, uint32_t pa, const uint32_t *w, unsigned n)
     }
 }
 
+/* The registers as the guest reads them (nc_mmio_direct): under KVM a read is
+ * plain memory from this page, not an exit to ohci_read. The page is brought
+ * up to date before the lock is given up (unlock) and before the interrupt
+ * line changes, so the guest's handler reads what raised it. Every register
+ * holds what ohci_read returns for it but HcFmRemaining, the time left in
+ * the frame: on the page it is the value at the last update. */
+static _Alignas(4096) uint8_t g_page[OHCI_SIZE];
+
+static uint32_t fm_remaining(const Ohci *o)
+{
+    const uint64_t into = (now_ns() - o->frame_t0_ns) % 1000000u;
+    return (uint32_t)((o->fi * (1000000u - into)) / 1000000u) & 0x3fff;
+}
+
+static uint32_t reg_value(const Ohci *o, uint32_t off)
+{
+    switch (off) {
+    case 0x00: return 0x10;
+    case 0x04: return o->ctl;
+    case 0x08: return o->status;
+    case 0x0C: return o->intr_status;
+    case 0x10:
+    case 0x14: return o->intr;
+    case 0x18: return o->hcca;
+    case 0x1C: return o->per_cur;
+    case 0x20: return o->ctrl_head;
+    case 0x24: return o->ctrl_cur;
+    case 0x28: return o->bulk_head;
+    case 0x2C: return o->bulk_cur;
+    case 0x30: return o->done;
+    case 0x34: return o->fit << 31 | o->fsmps << 16 | o->fi;
+    case 0x38: return fm_remaining(o);
+    case 0x3C: return o->frame_number;
+    case 0x40: return o->pstart;
+    case 0x44: return o->lst;
+    case 0x48: return o->rhdesc_a;
+    case 0x4C: return o->rhdesc_b;
+    case 0x50: return o->rhstatus;
+    default:
+        if (off >= 0x54 && off < 0x54 + 4 * ROOT_PORTS) {
+            return o->port[(off - 0x54) / 4];
+        }
+        return 0;
+    }
+}
+
+static void page_update(const Ohci *o)
+{
+    for (uint32_t off = 0; off < 0x54 + 4 * ROOT_PORTS; off += 4) {
+        const uint32_t v = reg_value(o, off);
+        uint32_t *at = (uint32_t *)(void *)(g_page + off);
+        if (__atomic_load_n(at, __ATOMIC_RELAXED) != v) {
+            __atomic_store_n(at, v, __ATOMIC_RELEASE);
+        }
+    }
+}
+
+static void unlock(Ohci *o)
+{
+    page_update(o);
+    pthread_mutex_unlock(&o->lock);
+}
+
 static void update_irq(Ohci *o)
 {
     const bool level = (o->intr & INT_MIE) && (o->intr_status & o->intr & ~INT_MIE);
     if (level != o->irq) {
         o->irq = level;
+        page_update(o);
         __atomic_thread_fence(__ATOMIC_RELEASE);
         nc_irq_set(OHCI_IRQ, level);
     }
@@ -651,6 +715,7 @@ static void frame(Ohci *o)
     }
     o->intr_status |= INT_SF;
     update_irq(o);
+    page_update(o);
 }
 
 static void *frame_thread(void *arg)
@@ -671,7 +736,7 @@ static void *frame_thread(void *arg)
             break;
         }
         frame(o);
-        pthread_mutex_unlock(&o->lock);
+        unlock(o);
         if (nc_paused()) {
             nc_pause_wait();                /* the emulation paused: no frames */
             clock_gettime(CLOCK_MONOTONIC, &next);
@@ -694,41 +759,9 @@ static void *frame_thread(void *arg)
 static uint64_t ohci_read(void *opaque, uint32_t off, unsigned size)
 {
     Ohci *o = opaque;
-    uint32_t v = 0;
+    (void)size;
     pthread_mutex_lock(&o->lock);
-    switch (off & ~3u) {
-    case 0x00: v = 0x10; break;
-    case 0x04: v = o->ctl; break;
-    case 0x08: v = o->status; break;
-    case 0x0C: v = o->intr_status; break;
-    case 0x10:
-    case 0x14: v = o->intr; break;
-    case 0x18: v = o->hcca; break;
-    case 0x1C: v = o->per_cur; break;
-    case 0x20: v = o->ctrl_head; break;
-    case 0x24: v = o->ctrl_cur; break;
-    case 0x28: v = o->bulk_head; break;
-    case 0x2C: v = o->bulk_cur; break;
-    case 0x30: v = o->done; break;
-    case 0x34: v = o->fit << 31 | o->fsmps << 16 | o->fi; break;
-    case 0x38: {
-        /* Time left in the current 1 ms frame, in bit times. */
-        const uint64_t into = (now_ns() - o->frame_t0_ns) % 1000000u;
-        v = (uint32_t)((o->fi * (1000000u - into)) / 1000000u) & 0x3fff;
-        break;
-    }
-    case 0x3C: v = o->frame_number; break;
-    case 0x40: v = o->pstart; break;
-    case 0x44: v = o->lst; break;
-    case 0x48: v = o->rhdesc_a; break;
-    case 0x4C: v = o->rhdesc_b; break;
-    case 0x50: v = o->rhstatus; break;
-    default:
-        if (off >= 0x54 && off < 0x54 + 4 * ROOT_PORTS) {
-            v = o->port[(off - 0x54) / 4];
-        }
-        break;
-    }
+    const uint32_t v = reg_value(o, off & ~3u);
     pthread_mutex_unlock(&o->lock);
     return v >> (8 * (off & 3));
 }
@@ -800,7 +833,7 @@ static void ohci_write(void *opaque, uint32_t off, uint64_t value, unsigned size
         }
         break;
     }
-    pthread_mutex_unlock(&o->lock);
+    unlock(o);
 }
 
 /* The players with a controller plugged in (bit n: player n + 1):
@@ -892,6 +925,9 @@ void nc_dev_ohci_init(struct NcVm *vm)
         .opaque = &g_ohci,
     };
     nc_mmio_register(&dev);
+    page_update(o);
+    const NcMmioDirect page = {OHCI_BASE, g_page, 0};
+    nc_mmio_direct(&page);
 
     g_ohci_thr.quit = false;
     g_ohci_thr.started = pthread_create(&g_ohci_thr.th, NULL, frame_thread, o) == 0;
@@ -950,7 +986,7 @@ static void set_pads(unsigned mask)
                        (mask & (1u << p)) ? "plugged in" : "pulled out");
             }
         }
-        pthread_mutex_unlock(&o->lock);
+        unlock(o);
     }
 }
 
@@ -1039,7 +1075,7 @@ bool nc_usb_state_load(NcRd *r, unsigned v)
         nc_rec_get(r, &nc_rec_NcUsbDev, hub ? hub : &scratch, v);
         nc_rec_get(r, &nc_rec_NcUsbHubState, &hs, v);
         if (hs.nports > 4) {
-            pthread_mutex_unlock(&o->lock);
+            unlock(o);
             return false;
         }
         if (hub) {
@@ -1070,6 +1106,6 @@ bool nc_usb_state_load(NcRd *r, unsigned v)
     update_irq(o);                          /* the line as the registers say, set either way */
     o->frame_t0_ns = now_ns();
     pthread_cond_broadcast(&o->run);
-    pthread_mutex_unlock(&o->lock);
+    unlock(o);
     return !r->fail;
 }

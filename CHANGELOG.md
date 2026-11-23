@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Linux x86-64 KVM performance.** Read the USB controller's registers in the guest. A title's USB interrupt handler no longer exits to the core for its two register reads, about 1,000 exits a second in Halo and seven other titles checked. vCPU time outside the guest did not change measurably on a Ryzen 7 9800X3D (10.6% of one core against 10.7–10.8%). `NC_KVM_DIRECT=0` disables it together with the NV2A page.
+
 ## linux-v0.37.3 (Linux ARM64, Linux x86-64, and Android ARM64)
 
 - **Steam Deck installer.** Restore missing icons in RetroArch's AppImage menu, including sidebar icons, button hints and the battery indicator. Rerun the installer once to repair an existing installation. [#303](https://github.com/portare-ch/hakuX-lr/pull/303)
