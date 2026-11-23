@@ -24,6 +24,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <unistd.h>
 
 #define CODE  0x10000u
@@ -33,6 +34,8 @@
 #define IDT   0x8001F000u
 #define MMIO  0xFE000000u
 #define HOOK  (CODE + 0x805)
+#define WP    0x40000u
+#define WPFLAG (DATA + 0x204)
 
 static NcCore core;
 static NcCpu *cpu;
@@ -94,6 +97,8 @@ static bool system_op(void *opaque, NcFrame *f, enum NcSysOp op, unsigned size)
             const uint64_t t0 = nc_cpu_host_cycles();
             usleep(100000);
             nc_cpu_cycle_offset_add(cpu, nc_cpu_host_cycles() - t0);
+        } else if (v == 0x46) {
+            nc_vm_view_prot(&core.vm, WP, NC_PAGE, PROT_READ);  /* protect between vCPU entries */
         } else if (v == 0x44) {
             usleep(50000); /* 50 ms it counts */
         } else if (v == 0x45) {
@@ -186,9 +191,37 @@ static void direct_write(void *opaque, uint32_t off, uint64_t value, unsigned si
     memcpy(direct_page + off, &value, size);
 }
 
+/* Make WP read-only while the guest writes to it. Sample the counter twice
+ * before the fault handler restores write access to check for stale stores. */
+static int wp_faults;
+static volatile int wp_sampled;
+static uint32_t wp_v0, wp_v1;
+
+static void *protect_later(void *arg)
+{
+    usleep(20000);
+    nc_vm_view_prot(&core.vm, WP, NC_PAGE, PROT_READ);
+    wp_v0 = nc_vm_rd32(&core.vm, WP);
+    usleep(5000);
+    wp_v1 = nc_vm_rd32(&core.vm, WP);
+    __atomic_store_n(&wp_sampled, 1, __ATOMIC_RELEASE);
+    usleep(200000);
+    nc_wr32(nc_vm_host(&core.vm, WPFLAG), 1);   /* let the guest exit if it never faults */
+    return arg;
+}
+
 /* A page the guest touches first maps on its fault; the rest is the core's. */
 static int fault(void *opaque, NcFrame *f, uint32_t va, bool write, const char **why)
 {
+    if (va - WP < NC_PAGE && write) {
+        if (wp_faults++ == 1) {
+            while (!__atomic_load_n(&wp_sampled, __ATOMIC_ACQUIRE)) {
+                usleep(100);
+            }
+            nc_wr32(nc_vm_host(&core.vm, WPFLAG), 1);
+        }
+        return nc_vm_view_prot(&core.vm, WP, NC_PAGE, PROT_READ | PROT_WRITE) == 0 ? 1 : 0;
+    }
     if (va - LATE < NC_PAGE) {
         late_faults++;
         return nc_vm_alloc_at(&core.vm, LATE, NC_PAGE, NULL) ? 1 : 0;
@@ -246,7 +279,8 @@ int main(void)
 {
     setvbuf(stdout, NULL, _IONBF, 0);
     if (!nc_vm_init(&core.vm, 64u << 20) || !nc_kernel_init(&core.kernel, &core.vm) ||
-        !nc_vm_alloc_at(&core.vm, CODE, 4 * NC_PAGE, NULL) || !nc_vm_alloc_at(&core.vm, DATA, NC_PAGE, NULL)) {
+        !nc_vm_alloc_at(&core.vm, CODE, 4 * NC_PAGE, NULL) || !nc_vm_alloc_at(&core.vm, DATA, NC_PAGE, NULL) ||
+        !nc_vm_alloc_at(&core.vm, WP, NC_PAGE, NULL)) {
         printf("FAIL: guest memory\n");
         return 1;
     }
@@ -523,6 +557,32 @@ int main(void)
     check(nc_vm_rd32(&core.vm, DATA + 0x390) == 0x1F80, "RSQRT leaves guest MXCSR unchanged");
     check(*(uint8_t *)nc_vm_host(&core.vm, CODE + 0xA0E) == (nc_rsqrt_host_amd() ? 0xCC : 0xF3),
           "RSQRT patching uses actual AMD host CPUID only");
+
+    /* Check write faults after protection changes between vCPU entries and
+     * while the guest runs. Verify that guest INT 2 reaches the system-op handler. */
+    const uint8_t wp[] = {
+        0xC7, 0x05, 0x00, 0x00, 0x04, 0x00, 0x01, 0x00, 0x00, 0x00, /* mov dword [WP], 1 */
+        0xCD, 0x46,                                                 /* int 46h: protect WP */
+        0xC7, 0x05, 0x00, 0x00, 0x04, 0x00, 0x02, 0x00, 0x00, 0x00, /* mov dword [WP], 2 */
+        0xA1, 0x00, 0x00, 0x04, 0x00, 0xCD, 0x42,                   /* mov eax, [WP]; int 42h */
+        0xFF, 0x05, 0x00, 0x00, 0x04, 0x00,                         /* again: inc dword [WP] */
+        0x83, 0x3D, 0x04, 0x02, 0x02, 0x00, 0x00,                   /* cmp dword [WPFLAG], 0 */
+        0x74, 0xF1,                                                 /* je again */
+        0xCD, 0x02,                                                 /* int 2 */
+        0xF4,
+    };
+    nreports = 0;
+    nops = 0;
+    nc_wr32(nc_vm_host(&core.vm, WPFLAG), 0);
+    put(CODE + 0x1000, wp, sizeof(wp));
+    pthread_t wp_th;
+    pthread_create(&wp_th, NULL, protect_later, NULL);
+    run_at(CODE + 0x1000);
+    pthread_join(wp_th, NULL);
+    check(nreports == 1 && reports[0] == 2 && wp_faults >= 1, "a page protected between entries: the store faults");
+    check(wp_faults == 2 && wp_v0 == wp_v1 && nc_vm_rd32(&core.vm, WP) == wp_v0 + 1,
+          "a page protected under the running guest: no store after it");
+    check(saw(NC_SYSOP_INT, 2, CODE + 0x1000 + sizeof(wp) - 3), "INT 2: the title's, a system op");
 
     nc_cpu_destroy(cpu);
     check(*(uint8_t *)nc_vm_host(&core.vm, CODE + 0xA0E) == 0xF3 &&
