@@ -19,6 +19,7 @@
 #include "native/core/vm.h"
 #include "native/core/mmio.h"
 #include "native/cpu/kvm_rsqrt.h"
+#include "native/cpu/kvm_fault_guest.h"
 #include "native/cpu/kvm_rsqrt_guest.h"
 #include "native/cpu/kvm_rsqrt_scan.h"
 
@@ -63,6 +64,12 @@ const char nc_cpu_backend[] = "kvm";
 #define LIN_RSQ_SITES 0xC000u /* count, then {eip, u16 routine, u16 length} each, ascending */
 #define LIN_RSQ_HITS (LIN_END - 8u) /* the handler's corrections, counted (64 bits) */
 #define RSQ_GUEST_MAX ((LIN_RSQ_HITS - LIN_RSQ_SITES - 4u) / 8u)
+/* Guest #PF and NMI handlers, saved CR2, and TLB invalidation list. */
+#define LIN_FLT_PF   0x7400u
+#define LIN_FLT_NMI  0x7440u
+#define LIN_FLT_CR2  0x7800u
+#define LIN_FLT_INV  0x7804u
+#define INV_MAX      32u
 #define LIN_END   0x10000u
 #define SYS_SIZE  (SYS_LOW + (LIN_END - LIN_GDT))
 
@@ -138,7 +145,12 @@ struct NcCpu {
     pthread_t thread;      /* nc_cpu_run's */
     bool running;
     volatile int irq;      /* nc_cpu_request_interrupt */
-    volatile int flush;    /* a PTE lost access since the last entry */
+    volatile int flush;    /* pending full TLB flush */
+    bool guest_fault;      /* guest CR2 capture and per-page TLB invalidation */
+    volatile int inv_lock;
+    uint32_t inv[INV_MAX]; /* pending invalidations, protected by inv_lock */
+    unsigned ninv;
+    uint64_t inv_sent, inv_pages, flushes;
     volatile int in_guest; /* from before the flush check to KVM_RUN's return */
     volatile uint64_t exits; /* KVM_RUN returns, counted at once */
     NcFrame frame;
@@ -245,9 +257,26 @@ static uint32_t pte_for(NcCpu *cpu, uint32_t va)
     return 0;
 }
 
-/* PTEs for [va, va + len) again; a lost permission makes the next entry
- * flush the TLB (a gained one needs none: the stale entry faults once and
- * the #PF path finds the PTE allows it). True if one was lost. */
+/* Queue the invalidation before shootdown checks in_guest. Request a full
+ * flush if guest invalidation is disabled or the queue is full. */
+static void inv_push(NcCpu *cpu, uint32_t va)
+{
+    if (!cpu->guest_fault) {
+        __atomic_store_n(&cpu->flush, 1, __ATOMIC_SEQ_CST);
+        return;
+    }
+    while (__atomic_exchange_n(&cpu->inv_lock, 1, __ATOMIC_SEQ_CST)) {
+    }
+    if (cpu->ninv < INV_MAX) {
+        cpu->inv[cpu->ninv++] = va;
+    } else {
+        __atomic_store_n(&cpu->flush, 1, __ATOMIC_SEQ_CST);
+    }
+    __atomic_store_n(&cpu->inv_lock, 0, __ATOMIC_SEQ_CST);
+}
+
+/* Update PTEs for [va, va + len). Queue invalidation for lost permissions
+ * or changed mappings. When access is granted, #PF handles any stale entry. */
 static bool pte_update(NcCpu *cpu, uint32_t va, uint32_t len)
 {
     bool any = false;
@@ -262,7 +291,7 @@ static bool pte_update(NcCpu *cpu, uint32_t va, uint32_t len)
         const bool lost = (old & PTE_P) && (!(now & PTE_P) || ((old & PTE_RW) && !(now & PTE_RW)) ||
                                             ((old ^ now) & ~0xFFFu));
         if (lost) {
-            __atomic_store_n(&cpu->flush, 1, __ATOMIC_SEQ_CST);
+            inv_push(cpu, (uint32_t)a);
             any = true;
         }
     }
@@ -316,11 +345,52 @@ static void prot_hook(uint32_t va, uint32_t len, int prot)
     }
 }
 
+static uint8_t *lin(NcCpu *cpu, uint32_t l);
+
+/* Queue an NMI only if KVM can deliver it on entry. An interrupt shadow
+ * or an NMI already pending, injected, or masked requires a full flush. */
+static bool inv_send(NcCpu *cpu, const uint32_t *va, unsigned n)
+{
+    if (!cpu->sync_valid) {
+        return false;
+    }
+    const struct kvm_vcpu_events *ev = &cpu->run->s.regs.events;
+    uint8_t *list = lin(cpu, LIN_FLT_INV);
+    if (ev->interrupt.shadow || ev->nmi.injected || ev->nmi.pending || ev->nmi.masked) {
+        return false;
+    }
+    /* Clear any list left behind by a lost NMI. */
+    nc_wr32(list, 0);
+    for (unsigned i = 0; i < n; i++) {
+        nc_wr32(list + 4 * (i + 1), va[i]);
+    }
+    nc_wr32(list, n);
+    if (ioctl(cpu->vcpu, KVM_NMI, 0) < 0) {
+        nc_wr32(list, 0);
+        return false;
+    }
+    cpu->inv_sent++;
+    cpu->inv_pages += n;
+    return true;
+}
+
 static void tlb_flush(NcCpu *cpu)
 {
-    if (!__atomic_exchange_n(&cpu->flush, 0, __ATOMIC_SEQ_CST)) {
+    uint32_t va[INV_MAX];
+    unsigned n = 0;
+    if (cpu->guest_fault) {
+        while (__atomic_exchange_n(&cpu->inv_lock, 1, __ATOMIC_SEQ_CST)) {
+        }
+        n = cpu->ninv;
+        memcpy(va, cpu->inv, n * sizeof(va[0]));
+        cpu->ninv = 0;
+        __atomic_store_n(&cpu->inv_lock, 0, __ATOMIC_SEQ_CST);
+    }
+    const bool all = __atomic_exchange_n(&cpu->flush, 0, __ATOMIC_SEQ_CST);
+    if (!all && (!n || inv_send(cpu, va, n))) {
         return;
     }
+    cpu->flushes++;
     struct kvm_sregs s;
     if (ioctl(cpu->vcpu, KVM_GET_SREGS, &s) < 0) {
         fatal(cpu, "KVM_GET_SREGS");
@@ -397,8 +467,8 @@ static void build_tables(NcCpu *cpu)
         s[n++] = 0x08;
         s[n++] = 0xCF; /* iret */
         const uint32_t off = LIN_STUBS + 16 * v;
-        /* vectors with an error code take software INTs as #GP (DPL 0) */
-        const unsigned dpl = errcode_vector(v) ? 0 : 3;
+        /* DPL 0 makes guest software INTs to error-code vectors or vector 2 raise #GP. */
+        const unsigned dpl = errcode_vector(v) || v == 2 ? 0 : 3;
         idt[2 * v] = (SEL_CODE0 << 16) | (off & 0xFFFFu);
         idt[2 * v + 1] = (off & 0xFFFF0000u) | 0x8E00u | (dpl << 13);
     }
@@ -414,6 +484,16 @@ static void build_tables(NcCpu *cpu)
         nc_wr32(lin(cpu, LIN_RSQ_SITES), 0);
         idt[2 * 3] = (SEL_CODE0 << 16) | (LIN_RSQ_CODE & 0xFFFFu);
         idt[2 * 3 + 1] = (LIN_RSQ_CODE & 0xFFFF0000u) | 0x8E00u | (3u << 13);
+    }
+
+    if (cpu->guest_fault) {
+        memcpy(lin(cpu, LIN_FLT_PF), fault_guest_pf, sizeof(fault_guest_pf));
+        memcpy(lin(cpu, LIN_FLT_NMI), fault_guest_nmi, sizeof(fault_guest_nmi));
+        nc_wr32(lin(cpu, LIN_FLT_INV), 0);
+        idt[2 * 14] = (SEL_CODE0 << 16) | (LIN_FLT_PF & 0xFFFFu);
+        idt[2 * 14 + 1] = (LIN_FLT_PF & 0xFFFF0000u) | 0x8E00u;
+        idt[2 * 2] = (SEL_CODE0 << 16) | (LIN_FLT_NMI & 0xFFFFu);
+        idt[2 * 2 + 1] = (LIN_FLT_NMI & 0xFFFF0000u) | 0x8E00u;
     }
 
     uint32_t *pd0 = (uint32_t *)(cpu->sys + SYS_PD0), *pd1 = (uint32_t *)(cpu->sys + SYS_PD1);
@@ -675,6 +755,15 @@ NcCpu *nc_cpu_create(const NcCpuConfig *cfg, uint32_t fs_base)
         const int caps = ioctl(cpu->kvm, KVM_CHECK_EXTENSION, KVM_CAP_SYNC_REGS);
         cpu->sync = caps > 0 && (caps & KVM_SYNC_X86_REGS) && !(off && !strcmp(off, "0"));
         cpu->run->kvm_valid_regs = cpu->sync ? KVM_SYNC_X86_REGS : 0;
+        /* Guest invalidation needs synced vCPU events and host-injected NMIs. */
+        const char *gf = getenv("NC_KVM_GUEST_FAULT");
+        cpu->guest_fault = cpu->sync && (caps & KVM_SYNC_X86_EVENTS) && !(gf && !strcmp(gf, "0")) &&
+                           ioctl(cpu->kvm, KVM_CHECK_EXTENSION, KVM_CAP_USER_NMI) > 0;
+        if (cpu->guest_fault) {
+            cpu->run->kvm_valid_regs |= KVM_SYNC_X86_EVENTS;
+        }
+        nc_log("hakuX-lr-native-kvm", "page faults: the address and TLB entries %s",
+               cpu->guest_fault ? "handled in the guest" : "through the host");
     }
     direct_pages(cpu);
     /* the FPU through the XSAVE area (fpu_get, fpu_set), sized once the
@@ -755,6 +844,11 @@ void nc_cpu_destroy(NcCpu *cpu)
         }
         nc_log("hakuX-lr-native-kvm", "RSQRT: %llu instructions corrected in the guest, %llu through the host",
                (unsigned long long)guest, (unsigned long long)cpu->rsqrt_hits);
+    }
+    if (cpu->guest_fault) {
+        nc_log("hakuX-lr-native-kvm", "TLB: %llu pages dropped in the guest (%llu lists), the whole TLB %llu times",
+               (unsigned long long)cpu->inv_pages, (unsigned long long)cpu->inv_sent,
+               (unsigned long long)cpu->flushes);
     }
     free(cpu->rsqrt_sites);
     cpu->rsqrt_sites = NULL;
@@ -1745,11 +1839,16 @@ typedef enum { RUN_ON, RUN_STOP } RunState;
  * the core's fault path. */
 static RunState page_fault(NcCpu *cpu, uint32_t err)
 {
-    struct kvm_sregs s;
-    if (ioctl(cpu->vcpu, KVM_GET_SREGS, &s) < 0) {
-        fatal(cpu, "KVM_GET_SREGS");
+    uint32_t va;
+    if (cpu->guest_fault) {
+        va = nc_rd32(lin(cpu, LIN_FLT_CR2)); /* CR2 saved by the guest #PF handler */
+    } else {
+        struct kvm_sregs s;
+        if (ioctl(cpu->vcpu, KVM_GET_SREGS, &s) < 0) {
+            fatal(cpu, "KVM_GET_SREGS");
+        }
+        va = (uint32_t)s.cr2;
     }
-    const uint32_t va = (uint32_t)s.cr2;
     const bool write = err & 2;
     const uint32_t pte = __atomic_load_n(pt_entry(cpu, va), __ATOMIC_ACQUIRE);
     if ((pte & PTE_P) && (pte & PTE_US) && (!write || (pte & PTE_RW))) {

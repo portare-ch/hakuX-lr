@@ -115,6 +115,36 @@ memory. Taking the access away again then needs no call either.
 In that scene on a Ryzen 7 9800X3D, the guest CPU thread's time outside the
 guest fell from 16% to 10.5% of a core. `NC_KVM_LAZY_VIEWS=0` turns it off.
 
+### Page-fault work in the guest
+
+When the core takes write access to a page away again (the renderer has read
+it and wants to see the next store), the guest's TLB may still hold the old
+entry. The backend used to throw the whole TLB away for that, by moving CR3
+to a second, identical page directory: two calls into KVM, and every
+translation the title had refilled afterwards. In Halo's opening scene that
+happened about 7,000 times a second.
+
+Now the pages that lost access are listed for a small NMI handler in the
+backend's own guest pages (`native/cpu/kvm_fault_guest.h`), which drops each
+with `INVLPG`. The NMI is queued before the entry (`KVM_NMI`), so the handler
+has run before the title's next instruction. When KVM's events say it would
+not be taken at once (an NMI on its way or in progress, or an interrupt
+shadow after `STI` or `MOV SS`), and for more than 32 pages at a time, the
+whole TLB goes as before. The title's own `INT 2` stays a software interrupt
+(the gate's DPL is 0, like the vectors with an error code).
+
+A page fault's address also comes from the guest: the `#PF` entry stores CR2
+in the backend's page before it stops for the host, which saves reading the
+vCPU's system registers on every fault.
+
+In that scene on a Ryzen 7 9800X3D, the guest CPU thread's time outside the
+guest fell from 10.7% to 8.7% of a core, and a protect-and-fault cycle in
+`kvm-smoke`'s program from 16.0 to 13.5 us. `NC_KVM_GUEST_FAULT=0` turns
+both off; the startup log says which is in use, and the line at shutdown
+counts the pages dropped in the guest and the whole-TLB flushes left.
+`kvm-smoke` checks that no store lands on a page once it is protected,
+between two entries and under the running guest.
+
 ### Experimental Intel RSQRT results on AMD
 
 AMD CPUs return different low bits from `RSQRTSS` and `RSQRTPS` than the

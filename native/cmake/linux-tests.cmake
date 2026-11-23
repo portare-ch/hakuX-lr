@@ -45,6 +45,9 @@ if(HAKUX_CPU STREQUAL "kvm")
   # the same with RSQRT corrected through the host, not in the guest
   add_test(NAME kvm-smoke-rsqrt-host COMMAND kvm-smoke)
   set_tests_properties(kvm-smoke-rsqrt-host PROPERTIES TIMEOUT 30 ENVIRONMENT "NC_KVM_RSQRT_INGUEST=0")
+  # Run the smoke test with host-side page-fault handling.
+  add_test(NAME kvm-smoke-fault-host COMMAND kvm-smoke)
+  set_tests_properties(kvm-smoke-fault-host PROPERTIES TIMEOUT 30 ENVIRONMENT "NC_KVM_GUEST_FAULT=0")
 endif()
 add_executable(linux-smoke "${NC_REPO}/tests/native/linux/smoke.c" "${NC_APU_OUT_NULL}")
 target_link_libraries(linux-smoke PRIVATE hakux_native)

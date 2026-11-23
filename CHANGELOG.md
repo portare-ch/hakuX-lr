@@ -4,6 +4,8 @@
 
 - **Linux x86-64 KVM performance.** Read the USB controller's registers in the guest. A title's USB interrupt handler no longer exits to the core for its two register reads, about 1,000 exits a second in Halo and seven other titles checked. vCPU time outside the guest did not change measurably on a Ryzen 7 9800X3D (10.6% of one core against 10.7–10.8%). `NC_KVM_DIRECT=0` disables it together with the NV2A page. [#307](https://github.com/portare-ch/hakuX-lr/pull/307)
 
+- **Linux x86-64 KVM performance.** When a page of guest memory is write-protected again, drop only that page from the guest's TLB instead of the whole TLB, and take a page fault's address from the guest. In Halo's opening scene on a Ryzen 7 9800X3D, vCPU time outside the guest fell from 10.7–10.8% to 8.4–8.9% of one core across two runs per configuration. Steam Deck measurements are pending. Set `NC_KVM_GUEST_FAULT=0` to disable the change. [#306](https://github.com/portare-ch/hakuX-lr/pull/306)
+
 ## linux-v0.37.3 (Linux ARM64, Linux x86-64, and Android ARM64)
 
 - **Steam Deck installer.** Restore missing icons in RetroArch's AppImage menu, including sidebar icons, button hints and the battery indicator. Rerun the installer once to repair an existing installation. [#303](https://github.com/portare-ch/hakuX-lr/pull/303)
