@@ -552,7 +552,7 @@ int main(void)
     nreports = 0;
     uint64_t ohci_mmio_before = nc_mmio_total();
     run_at(CODE + 0xB00);
-    check(nreports == 3 && reports[0] == 0 && reports[1] == 0 &&
+    check(nreports == 3 && reports[0] == 0 && reports[1] == OHCI_MIE &&
           reports[2] == (OHCI_MIE | OHCI_RHSC),
           "OHCI: guest reads the initial and written interrupt registers");
     check(nc_mmio_total() - ohci_mmio_before == 1,
