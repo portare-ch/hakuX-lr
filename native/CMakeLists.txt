@@ -134,6 +134,7 @@ add_library(hakux_native STATIC
   core/core.c
   core/dash.c
   core/dash_blob.c
+  core/sysfont.c
   core/mmio.c
   core/irq.c
   dev/nv2a.c
@@ -189,9 +190,11 @@ endif()
 target_include_directories(hakux_native PUBLIC "${NC_REPO}")
 # Rebuild the embedded dashboard when the pinned XBE changes.
 set(NC_DASH_XBE "${NC_REPO}/native/dash/hakux-lr-dash.xbe")
+set(NC_DASH_FONT "${NC_REPO}/native/dash/fonts/hakux-open.xtf.gz")
+set(NC_DASH_FONT_LICENSE "${NC_REPO}/native/dash/fonts/LICENSE_roboto_mono")
 set_source_files_properties(core/dash_blob.c PROPERTIES
-  COMPILE_DEFINITIONS "NC_DASH_XBE=\"${NC_DASH_XBE}\""
-  OBJECT_DEPENDS "${NC_DASH_XBE}")
+  COMPILE_DEFINITIONS "NC_DASH_XBE=\"${NC_DASH_XBE}\";NC_DASH_FONT=\"${NC_DASH_FONT}\";NC_DASH_FONT_LICENSE=\"${NC_DASH_FONT_LICENSE}\""
+  OBJECT_DEPENDS "${NC_DASH_XBE};${NC_DASH_FONT};${NC_DASH_FONT_LICENSE}")
 # xxhash (single header, FEX's copy): the savestates' blob store (state/cache.c)
 target_include_directories(hakux_native PRIVATE "${HAKUX_FEX_DIR}/External/xxhash")
 # The HLE layer's pure modules build without QEMU in this mode.
