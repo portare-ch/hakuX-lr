@@ -612,7 +612,9 @@ int main(void)
     nreports = 0;
     uint64_t ohci_mmio_before = nc_mmio_total();
     run_at(CODE + 0xB00);
-    check(nreports == 3 && reports[0] == 0 && reports[1] == OHCI_MIE &&
+    /* The controller starts with player 1's pad attached: the port's connect
+     * change is pending in HcInterruptStatus from the start, not yet enabled. */
+    check(nreports == 3 && reports[0] == OHCI_RHSC && reports[1] == OHCI_MIE &&
           reports[2] == (OHCI_MIE | OHCI_RHSC),
           "OHCI: guest reads the initial and written interrupt registers");
     check(nc_mmio_total() - ohci_mmio_before == 1,
