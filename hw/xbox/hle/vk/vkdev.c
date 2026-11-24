@@ -329,16 +329,20 @@ static uint32_t g_inst_api;
 
 uint32_t hle_vk_instance_version(void)
 {
-    if (volkGetInstanceVersion() == 0) {
+    uint32_t loader = volkGetInstanceVersion();
+    if (!loader) {
         PFN_vkGetInstanceProcAddr gipa = (PFN_vkGetInstanceProcAddr)hle_host_vk_loader();
         if (gipa) {
             volkInitializeCustom(gipa);
         } else {
             volkInitialize();
         }
+        loader = volkGetInstanceVersion();
     }
-    g_inst_api = volkGetInstanceVersion() >= VK_API_VERSION_1_4 ? VK_API_VERSION_1_4
-                                                                : VK_API_VERSION_1_3;
+    /* RetroArch compares the full version against its own loader. Request
+     * patch zero, and keep 1.1 as the minimum even if the loader is older. */
+    loader = MAX(VK_API_VERSION_1_1, MIN(loader, VK_API_VERSION_1_4));
+    g_inst_api = VK_MAKE_API_VERSION(0, 1, VK_API_VERSION_MINOR(loader), 0);
     return g_inst_api;
 }
 
@@ -360,6 +364,13 @@ static int vk_init(PFN_vkGetInstanceProcAddr gipa_shared, VkInstance inst_shared
             hle_log("hakuX-lr-hle-back", "vk: volkInitialize failed");
             return -1;
         }
+    }
+    const uint32_t loader_api = volkGetInstanceVersion();
+    if (loader_api < VK_API_VERSION_1_1) {
+        snprintf(c->missing, sizeof(c->missing), "Vulkan 1.1 loader");
+        snprintf(g_hle_unavailable, sizeof(g_hle_unavailable), "Vulkan 1.1 loader required");
+        hle_log("hakuX-lr-hle-back", "vk: %s", g_hle_unavailable);
+        return -2;
     }
     hle_mutex_init(&g_queue_lock);
     v->shared = inst_shared != VK_NULL_HANDLE;
@@ -476,8 +487,8 @@ static int vk_init(PFN_vkGetInstanceProcAddr gipa_shared, VkInstance inst_shared
     bool e_dru = has_ext(ext, ne, VK_EXT_DEPTH_RANGE_UNRESTRICTED_EXTENSION_NAME);
     bool e_pd = has_ext(ext, ne, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
     /* Use the API version supported by both the instance and device. */
-    const uint32_t inst_api = g_inst_api ? g_inst_api : VK_API_VERSION_1_3;
-    const uint32_t api = force11 ? VK_API_VERSION_1_1 : MIN(v->props.apiVersion, inst_api);
+    const uint32_t inst_api = force11 || !g_inst_api ? VK_API_VERSION_1_1 : MIN(g_inst_api, loader_api);
+    const uint32_t api = MIN(v->props.apiVersion, inst_api);
     const bool v14 = api >= VK_API_VERSION_1_4;
     const bool v13 = api >= VK_API_VERSION_1_3, v12 = api >= VK_API_VERSION_1_2;
     /* Line rasterization: core in 1.4, else either extension. */

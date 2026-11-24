@@ -154,7 +154,7 @@ extern HleVk g_hvk;
  * Vulkan 1.1 is the floor's version: 1.2's and 1.3's parts come from their
  * extensions (timeline semaphores required) or vk/compat.c. */
 int hle_vk_init(void);
-/* Request Vulkan 1.4 if available, otherwise 1.3. */
+/* Highest instance API shared with the loader, requested in the range 1.1–1.4. */
 uint32_t hle_vk_instance_version(void);
 /* hle_vk_init on a frontend's instance (the libretro core): gpu, or the first
  * one when VK_NULL_HANDLE; a queue that can present to surface if it isn't

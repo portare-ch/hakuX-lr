@@ -231,14 +231,14 @@ ra() { "$retroarch" "$@"; }
 if [ -z "$(vulkan_icds)" ]; then
     case $(gpu_vendors) in
         *0x10de*) warn "no Vulkan driver found: install NVIDIA's driver (nvidia-utils or your distribution's equivalent)" ;;
-        *) warn "no hardware Vulkan driver found; hakuX-lr needs Vulkan 1.2 or newer (1.3 recommended)" ;;
+        *) warn "no hardware Vulkan driver found; hakuX-lr needs Vulkan 1.1 or newer with timeline semaphores" ;;
     esac
 fi
 if loader=$(libvulkan); then
     # Read the version from the symlink target (libvulkan.so.1.3.275).
     lmin=$(readlink -f "$loader" | sed -n 's/.*libvulkan\.so\.1\.\([0-9][0-9]*\)\..*/\1/p')
-    if [ -n "$lmin" ] && [ "$lmin" -lt 3 ]; then
-        warn "the Vulkan loader is 1.$lmin; RetroArch refuses hakuX-lr on a loader older than 1.3, even with a 1.2 driver"
+    if [ -n "$lmin" ] && [ "$lmin" -lt 1 ]; then
+        warn "the Vulkan loader is 1.$lmin; hakuX-lr requires a Vulkan 1.1 or newer loader"
     fi
 else
     warn "libvulkan.so.1 (the Vulkan loader) is missing"
