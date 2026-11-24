@@ -326,8 +326,8 @@ typedef struct HleCmdDraw {
     uint32_t tex[HLE_TSS_STAGES];   /* object ids, 0 = none */
     uint32_t tex_unset;         /* bit s: no texture set (D3D's Textures[s] NULL), as
                                    against one HLE could not prepare */
-    uint32_t tex_lin;           /* bit s: the stage's format is linear, sampled by texel
-                                   coordinates (whatever the layout of a target there) */
+    uint32_t tex_lin;           /* Bit s marks a linear texture format, regardless of target layout.
+                                   Bit 8+s selects the stored texture border (bord[s]). */
     uint32_t tex_ord;           /* Bits 4s..4s+3: stage s's byte order when sampling a
                                    32-bit render target (HLE_DRAW_ORD_*). */
     uint32_t tex_rect[HLE_TSS_STAGES];  /* a linear stage's own size, its IMAGE_RECT

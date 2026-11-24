@@ -22,6 +22,8 @@ uint32_t hle_draw_arena_alloc16(uint32_t len, uint8_t **ptr);
  * host_bytes is the uploaded image size, including any decompression. */
 #define HLE_TEXDEF_SIGN         0xFu
 #define HLE_TEXDEF_BORDER       0x100u
+/* Upload the entire buffer, including its four-texel border. */
+#define HLE_TEXDEF_BTEX         0x200u
 #define HLE_TEXDEF_PITCH_SHIFT  16
 uint32_t hle_draw_tex_define(uint32_t id, const uint32_t h5[5], const uint32_t *pal, uint32_t npal,
                              uint32_t sign, uint32_t *bytes, uint32_t *host_bytes);

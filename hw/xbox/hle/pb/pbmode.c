@@ -1731,6 +1731,7 @@ void hle_pb_put(void)
     if (t_hitch < 0 && g_hitch_on) {
         hle_hitch_thread(HLE_HT_VCPU);  /* the vCPU's CPU time for the monitor */
     }
+    hle_barrier_rearm_texels();
     hle_pb_kick();
 }
 

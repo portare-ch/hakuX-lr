@@ -2,10 +2,13 @@
 
 ## Unreleased
 
+- **Textures rewritten right after a draw.** A title that draws with a texture and goes straight on to write the next image into the same memory now has its draw read the old texels, as the console's GPU, close behind the pushes, does. A store into texels a draw has read waits until the pushed draws are decoded. nxdk_pgraph_tests' Texture signed components, Surface pitch and Vertex shader rounding gain six pictures.
+- **Signed textures upload faster.** A texture with signed colour channels had its sign offset applied in the upload arena, which is slow to read back: a 256 × 256 texture took about 105 ms of the decoder. It is now done in a scratch copy.
 - **HDTV modes.** Games can select 480p (on by default) or 720p (off by default). A game running in 720p uses its own **Render Scale (720p)**, 1× by default. The core scales output larger than 3840×2160 to fit.
 - **NV2A accuracy.** A cube map looked up with a zero-length direction returns the +X face's corner texel from the smallest mip level the filter allows, as on the console, and a specular reflection about a zero normal does the same. Texture cubemap goes from 66 to 72 of 83 pictures.
 - **NV2A accuracy.** In a 16-bit float depth buffer, a fragment depth below 2^-6 is tested and stored as 0, while a clear value under 0x1000 is kept. Depth buffer goes from 132 to 142 of 144 pictures and Depth buffer fixed function from 76 to 78 of 80.
 - **NV2A accuracy.** A `SET_POINT_SIZE` value above the register's range (0x1FF) is ignored instead of clamped, so the previous size stays. Point size goes from 11 to 15 of 22 pictures.
+- **NV2A texture borders.** A swizzled 2D or volume texture with a texture border (`BORDER_SOURCE_TEXTURE`), addressed by the border, now shows its own border texels: the four texels around the image, and beyond them the outermost border texel. Bordered volume textures were read with the wrong layout before. Texture border goes from 6 to 17 of 18 pictures.
 - **NV2A polygon stipple.** `SET_STIPPLE_ENABLE` and its 32 × 32 pattern now apply to filled polygons, by guest pixel at every render scale; lines and points are not stippled, as on the console. nxdk_pgraph_tests' Stipple tests go from 1 to 6 of 6 pictures.
 - **NV2A accuracy.** A NaN colour written by a vertex program saturates by its sign as on the console: -NaN is black, +NaN white, and a product with a NaN is white. nxdk_pgraph_tests' Attrib float goes from 2 to 12 of 12 pictures.
 - **NV2A accuracy.** Fixed-function reflection and sphere-map texture coordinates honour `SET_TEXGEN_VIEW_MODEL`'s infinite viewer. Texgen goes from 8 to 10 of 10 pictures.

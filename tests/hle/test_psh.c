@@ -256,12 +256,52 @@ static void test_reflect(void)
     /* a zero N: the zero direction, whatever E is */
     HT_CHECK(strstr(buf, "t3 = sampc(3u, n == vec3(0.0) ? vec3(0.0) :\n"
                          "                2.0 * n * dot(n, e)") != NULL);
-    /* sampc: the ordinary lookup for every fragment (its derivatives), then
-     * a zero direction's: the +X face's texel (0, 0), the LOD by the sampler */
-    const char *all = strstr(buf, "  vec4 c = texture(samplerCube(");
+    /* sampc: the derivatives for every fragment, then one lookup: a zero
+     * direction's (the +X face's texel (0, 0), the LOD by the sampler) or
+     * the ordinary one by those derivatives */
+    const char *all = strstr(buf, "  vec3 gx = dFdx(dir), gy = dFdy(dir);");
     const char *zero = strstr(buf, "  if (dir == vec3(0.0)) {");
     const char *lod = strstr(buf, "vec3(1.0, 1.0 - 1.0 / n, 1.0 - 1.0 / n), 1000.0);");
-    HT_CHECK(all && zero && lod && all < zero && zero < lod);
+    const char *grad = strstr(buf, "dir, gx, gy);");
+    HT_CHECK(all && zero && lod && grad && all < zero && zero < lod && lod < grad);
+    HT_CHECK(strstr(buf, "  vec4 c = texture(samplerCube(") == NULL);
+}
+
+/* Check stored-border coordinates for 2D and volume textures. */
+static void test_btex(void)
+{
+    uint32_t rs[HLE_PS_REGS] = { 0 };
+    rs[HLE_PS_TEXMODES] = HLE_PST_PROJECT2D | (unsigned)HLE_PST_PROJECT3D << 5;
+    rs[HLE_PS_RGB_IN] = IN4(R_T0, R_T1, R_ZERO, R_ZERO);
+    rs[HLE_PS_RGB_OUT] = R_R0 << 4;
+    rs[HLE_PS_COUNT] = 1;
+    HlePshKey k;
+    hle_psh_key(rs, &k);
+    k.vol = 2;
+    unsigned un = 99;
+    HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), &un) > 0);
+    HT_CHECK(strstr(buf, "#define BTEX") == NULL && strstr(buf, "VshConst") == NULL);
+    k.zclamp |= HLE_PSH_BTEX;
+    HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), &un) > 0);
+    dump("psh_btex");
+    HT_EQ_U32(un, 0);
+    const char *def = strstr(buf, "#define BTEX 1\n");
+    const char *blk = strstr(buf, "uvec4 stip[8]; vec4 bord[4]; };");
+    const char *s2 = strstr(buf, "    uv = clamp(uv * bord[s].xy + 4.0, vec2(0.5), bord[s].xy + 7.5) / sz;");
+    const char *s3 = strstr(buf, "    uvw = clamp(uvw * bord[s].xyz + 4.0, vec3(0.5), bord[s].xyz + 7.5) / sz3;");
+    HT_CHECK(def && blk && s2 && s3 && def < blk && blk < s2 && s2 < s3);
+    /* Convolution maps the centre before computing gradients. */
+    HT_CHECK(strstr(buf, "sampk") == NULL);
+    k.conv = 1;
+    k.conv_mm = 3;
+    HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), &un) > 0);
+    dump("psh_btex_conv");
+    const char *fk = strstr(buf, "vec4 sampk(uint s, vec2 uv, uint kern, uint when) {");
+    const char *mk = fk ? strstr(fk, "#ifdef BTEX\n  if (bord[s].x > 0.0)\n    uv = clamp(uv * "
+                                     "bord[s].xy + 4.0, vec2(0.5), bord[s].xy + 7.5) / sz;") : NULL;
+    const char *gk = fk ? strstr(fk, "vec2 gx = dFdx(uv), gy = dFdy(uv);") : NULL;
+    blk = strstr(buf, "uvec4 stip[8]; vec4 bord[4]; };");
+    HT_CHECK(blk && fk && mk && gk && blk < fk && mk < gk);
 }
 
 /* A 16-bit float depth target (zclamp's HLE_PSH_ZF16): a depth under 2^-6,
@@ -335,7 +375,7 @@ static void test_stipple(void)
     HT_CHECK(n > 0 && n == strlen(buf));
     dump("psh_stipple");
     HT_EQ_U32(un, 0);
-    HT_CHECK(strstr(buf, "uniform VshConst { vec4 c[192]; vec4 vcur[16]; vec4 vpsz; uvec4 stip[8]; };") != NULL);
+    HT_CHECK(strstr(buf, "uniform VshConst { vec4 c[192]; vec4 vcur[16]; vec4 vpsz; uvec4 stip[8]; vec4 bord[4]; };") != NULL);
     /* by guest pixel; row 31 the top row, pixel x bit x ^ 7 */
     const char *sp = strstr(buf, "ivec2 sp = ivec2(gl_FragCoord.xy / float(max((pc.flags >> 16) & 255u, 1u)));");
     const char *row = strstr(buf, "uint row = uint(31 - (sp.y & 31));");
@@ -1196,6 +1236,7 @@ int main(void)
     HT_RUN(test_reflect);
     HT_RUN(test_stipple);
     HT_RUN(test_zf16);
+    HT_RUN(test_btex);
     HT_RUN(test_dot_zw);
     HT_RUN(test_dot_zw_formats);
     HT_RUN(test_brdf);

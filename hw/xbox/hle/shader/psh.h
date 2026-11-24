@@ -50,6 +50,8 @@ enum {
  * by guest pixel. Row 31 is the top one; in a row the pixel x is bit x ^ 7
  * (its bytes from the low one, each from its top bit). */
 #define HLE_PSH_STIPPLE 8u
+/* zclamp bit 5 enables stored-border sampling for stages with nonzero bord[s]. */
+#define HLE_PSH_BTEX 32u
 /* HlePshKey.zclamp bit 4: the depth target is the NV2A's 16-bit float. A
  * fragment's depth of exponent 0 (below 2^-6) is written, and tested, as 0. */
 #define HLE_PSH_ZF16 16u

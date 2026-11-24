@@ -417,25 +417,28 @@ static bool tex_define(uint32_t id, const uint32_t h5[5], const HleResDesc *dp,
             uint32_t sw, sh, bo;
             hle_res_level(&d, l, &sw, &sh, &bo);
             HleXgRect img = { bo, bo, w, h };
-            /* conv: the guest's texels to a scratch copy first, converted below */
-            uint8_t *out = dst + pos;
+            /* Apply the sign offset in scratch memory to avoid reading the write-combined arena. */
+            g_autofree uint8_t *sx = sxor ? g_malloc(n) : NULL;
+            uint8_t *const lvl = sx ? sx : dst + pos;
+            uint8_t *out = lvl;
             uint32_t orow = row;
             g_autofree uint8_t *raw = NULL;
+            /* Convert guest texels after unpacking them into raw. */
             if (conv) {
                 orow = w * fi->bpp / 8;
                 out = raw = g_malloc((size_t)orow * h * dd);
             }
             if (etc) {
-                dxt_to_etc2(d.fmt, oxfmt, s, w, h, dst + pos);
+                dxt_to_etc2(d.fmt, oxfmt, s, w, h, lvl);
             } else if (dxtd && !vol) {
-                dxt_volume(d.fmt, s, w, h, 1, (uint32_t *)(dst + pos));
+                dxt_volume(d.fmt, s, w, h, 1, (uint32_t *)lvl);
             } else if (vol) {
                 if (dxtd) {
-                    dxt_volume(d.fmt, s, w, h, dd, (uint32_t *)(dst + pos));
+                    dxt_volume(d.fmt, s, w, h, dd, (uint32_t *)lvl);
                 } else if (p8) {
                     g_autofree uint8_t *idx = g_malloc((size_t)w * h * dd);
                     hle_xg_unswizzle_box(s, w, h, dd, NULL, idx, w, w * h, 0, 0, 0, 1);
-                    uint32_t *o32 = (uint32_t *)(dst + pos);
+                    uint32_t *o32 = (uint32_t *)lvl;
                     for (uint32_t i = 0; i < w * h * dd; i++) {
                         o32[i] = pal[idx[i]];
                     }
@@ -444,11 +447,11 @@ static bool tex_define(uint32_t id, const uint32_t h5[5], const HleResDesc *dp,
                                          fi->bpp / 8);
                 }
             } else if (p8) {
-                hle_xg_unswizzle_rect_p8(s, sw, sh, &img, pal, dst + pos, row, 0, 0);
+                hle_xg_unswizzle_rect_p8(s, sw, sh, &img, pal, lvl, row, 0, 0);
             } else if (fi->flags & HLE_FI_SWZ) {
                 hle_xg_unswizzle_rect(s, sw, sh, &img, out, orow, 0, 0, fi->bpp / 8);
             } else if (fi->flags & HLE_FI_DXT) {
-                memcpy(dst + pos, s, n);
+                memcpy(lvl, s, n);
             } else {
                 uint32_t sp = lin_pitch ? lin_pitch : pitch ? pitch : orow;
                 for (uint32_t y = 0; y < h; y++) {
@@ -456,22 +459,25 @@ static bool tex_define(uint32_t id, const uint32_t h5[5], const HleResDesc *dp,
                 }
             }
             if (conv) {
-                hle_tex_convert(d.fmt, raw, w * h * dd, dst + pos);
+                hle_tex_convert(d.fmt, raw, w * h * dd, lvl);
             }
             if (sxor && ofi->bpp == 32) {
                 for (uint32_t i = 0; i + 4 <= n; i += 4) {
                     uint32_t v;
-                    memcpy(&v, dst + pos + i, 4);
+                    memcpy(&v, lvl + i, 4);
                     v ^= sxor;
-                    memcpy(dst + pos + i, &v, 4);
+                    memcpy(lvl + i, &v, 4);
                 }
             } else if (sxor && ofi->bpp == 16) {
                 for (uint32_t i = 0; i + 2 <= n; i += 2) {
                     uint16_t v;
-                    memcpy(&v, dst + pos + i, 2);
+                    memcpy(&v, lvl + i, 2);
                     v ^= (uint16_t)sxor;
-                    memcpy(dst + pos + i, &v, 2);
+                    memcpy(lvl + i, &v, 2);
                 }
+            }
+            if (sx) {
+                memcpy(dst + pos, sx, n);
             }
             pos += n;
         }
@@ -515,6 +521,22 @@ static bool tex_define(uint32_t id, const uint32_t h5[5], const HleResDesc *dp,
     return true;
 }
 
+/* Describe the entire bordered allocation as a single texture level. */
+static bool btex_desc(uint32_t def, HleResDesc *d, HleResInfo *ri)
+{
+    if (!(def & HLE_TEXDEF_BTEX)) {
+        return true;
+    }
+    d->w = MAX(16u, 2 * d->w);
+    d->h = MAX(16u, 2 * d->h);
+    if (d->kind == HLE_RK_VOLUME) {
+        d->d = MAX(16u, 2 * d->d);
+    }
+    d->border = false;
+    d->levels = 1;
+    return hle_res_info(d, ri);
+}
+
 /* Source span at def's exact row pitch, including only the texels in the
  * final row. Return 0 when the header's byte count should be used. */
 static uint32_t lin_span(const HleResDesc *d, uint32_t def)
@@ -533,7 +555,8 @@ uint32_t hle_draw_tex_bytes(const uint32_t h5[5], uint32_t def)
 {
     HleResDesc d;
     HleResInfo ri;
-    if (!hle_res_from_header(h5[0], h5[3], h5[4], &d) || !hle_res_info(&d, &ri)) {
+    if (!hle_res_from_header(h5[0], h5[3], h5[4], &d) || !hle_res_info(&d, &ri) ||
+        !btex_desc(def, &d, &ri)) {
         return 0;
     }
     const uint32_t span = lin_span(&d, def);
@@ -546,7 +569,7 @@ uint32_t hle_draw_tex_define(uint32_t id, const uint32_t h5[5], const uint32_t *
     HleResDesc d;
     HleResInfo ri;
     *host_bytes = 0;
-    if (!tex_desc(h5, &d, &ri)) {
+    if (!tex_desc(h5, &d, &ri) || !btex_desc(sign, &d, &ri)) {
         return 0;
     }
     const uint32_t span = lin_span(&d, sign);

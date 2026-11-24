@@ -4814,6 +4814,9 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         if (s->stipple_en && prog && !lines && !points) {
             k.pk.zclamp |= HLE_PSH_STIPPLE;
         }
+        if (prog && (c->tex_lin >> 8 & 0xF)) {
+            k.pk.zclamp |= HLE_PSH_BTEX;
+        }
         if (ds && (ds->d.xfmt == HLE_XFMT_F16 || ds->d.xfmt == HLE_XFMT_LIN_F16)) {
             k.pk.zclamp |= HLE_PSH_ZF16;    /* a 16-bit float depth target (psh.c) */
         }
