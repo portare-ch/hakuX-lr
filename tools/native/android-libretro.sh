@@ -58,26 +58,11 @@ cp LICENSE COPYING licenses/* "$out/$name/licenses/"
     echo "dependencies (tools/native/linux-deps.json):"
     cat tools/native/linux-deps.json
 } > "$out/$name/BUILD-INFO"
-python3 -I - "$repo" "$out" "$name" "$version" "$(git log -1 --format=%ct)" <<'EOF'
+sed "s/^display_version = .*/display_version = \"$version\"/" native/libretro/hakux-lr_libretro.info \
+    > "$out/$name/hakux-lr_libretro.info"
+python3 -I - "$out" "$name" "$(git log -1 --format=%ct)" <<'EOF'
 import hashlib, os, sys, time, zipfile
-repo, out, name, version, stamp = sys.argv[1:]
-info = open(os.path.join(repo, 'native/libretro/hakux-lr_libretro.info')).read().splitlines()
-lines = {
-    'display_version': version,
-    'description': 'hakuX-lr is an original Xbox emulator for ARM64 Android. Uses Vulkan graphics and requires no BIOS, '
-                   'MCPX ROM or hard disk image.',
-    'notes': "(!) Experimental on Android. Requires Android 9 (API 28) or newer on ARM64, Vulkan 1.2 (1.3 recommended) "
-             "and RetroArch's vulkan video driver.|Game saves and caches are stored in hdd/ and cache/ under "
-             "RetroArch's save directory.|Start Core (no content) boots the Xbox dashboard installed in "
-             "hdd/Partition2.|Save states, rewind and run-ahead are not supported.",
-}
-for i, l in enumerate(info):
-    key = l.split(' = ', 1)[0]
-    if key in lines:
-        info[i] = '%s = "%s"' % (key, lines.pop(key))
-assert not lines, lines
-with open(os.path.join(out, name, 'hakux-lr_libretro.info'), 'w') as f:
-    f.write('\n'.join(info) + '\n')
+out, name, stamp = sys.argv[1:]
 when = time.gmtime(int(stamp))[:6]
 path = os.path.join(out, name + '.zip')
 with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as z:
