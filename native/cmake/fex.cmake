@@ -7,7 +7,7 @@
 set(HAKUX_FEX_DIR "${CMAKE_CURRENT_LIST_DIR}/../../external/fex" CACHE PATH "Checkout of the FEX fork (branch hakuX)")
 if(NOT EXISTS "${HAKUX_FEX_DIR}/CMakeLists.txt")
   message(FATAL_ERROR "No FEX fork at ${HAKUX_FEX_DIR}: git submodule update --init external/fex "
-    "(and its submodules, android/README.md), or set HAKUX_FEX_DIR")
+    "(and its submodules), or set HAKUX_FEX_DIR")
 endif()
 
 # FEXCore only. No thunks, tests, FEXConfig, telemetry, glibc jemalloc,

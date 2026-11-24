@@ -1,7 +1,0 @@
-<resources>
-  <!-- The app's green (ui/theme Theme.kt's primary, light and dark) for the
-       framework's widgets: the in-game dialogs' buttons, check boxes and
-       spinners, the clock's pickers. Without it they are Material's teal. -->
-  <color name="hakux_green">#FF2E7D32</color>
-  <color name="hakux_green_dark">#FF81C784</color>
-</resources>

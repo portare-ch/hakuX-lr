@@ -427,7 +427,7 @@ option's depth for a run (xboxrun takes `pace=1`).
 
 ## Insignia NAT
 
-The libretro core and Android app share this backend. It forwards the
+This backend forwards the
 console's UDP 3074 through the device's UDP 3074 and asks the router to
 forward that port through UPnP. For Open NAT, enable UPnP on the router or
 forward UDP 3074 to the device manually. If a device firewall is enabled,

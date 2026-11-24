@@ -1,8 +1,0 @@
-<resources>
-  <!-- The phone at night: the window before Compose draws dark, as the app's
-       theme then is unless set to light (ui/theme AppTheme; LauncherActivity
-       sets the window's own background from it as it starts). -->
-  <style name="Theme.HakuX" parent="android:Theme.Material.NoActionBar">
-    <item name="android:windowBackground">#FF121212</item>
-  </style>
-</resources>
