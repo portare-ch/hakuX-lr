@@ -22,7 +22,12 @@
 #define HLE_VSH_MAX_SLOTS 136
 #define HLE_VSH_CONSTANTS 192
 #define HLE_VSH_CUR_REGS  16    /* current attribute values after the constants */
-#define HLE_VSH_EXTRA_REGS 1    /* vpsz: size in pixels, point params enable, 0, 0 */
+#define HLE_VSH_EXTRA_REGS 13   /* vpsz holds point size and the point-params flag. stip[8] holds 32 stipple words.
+                                   bord[4] holds unpadded dimensions per stage, zero without a stored border. */
+/* the block's declaration, the same in both stages */
+#define HLE_VSH_BLOCK_GLSL \
+    "layout(set = 1, binding = 0, std140) uniform VshConst { vec4 c[192]; " \
+    "vec4 vcur[16]; vec4 vpsz; uvec4 stip[8]; vec4 bord[4]; };\n"
 
 typedef struct HleVshKey {
     uint32_t in_mask;           /* vertex attribute registers bound (bit per vN) */

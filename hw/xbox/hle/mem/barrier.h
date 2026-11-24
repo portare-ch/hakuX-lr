@@ -107,6 +107,10 @@ bool hle_barrier_contended(uint32_t pa, uint32_t len);
  * later queued draw may still need the old data. The catch_up callback runs on the guest
  * thread and returns after decoding the work submitted before the store. */
 void hle_barrier_arm_copied(uint32_t pa, uint32_t len);
+/* Protect texels until queued draws have read them. */
+void hle_barrier_arm_texels(uint32_t pa, uint32_t len);
+/* Re-arm written texel spans once, at the guest thread's next PUT. */
+void hle_barrier_rearm_texels(void);
 void hle_barrier_set_catch_up(void (*catch_up)(void));
 /* Track visibility reports from GET_REPORT in push-buffer mode. The scout runs on the guest
  * thread at each PUT write. It assigns each report to a frame by counting preceding swaps and

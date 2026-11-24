@@ -111,9 +111,9 @@ the frame rate and the core's time per frame.
    with sound. Direct RetroArch confirmation is still needed; report the result.
 5. **Close Content:** check that it closes without hanging. PortareOS should
    return to the launcher. Elsewhere, load another game in the same session.
-6. **Core options:** Render Scale, Screen Format, Language, Video Region,
-   Network and Audio Resampler apply after restarting the game. Crop
-   Overscan, Rumble and Frame Pacing update immediately.
+6. **Core options.** Restart the game to apply Render Scale, Screen Format, 480p,
+   720p, Language, Video Region, Network or Audio Resampler. Crop Overscan,
+   Rumble and Frame Pacing take effect immediately.
 7. **Game saves:** save in-game, close it, then reopen and load the save.
 8. **Game executable changes:** compilations and demo discs should continue
    when launching another program, without returning to the frontend.

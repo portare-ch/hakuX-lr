@@ -284,6 +284,7 @@ static struct {
     uint64_t ffgen;                     /* bumped as a register ff_consts reads changes */
     uint64_t blk_gen, blk_ffgen, blk_value;
     float blk_psz[2];                   /* cached point size and point params flag */
+    float blk_bord[4][4];               /* Cached image dimensions for bordered stages. */
     uint32_t blk_off;
     bool blk_ok, blk_ff;
     uint64_t blk_reused;
@@ -2655,6 +2656,7 @@ static uint64_t ff_program(void)
         k.texmat |= (uint8_t)((R(0x0420 + 4 * s) & 1) << s);
     }
     k.points = R(0x0318) & 1;
+    k.texgen_inf = R(0x09CC) & 1;                 /* SET_TEXGEN_VIEW_MODEL */
     k.two_side = R(0x17C4) & 1;                   /* SET_TWO_SIDE_LIGHT_EN */
     return send_vsh(&k, HLE_FFHW_SLOTS, &g_vh_ff);
 }
@@ -2676,7 +2678,7 @@ static void ff_consts(float (*c)[4])
     regs_f(c[HLE_FFHW_C_EMISSION], 0x03A8, 3);
     regs_f(c[HLE_FFHW_C_SPECULAR], 0x09E0, 3);              /* SET_SPECULAR_PARAMS 0..2 */
     regs_f(c[HLE_FFHW_C_BACK_SPECULAR], 0x1E28, 3);         /* ... _BACK */
-    c[HLE_FFHW_C_PARAMS][2] = MIN(R(0x043C), 0x1FFu) / 8.0f;
+    c[HLE_FFHW_C_PARAMS][2] = R(0x043C) / 8.0f;
     regs_f(c[HLE_FFHW_C_POINT], 0x0A30, 8);
     for (unsigned i = 0; i < 8; i++) {
         float (*l)[4] = &c[HLE_FFHW_C_LIGHTS + HLE_FFHW_LIGHT_VEC4 * i];
@@ -3711,9 +3713,31 @@ static void tex_land(void)
     }
 }
 
-/* The texture stage s samples: the object id, 0 if it can't be drawn;
- * *unset when the stage has none (CONTROL0 disabled), *lin when its format
- * is linear (sampled by texel coordinates). */
+/* Return image dimensions for single-level swizzled 2D or volume textures
+ * that use their stored border on every axis. Cubemaps use seamless filtering. */
+static bool stage_bord(unsigned s, uint32_t dim[3])
+{
+    const uint32_t b = 64 * s;
+    const uint32_t fmt = R(NV097_SET_TEXTURE_FORMAT + b), addr = R(NV097_SET_TEXTURE_ADDRESS + b);
+    const HleFmtInfo *fi = hle_fmt_info(HLE_FMT_CODE(fmt));
+    const uint32_t dims = (fmt >> HLE_FMT_DIM_SHIFT) & 0xF;
+    if (!(R(NV097_SET_TEXTURE_CONTROL0 + b) & 0x40000000u) || !fi || fi->flags != HLE_FI_SWZ ||
+        (fmt & (HLE_FMT_BORDER_COLOR | HLE_FMT_CUBEMAP)) || ((fmt >> HLE_FMT_MIPMAP_SHIFT) & 0xF) != 1 ||
+        (dims != 2 && dims != 3) || (addr & 0xF) != 4 || ((addr >> 8) & 0xF) != 4 ||
+        (dims == 3 && ((addr >> 16) & 0xF) != 4)) {
+        return false;
+    }
+    dim[0] = 1u << ((fmt >> 20) & 0xF);
+    dim[1] = 1u << ((fmt >> 24) & 0xF);
+    dim[2] = dims == 3 ? 1u << ((fmt >> 28) & 0xF) : 1;
+    /* The doubled dimensions must fit hle_res_info(). */
+    if (dim[0] > 2048 || dim[1] > 2048 || dim[2] > 256) {
+        return false;
+    }
+    return true;
+}
+
+/* Return the texture ID or 0. unset marks a disabled stage, lin a linear format. */
 static uint32_t texture(unsigned s, bool *unset, bool *lin)
 {
     uint32_t b = 64 * s;
@@ -3824,6 +3848,10 @@ static uint32_t texture(unsigned s, bool *unset, bool *lin)
             def |= pitch << HLE_TEXDEF_PITCH_SHIFT;
         }
     }
+    uint32_t bdim[3];
+    if (stage_bord(s, bdim)) {
+        def |= HLE_TEXDEF_BTEX;             /* Keep bordered uploads distinct in the texture cache. */
+    }
     uint32_t key[6] = { off, fmt, size, pal_key, sxor, def };
     uint32_t h = hash32(key, sizeof(key)) % TEX_SLOTS;
     PbTex *t = &g_pd.tex[h];
@@ -3900,6 +3928,7 @@ static uint32_t texture(unsigned s, bool *unset, bool *lin)
         const uint32_t h5[5] = { HLE_COMMON_TYPE_TEXTURE | 1, off, 0, fmt, size };
         uint32_t bytes = 0, host_bytes = 0;
         coh_pend_wait(pa, hle_draw_tex_bytes(h5, def));  /* a copy queued into its texels lands first */
+        hle_barrier_arm_texels(pa, hle_draw_tex_bytes(h5, def));
         t->ok = hle_draw_tex_define(t->id, h5, pal, npal, (sxor ? sign : 0) | def, &bytes, &host_bytes) != 0;
         if (t->ok) {                    /* failed: the back end keeps the image it had */
             g_pd.tex_bytes -= t->host_bytes;
@@ -4335,15 +4364,27 @@ static void emit(HleCmdDraw *d)
      * block. Crimson Sea's 2300 draws a frame copied 3.3 KB each; a
      * fixed-function draw's block (ff_consts) holds while none of the
      * registers it is made of changed (ffgen). */
-    /* The Xbox clamps the 6.3 fixed-point SET_POINT_SIZE to 0x1FF. */
-    const float psz[2] = { MIN(R(0x043C), 0x1FFu) / 8.0f, (float)(R(0x0318) & 1) };
+    /* SET_POINT_SIZE: 6.3 fixed point (hle_pbd_method refuses more than 0x1FF) */
+    const float psz[2] = { R(0x043C) / 8.0f, (float)(R(0x0318) & 1) };
+    float bord[4][4];
+    uint32_t bord_mask = 0;
+    memset(bord, 0, sizeof(bord));
+    for (unsigned s = 0; s < 4; s++) {
+        uint32_t dim[3];
+        if (stage_bord(s, dim)) {
+            bord[s][0] = (float)dim[0];
+            bord[s][1] = (float)dim[1];
+            bord[s][2] = (float)dim[2];
+            bord_mask |= 1u << s;
+        }
+    }
     if (g_pd.blk_ok && g_pd.blk_ff == ff && g_pd.blk_gen == g_pd.cgen &&
         (!ff || g_pd.blk_ffgen == g_pd.ffgen) && g_pd.blk_value == hle_fe_last_value() &&
-        !memcmp(g_pd.blk_psz, psz, sizeof(psz))) {
+        !memcmp(g_pd.blk_psz, psz, sizeof(psz)) && !memcmp(g_pd.blk_bord, bord, sizeof(bord))) {
         c_off = g_pd.blk_off;
         g_pd.blk_reused++;
     } else {
-        c_off = arena(sizeof(g_pd.consts) + sizeof(g_pd.cur) + 16, &cb);
+        c_off = arena(sizeof(g_pd.consts) + sizeof(g_pd.cur) + 16 * HLE_VSH_EXTRA_REGS, &cb);
         if (c_off == HLE_ARENA_FULL) {
             skip(SK_EMIT_ARENA);
             return;
@@ -4356,6 +4397,10 @@ static void emit(HleCmdDraw *d)
         memcpy(cb + sizeof(g_pd.consts), g_pd.cur, sizeof(g_pd.cur));
         const float vpsz[4] = { psz[0], psz[1], 0.0f, 0.0f };
         memcpy(cb + sizeof(g_pd.consts) + sizeof(g_pd.cur), vpsz, sizeof(vpsz));
+        /* SET_STIPPLE_PATTERN's 32 words (stip[], shader/vsh.h) */
+        memcpy(cb + sizeof(g_pd.consts) + sizeof(g_pd.cur) + sizeof(vpsz), &R(0x1480), 128);
+        memcpy(cb + sizeof(g_pd.consts) + sizeof(g_pd.cur) + sizeof(vpsz) + 128, bord, sizeof(bord));
+        memcpy(g_pd.blk_bord, bord, sizeof(bord));
         memcpy(g_pd.blk_psz, psz, sizeof(psz));
         g_pd.blk_ok = true;
         g_pd.blk_ff = ff;
@@ -4378,6 +4423,9 @@ static void emit(HleCmdDraw *d)
         d->tex[s] = texture(s, &unset, &lin);
         d->tex_unset |= (uint32_t)unset << s;
         d->tex_lin |= (uint32_t)lin << s;
+        if (d->tex[s] && (bord_mask >> s & 1)) {
+            d->tex_lin |= 256u << s;
+        }
         /* per draw: the state cache isn't rebuilt when only a texture changes */
         d->tex_rect[s] = lin ? R(NV097_SET_TEXTURE_IMAGE_RECT + 64 * s) : 0;
         d->tex_ord |= tex_order(s, d->tex[s]) << 4 * s;
@@ -5472,8 +5520,17 @@ void hle_pbd_method(uint32_t m, uint32_t v)
     if (!g_pd.on || m >= 0x2000) {
         return;
     }
+    if (m == 0x043C && v > 0x1FF) {
+        /* SET_POINT_SIZE past its 6.3 bits: ignored, not clamped or masked;
+         * the size before stays (nxdk_pgraph_tests' Point size: sizes rising
+         * by 2 pixels stop at 62, the last one within the range) */
+        return;
+    }
     if (g_pd.in_draw && g_pd.ndm < 12) {     /* debug: what an empty draw held */
         g_pd.dm[g_pd.ndm++] = m << 16 | (v & 0xFFFF);
+    }
+    if (m >= 0x1480 && m < 0x1500 && g_pd.r[m >> 2] != v) {
+        g_pd.cgen++;                        /* the stipple pattern: in the constant block */
     }
     if (g_pd.r[m >> 2] != v && (g_ff_regs[m >> 8] >> ((m >> 2) & 63) & 1)) {
         g_pd.ffgen++;                       /* (D3D sends matrices again unchanged) */

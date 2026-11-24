@@ -39,6 +39,8 @@ bool nc_hle_pb_active(void);
 void nc_hle_set_vk_loader(void *gipa);
 /* Before boot: the HLE GPU's render scale (1-4x the title's resolution). */
 void nc_hle_set_render_scale(int scale);
+/* The render scale of a title in 720p (1 to 3; 1 unless set). */
+void nc_hle_set_render_scale_720p(int scale);
 /* The decoder's frame pace (the app's "Frame pacing" setting): after a swap
  * it waits for the GPU to finish the swap depth (1-3) before it; 0 off.
  * Any time: the decoder reads it at each swap. */

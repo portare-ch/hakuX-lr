@@ -48,7 +48,9 @@ typedef struct HleFfhwKey {
                                            (back registers, -N), or unlit (0, 0, 0, 1) */
     uint8_t bsrc[4];                    /* SET_COLOR_MATERIAL 15:8: the back's emission,
                                            ambient, diffuse, specular sources (as src) */
-    uint8_t pad[1];
+    uint8_t texgen_inf;                 /* SET_TEXGEN_VIEW_MODEL: INFINITE_VIEWER (the
+                                           reflection and sphere maps' eye vector is
+                                           the view axis, not the vertex's direction) */
 } HleFfhwKey;                           /* 48 bytes: three program slots */
 
 #define HLE_FFHW_SLOTS (sizeof(HleFfhwKey) / 16)

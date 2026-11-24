@@ -72,7 +72,8 @@ static bool state_unread(uint32_t m)
 {
     return (m >= 0x0440 && m < 0x09C0) ||              /* matrices, texgen planes */
            (m >= 0x09D0 && m < 0x0A60) ||              /* fog plane .. eye position */
-           (m >= 0x0C00 && m < 0x1500) ||              /* lights */
+           (m >= 0x0C00 && m < 0x147C) ||              /* lights */
+           (m >= 0x1480 && m < 0x1500) ||              /* the stipple pattern (pb/pbdraw.c) */
            (m >= 0x1720 && m < 0x17A0) ||              /* vertex arrays */
            /* a stage's OFFSET, FORMAT, CONTROL1, +0x18, IMAGE_RECT, PALETTE */
            (m >= 0x1B00 && m < 0x1C00 && ((0x1D3u >> ((m >> 2) & 15)) & 1));
@@ -149,6 +150,12 @@ void hle_kelvin_method(uint32_t m, uint32_t v)
         if (s_logged++ < 4) {
             hle_log("hakuX-lr-hle-pb", "SET_LINE_WIDTH 0x%x refused (>= 0x200)", v);
         }
+        return;
+    }
+    if (m == 0x0354 && (v < 0x200 || v > 0x207)) {
+        /* SET_DEPTH_FUNC with none of NEVER .. ALWAYS: refused, the function
+         * before stays, also one written in the same batch (nxdk_pgraph_tests'
+         * Depth function writes LESS, then 20, and draws: LESS) */
         return;
     }
     uint32_t i = m >> 2;
@@ -241,19 +248,13 @@ void hle_kelvin_state(HleCmdState *st)
     uint32_t *rs = st->rs;
     for (unsigned i = 0; i < ARRAY_SIZE(k_rs_map); i++) {
         if (W(k_rs_map[i].m)) {
-            /* a DEPTH_FUNC that is none of NEVER .. ALWAYS (0x200 .. 0x207)
-             * leaves the one before in effect (nxdk_pgraph_tests' Depth
-             * function writes 0, 10 .. 70 after each) */
-            if (k_rs_map[i].rs == RS_ZFUNC && (R(0x0354) < 0x200 || R(0x0354) > 0x207) &&
-                rs[RS_ZFUNC] >= 0x200 && rs[RS_ZFUNC] <= 0x207) {
-                continue;
-            }
             rs[k_rs_map[i].rs] = R(k_rs_map[i].m);
         }
     }
     /* D3DRS_LOGICOP holds the active GL op, or zero when disabled. */
     rs[RS_LOGICOP] = R(0x17BC) ? R(0x17C0) : 0;
     st->aactl = W(0x1D7C) ? R(0x1D7C) : 0xFFFF0001u;   /* SET_ANTI_ALIASING_CONTROL */
+    st->stipple_en = R(0x147C) & 1;     /* SET_STIPPLE_ENABLE */
     static const float k_eye[3] = { 0.0f, 0.0f, -1.0f };
     for (unsigned i = 0; i < 3; i++) {  /* SET_EYE_VECTOR (envytools' TEX_SHADER_CONST_EYE) */
         if (W(0x181C + 4 * i)) {

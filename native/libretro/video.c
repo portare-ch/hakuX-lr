@@ -21,8 +21,8 @@
 #include <string.h>
 #include <time.h>
 
-#define MAX_W 3840
-#define MAX_H 2160
+#define MAX_W HLE_DISP_MAX_W
+#define MAX_H HLE_DISP_MAX_H
 
 static struct {
     uint32_t w, h;           /* cropped frame size */

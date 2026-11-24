@@ -176,7 +176,13 @@ void hle_barrier_set_catch_up(void (*catch_up)(void))
     __atomic_store_n(&g_catch_up, catch_up, __ATOMIC_RELEASE);
 }
 
-void hle_barrier_arm_copied(uint32_t pa, uint32_t len)
+/* Bits 0-11 hold the start offset, bit 15 marks texels, and bits 16-28 hold the exclusive end. */
+#define CS_TEXELS 0x8000u
+#define CS_LO(v) ((v) & 0xFFFu)
+#define CS_HI(v) ((v) >> 16)
+
+/* keep: protect again without clearing the pages' written state. */
+static void arm_copied(uint32_t pa, uint32_t len, uint32_t flags, bool keep)
 {
     if (!g_cspan || !__atomic_load_n(&g_catch_up, __ATOMIC_ACQUIRE) || !len ||
         (uint64_t)pa + len > g_ram) {
@@ -189,13 +195,50 @@ void hle_barrier_arm_copied(uint32_t pa, uint32_t len)
         uint32_t *s = &g_cspan[a >> 12];
         uint32_t old = __atomic_load_n(s, __ATOMIC_RELAXED), v;
         do {
-            v = old ? MIN(old & 0xFFFF, lo) | MAX(old >> 16, hi) << 16 : lo | hi << 16;
+            v = (old ? MIN(CS_LO(old), lo) | MAX(CS_HI(old), hi) << 16 : lo | hi << 16) |
+                (old & CS_TEXELS) | flags;
         } while (!__atomic_compare_exchange_n(s, &old, v, true, __ATOMIC_RELEASE, __ATOMIC_RELAXED));
     }
     /* protected after the spans are set: a store from now on faults and
      * finds its span */
     uint64_t lo = pa & ~4095u;
-    hle_host_mem_test_and_clear(hle_ram_addr_base() + lo, ((end + 4095) & ~4095ull) - lo);
+    if (keep) {
+        hle_host_mem_rearm((uint32_t)lo, (uint32_t)(((end + 4095) & ~4095ull) - lo));
+    } else {
+        hle_host_mem_test_and_clear(hle_ram_addr_base() + lo, ((end + 4095) & ~4095ull) - lo);
+    }
+}
+
+void hle_barrier_arm_copied(uint32_t pa, uint32_t len)
+{
+    arm_copied(pa, len, 0, false);
+}
+
+void hle_barrier_arm_texels(uint32_t pa, uint32_t len)
+{
+    arm_copied(pa, len, CS_TEXELS, false);
+}
+
+/* Texel spans written by this guest thread since its last PUT. On the heap: as a thread-local
+ * array it exceeded the static TLS space and the core failed to load on ARM64. */
+typedef struct {
+    uint32_t *page, *span;
+    unsigned n, cap;
+} Rearm;
+static __thread Rearm *t_rearm;
+
+void hle_barrier_rearm_texels(void)
+{
+    Rearm *const r = t_rearm;
+    if (!r) {
+        return;
+    }
+    for (unsigned i = 0; i < r->n; i++) {
+        const uint32_t v = r->span[i];
+        /* Re-arm once. The decoder marks the span again if a later draw uses it. */
+        arm_copied((r->page[i] << 12) + CS_LO(v), CS_HI(v) - CS_LO(v), 0, true);
+    }
+    r->n = 0;
 }
 
 bool hle_barrier_contended(uint32_t pa, uint32_t len)
@@ -1036,12 +1079,30 @@ void hle_mem_first_write(uint64_t ram_addr, unsigned size)
      * decoded, may read again: those draws come first, as the console's GPU,
      * close behind the pushes, would have read them. The page is dirty from
      * here on; the next copy arms it again. */
-    const uint32_t span = g_cspan ? __atomic_exchange_n(&g_cspan[pa >> 12], 0, __ATOMIC_ACQ_REL) : 0;
-    if (span && (pa & 4095) >= (span & 0xFFFF) && (pa & 4095) < (span >> 16)) {
+    uint32_t span = g_cspan ? __atomic_exchange_n(&g_cspan[pa >> 12], 0, __ATOMIC_ACQ_REL) : 0;
+    if (span && (pa & 4095) + MAX(size, 1u) > CS_LO(span) && (pa & 4095) < CS_HI(span)) {
         void (*catch_up)(void) = __atomic_load_n(&g_catch_up, __ATOMIC_ACQUIRE);
         if (catch_up) {
             catch_up();
+            /* This write also consumes any span the decoder armed during catch-up. */
+            const uint32_t set = __atomic_exchange_n(&g_cspan[pa >> 12], 0, __ATOMIC_ACQ_REL);
+            if (set & CS_TEXELS) {
+                span = set;
+            }
         }
+    }
+    if (span & CS_TEXELS) {
+        if (!t_rearm) {
+            t_rearm = g_new0(Rearm, 1);
+        }
+        Rearm *const r = t_rearm;
+        if (r->n == r->cap) {
+            r->cap = r->cap ? r->cap * 2 : 256;
+            r->page = g_renew(uint32_t, r->page, r->cap);
+            r->span = g_renew(uint32_t, r->span, r->cap);
+        }
+        r->page[r->n] = pa >> 12;
+        r->span[r->n++] = span;
     }
     if (!g_pu.max && !g_watch) {
         if (span) {

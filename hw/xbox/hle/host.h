@@ -147,6 +147,8 @@ const char *hle_host_base_path(void);
 const char *hle_host_hle_mode(void);
 /* The render scale, 1-4 times the title's resolution. */
 int hle_host_render_scale(void);
+/* ... of a title in 720p (1 to 3). */
+int hle_host_render_scale_720p(void);
 /* The decoder's frame pace: the game slows to the render pace instead of
  * simulating ahead of the screen (pb/pbdraw.c g_pace). */
 int hle_host_frame_pace(void);

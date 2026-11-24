@@ -281,7 +281,9 @@ typedef struct HleCmdState {
                                    outside the range is dropped */
     uint32_t znearfar;          /* ... ZMIN_MAX_CONTROL CULL_NEAR_FAR_EN (bit 0): under
                                    W-buffering the range is the program's z's too */
-    uint32_t znearfar_pad;      /* (the state is 8-byte words) */
+    uint32_t stipple_en;        /* NV2A SET_STIPPLE_ENABLE (0x147C): filled polygons draw
+                                   only the pixels whose bit of the 32 x 32 pattern is
+                                   set (the pattern: the draw's constant block, vsh.h) */
     uint32_t aactl;             /* NV2A SET_ANTI_ALIASING_CONTROL (0x1D7C): bit 0
                                    multisampling, 4 alpha-to-coverage, 8 alpha-to-one,
                                    31:16 the sample mask (as NV30's MULTISAMPLE_CONTROL);
@@ -324,8 +326,8 @@ typedef struct HleCmdDraw {
     uint32_t tex[HLE_TSS_STAGES];   /* object ids, 0 = none */
     uint32_t tex_unset;         /* bit s: no texture set (D3D's Textures[s] NULL), as
                                    against one HLE could not prepare */
-    uint32_t tex_lin;           /* bit s: the stage's format is linear, sampled by texel
-                                   coordinates (whatever the layout of a target there) */
+    uint32_t tex_lin;           /* Bit s marks a linear texture format, regardless of target layout.
+                                   Bit 8+s selects the stored texture border (bord[s]). */
     uint32_t tex_ord;           /* Bits 4s..4s+3: stage s's byte order when sampling a
                                    32-bit render target (HLE_DRAW_ORD_*). */
     uint32_t tex_rect[HLE_TSS_STAGES];  /* a linear stage's own size, its IMAGE_RECT

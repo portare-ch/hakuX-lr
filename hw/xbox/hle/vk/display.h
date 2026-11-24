@@ -19,6 +19,9 @@
 
 /* Once, before the presenter may come (hle_back_start). */
 void hle_disp_setup(void);
+/* Maximum output dimensions reported to the frontend. */
+#define HLE_DISP_MAX_W 3840u
+#define HLE_DISP_MAX_H 2160u
 /* Render thread (CONFIG_VULKAN builds only). */
 int hle_disp_init(uint32_t w, uint32_t h);
 void hle_disp_shutdown(void);

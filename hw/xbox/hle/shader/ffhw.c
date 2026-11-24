@@ -87,6 +87,10 @@ static void skinning(Buf *b, const HleFfhwKey *k)
 
 static void texgen(Buf *b, const HleFfhwKey *k)
 {
+    /* the eye vector the reflection is of: to the vertex, or with an infinite
+     * viewer the view axis for every vertex (nxdk_pgraph_tests' Texgen,
+     * *_InfiniteViewer: one colour over the quad) */
+    const char *eye = k->texgen_inf ? "vec3(0.0, 0.0, 1.0)" : "normalize(tPos.xyz)";
     for (unsigned s = 0; s < 4; s++) {
         put(b, "    oT%u = v%u;\n", s, 9 + s);
         for (unsigned j = 0; j < 4; j++) {
@@ -97,11 +101,11 @@ static void texgen(Buf *b, const HleFfhwKey *k)
             } else if (g == HLE_FFHW_TG_OBJECT) {
                 put(b, "    oT%u.%c = dot(c[%u], pos);\n", s, c, plane);
             } else if (g == HLE_FFHW_TG_SPHERE && j < 2) {
-                put(b, "    { vec3 r = reflect(normalize(tPos.xyz), tN);\n"
+                put(b, "    { vec3 r = reflect(%s, tN);\n"
                        "      oT%u.%c = r.%c / (2.0 * length(r + vec3(0.0, 0.0, 1.0))) + 0.5; }\n",
-                    s, c, c);
+                    eye, s, c, c);
             } else if (g == HLE_FFHW_TG_REFLECTION && j < 3) {
-                put(b, "    oT%u.%c = reflect(normalize(tPos.xyz), tN).%c;\n", s, c, c);
+                put(b, "    oT%u.%c = reflect(%s, tN).%c;\n", s, c, eye, c);
             } else if (g == HLE_FFHW_TG_NORMAL && j < 3) {
                 put(b, "    oT%u.%c = tN.%c;\n", s, c, c);
             }

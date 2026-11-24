@@ -53,6 +53,7 @@ static struct {
     float pend_z;
     HleCmdViewport vp;
     uint32_t disp_w, disp_h, present_id;
+    uint32_t scale;                     /* the session's render scale, 0 until its first device */
     bool warned_partial;
     HleBackStats st;
 } g_back;
@@ -858,7 +859,13 @@ uint32_t g_hle_rscale = 1;
 
 static void cmd_device(const HleCmdDevice *c, bool reset)
 {
-    uint32_t scale = MIN(MAX(hle_host_render_scale(), 1), 4);
+    /* The first display mode picks the session's render scale: 720p has its own. A later mode keeps
+     * it, since a new scale would discard live surfaces. */
+    if (!g_back.scale) {
+        g_back.scale = c->disp_w == 1280 && c->disp_h == 720 ? MIN(MAX(hle_host_render_scale_720p(), 1), 3)
+                                                             : MIN(MAX(hle_host_render_scale(), 1), 4);
+    }
+    uint32_t scale = g_back.scale;
     /* A Reset replaces only the device's surfaces (the front end destroys the
      * old ones by OBJ_DESTROY): the title's own render targets and textures
      * keep their images. A new scale resizes every image. */
@@ -875,10 +882,23 @@ static void cmd_device(const HleCmdDevice *c, bool reset)
     g_back.disp_w = c->disp_w;
     g_back.disp_h = c->disp_h;
     g_back.present_id = c->present_id;
-    hle_disp_init(c->disp_w * scale, c->disp_h * scale);
-    hle_log("hakuX-lr-hle-back", "DEVICE_%s %ux%u surfaces=%u present=%u scale=%u",
+    /* Fit the output to the frontend limits. Changing render scale here would discard live surfaces. */
+    uint32_t dw = c->disp_w * scale, dh = c->disp_h * scale;
+    if (dw > HLE_DISP_MAX_W || dh > HLE_DISP_MAX_H) {
+        if ((uint64_t)dw * HLE_DISP_MAX_H > (uint64_t)dh * HLE_DISP_MAX_W) {
+            dh = (uint32_t)((uint64_t)dh * HLE_DISP_MAX_W / dw);
+            dw = HLE_DISP_MAX_W;
+        } else {
+            dw = (uint32_t)((uint64_t)dw * HLE_DISP_MAX_H / dh);
+            dh = HLE_DISP_MAX_H;
+        }
+        dw = MAX(dw & ~1u, 2u);
+        dh = MAX(dh & ~1u, 2u);
+    }
+    hle_disp_init(dw, dh);
+    hle_log("hakuX-lr-hle-back", "DEVICE_%s %ux%u surfaces=%u present=%u scale=%u, presented %ux%u",
             reset ? "RESET" : "CREATE", c->disp_w, c->disp_h, c->nsurf, c->present_id,
-            scale);
+            scale, dw, dh);
 }
 
 /* ---- debug: render-target dump (debug.hakux.rtdump) ---------------------- */

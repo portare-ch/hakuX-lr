@@ -88,11 +88,11 @@ static const char k_fs16[] =
     "  uint v = uint(d * 65535.0 + 0.5);\n"
     /* a float buffer (map[1] = HLE_ZREAD_FLOAT): the depth, the image's over
      * 511.9375, as the NV2A's 16 bits: a 4-bit exponent from 2^-7 and 12
-     * bits of mantissa. A depth of exponent 0 (below 2^-6) is stored 0
-     * (nxdk_pgraph_tests' Depth buffer: every word under 0x1000) */
+     * bits of mantissa. (A fragment's depth of exponent 0 is already 0 in
+     * the image, shader/psh.c; a clear's word under 0x1000 reads back.) */
     "  if (pc.map.y == 0x80u) {\n"
     "    uint b = floatBitsToUint(d * 511.9375) + 2u;\n"
-    "    v = b < 0x3C800000u ? 0u : min((b - 0x3C000000u) >> 11, 65535u);\n"
+    "    v = b < 0x3C000000u ? 0u : min((b - 0x3C000000u) >> 11, 65535u);\n"
     "  }\n"
     "  o = vec4(float(v) / 65535.0);\n"
     "}\n";

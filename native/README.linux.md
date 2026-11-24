@@ -343,6 +343,9 @@ except Crop Overscan, Rumble and Frame Pacing, which update immediately:
 | `hakux_render_scale` | `1`–`4` times the game's native resolution | `2` |
 | `hakux_crop_overscan` | `enabled` (crop TV borders), `disabled` (full frame) | `enabled` |
 | `hakux_screen_format` | `normal`, `widescreen` (shown 16:9), `letterbox` | `normal` |
+| `hakux_video_480p` | `enabled`, `disabled` | `enabled` |
+| `hakux_video_720p` | `enabled`, `disabled` | `disabled` |
+| `hakux_render_scale_720p` | `1`–`3` times 1280x720, for a game running in 720p | `1` |
 | `hakux_language` | `auto` (RetroArch's), `english`, `japanese`, `german`, `french`, `spanish`, `italian`, `korean`, `chinese`, `portuguese` | `auto` |
 | `hakux_video_region` | `auto` (the game's region), `ntsc-m`, `ntsc-j`, `pal` | `auto` |
 | `hakux_rumble` | `disabled`, `enabled` (controller vibration) | `disabled` |
@@ -397,9 +400,8 @@ Under **Xbox Live**, select **Register this console**, then
 you. **Network** is on by default. Account recovery from this dashboard is
 still pending.
 
-480p is enabled, as on a console with the component cable, so a 4:3
-NTSC console's video flags are `00080000`. PAL consoles also get PAL60;
-720p and 1080i are disabled. Use RetroArch's
+The default video flags for a 4:3 NTSC console are `00080000` (480p).
+Enabling 720p adds `00020000`. PAL consoles also get PAL60. Use RetroArch's
 shaders for filters such as FXAA and **Core provided** for the core's 4:3 or
 16:9 aspect ratio.
 

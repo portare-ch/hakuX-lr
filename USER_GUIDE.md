@@ -144,7 +144,9 @@ Crop Overscan, Rumble and Frame Pacing take effect immediately.
 | Option | Behavior |
 | --- | --- |
 | Render Scale | Defaults to 2×. Use 1× for native resolution or up to 4× for a sharper picture. |
+| Render Scale (720p) | Used instead of Render Scale by a game running in 720p. Defaults to 1× (1280×720); 3× is 3840×2160. |
 | Screen Format | **Auto** selects 16:9 for games known to support widescreen, unless the frontend reports a display narrower than 16:10, and while a widescreen patch is active; 4:3 otherwise. A frontend that does not report the display's size (RetroArch 1.22.2 and older) counts as wide: select **Normal** on a 4:3 display there. Select **Widescreen** for a game with native 16:9 support that Auto does not know. Set RetroArch’s aspect ratio to **Core provided**. |
+| 480p, 720p | Games can select either enabled mode on an NTSC console. 480p is on by default. Enable 720p for 1280×720 widescreen in supported games such as Amped 2. Such a game uses **Render Scale (720p)**. Output is limited to 3840×2160. |
 | Crop Overscan | Enabled by default to hide borders. Disable it to show the whole frame. |
 | Accuracy Level | **Custom** uses the selected Combiner Precision. **Potato**, **Medium** and **High** apply the graphics settings below. Render scale is independent. |
 | Combiner Precision | Used with **Custom**. Defaults to **Accurate** on AMD64 and **Fast** on ARM64. Fast skips 9-bit combiner rounding. |

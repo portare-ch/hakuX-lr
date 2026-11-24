@@ -17,12 +17,14 @@
  *   first, the sum up to 2 unless clamped (EFG flags: 0x80 clamp, 0x40
  *   complement v1, 0x20 complement r0). Without one, the output is r0.
  */
+#include <math.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 #include "hw/xbox/hle/shader/ff.h"
 #include "hw/xbox/hle/shader/psh.h"
+#include "hw/xbox/hle/shader/vsh.h"
 
 typedef struct Buf {
     char *p;
@@ -248,6 +250,17 @@ static void final_combiner(Buf *b, const HlePshKey *k)
            "    outc = vec4(A * B + (1.0 - A) * C + D, G);\n  }\n");
 }
 
+/* Map the convolution centre into the bordered buffer; BTC clamps each tap to its border texels. */
+#define K_CONV_BTEX \
+    "#undef BTC\n" \
+    "#ifdef BTEX\n" \
+    "  if (bord[s].x > 0.0)\n" \
+    "    uv = clamp(uv * bord[s].xy + 4.0, vec2(0.5), bord[s].xy + 7.5) / sz;\n" \
+    "#define BTC(p) (bord[s].x > 0.0 ? clamp(p, vec2(0.5) / sz, (bord[s].xy + 7.5) / sz) : (p))\n" \
+    "#else\n" \
+    "#define BTC(p) (p)\n" \
+    "#endif\n"
+
 /* The convolution filters at the texture's own texels (guest ones: a scaled
  * surface's are the resolution scale's wide), level 0: taps through the
  * stage's level-0 sampler (pc.tex bits 24-31, vk/draw.c sampler_lod0), at
@@ -266,6 +279,7 @@ static const char k_conv_glsl[] =
     "  uint ti = pc.tex[s] & 0xFFFFu, si = (pc.tex[s] >> 16) & 0xFFu, ci = pc.tex[s] >> 24;\n"
     "  vec2 sz = vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[0]), 0));\n"
     "  float sc = (pc.flags & (256u << s)) != 0u ? float(pc.flags >> 24) : 1.0;\n"
+    K_CONV_BTEX
     "  if ((pc.flags & (1u << s)) != 0u)\n"
     "    uv /= sz / sc;\n"
     /* a scaled surface holds a texel's own sample in its block's first pixel (ff.h HLE_TEXEL_EDGE_GLSL) */
@@ -277,13 +291,13 @@ static const char k_conv_glsl[] =
     "    return textureGrad(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), "
     "uv, gx, gy);\n"
     "  vec2 d = sc / sz;\n"
-    "  vec4 diag = tap(ti, ci, uv - d) + tap(ti, ci, uv + d) +\n"
-    "              tap(ti, ci, uv + vec2(d.x, -d.y)) + tap(ti, ci, uv + vec2(-d.x, d.y));\n"
+    "  vec4 diag = tap(ti, ci, BTC(uv - d)) + tap(ti, ci, BTC(uv + d)) +\n"
+    "              tap(ti, ci, BTC(uv + vec2(d.x, -d.y))) + tap(ti, ci, BTC(uv + vec2(-d.x, d.y)));\n"
     "  if (kern == 1u)\n"
-    "    return 0.5 * tap(ti, ci, uv) + 0.125 * diag;\n"
-    "  vec4 edge = tap(ti, ci, uv + vec2(d.x, 0.0)) + tap(ti, ci, uv - vec2(d.x, 0.0)) +\n"
-    "              tap(ti, ci, uv + vec2(0.0, d.y)) + tap(ti, ci, uv - vec2(0.0, d.y));\n"
-    "  return (4.0 * tap(ti, ci, uv) + 2.0 * edge + diag) / 16.0;\n"
+    "    return 0.5 * tap(ti, ci, BTC(uv)) + 0.125 * diag;\n"
+    "  vec4 edge = tap(ti, ci, BTC(uv + vec2(d.x, 0.0))) + tap(ti, ci, BTC(uv - vec2(d.x, 0.0))) +\n"
+    "              tap(ti, ci, BTC(uv + vec2(0.0, d.y))) + tap(ti, ci, BTC(uv - vec2(0.0, d.y)));\n"
+    "  return (4.0 * tap(ti, ci, BTC(uv)) + 2.0 * edge + diag) / 16.0;\n"
     "}\n";
 /* Apply GL-style clamp to each convolution tap. */
 static const char k_conv_glc_glsl[] =
@@ -295,6 +309,7 @@ static const char k_conv_glc_glsl[] =
     "  uint ti = pc.tex[s] & 0xFFFFu, si = (pc.tex[s] >> 16) & 0xFFu, ci = pc.tex[s] >> 24;\n"
     "  vec2 sz = vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[0]), 0));\n"
     "  float sc = (pc.flags & (256u << s)) != 0u ? float(pc.flags >> 24) : 1.0;\n"
+    K_CONV_BTEX
     "  if ((pc.flags & (1u << s)) != 0u)\n"
     "    uv /= sz / sc;\n"
     /* a scaled surface holds a texel's own sample in its block's first pixel (ff.h HLE_TEXEL_EDGE_GLSL) */
@@ -306,13 +321,13 @@ static const char k_conv_glc_glsl[] =
     "    return textureGrad(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), "
     "GLC2(s, uv), gx, gy);\n"
     "  vec2 d = sc / sz;\n"
-    "  vec4 diag = tap(ti, ci, GLC2(s, uv - d)) + tap(ti, ci, GLC2(s, uv + d)) +\n"
-    "              tap(ti, ci, GLC2(s, uv + vec2(d.x, -d.y))) + tap(ti, ci, GLC2(s, uv + vec2(-d.x, d.y)));\n"
+    "  vec4 diag = tap(ti, ci, GLC2(s, BTC(uv - d))) + tap(ti, ci, GLC2(s, BTC(uv + d))) +\n"
+    "              tap(ti, ci, GLC2(s, BTC(uv + vec2(d.x, -d.y)))) + tap(ti, ci, GLC2(s, BTC(uv + vec2(-d.x, d.y))));\n"
     "  if (kern == 1u)\n"
-    "    return 0.5 * tap(ti, ci, GLC2(s, uv)) + 0.125 * diag;\n"
-    "  vec4 edge = tap(ti, ci, GLC2(s, uv + vec2(d.x, 0.0))) + tap(ti, ci, GLC2(s, uv - vec2(d.x, 0.0))) +\n"
-    "              tap(ti, ci, GLC2(s, uv + vec2(0.0, d.y))) + tap(ti, ci, GLC2(s, uv - vec2(0.0, d.y)));\n"
-    "  return (4.0 * tap(ti, ci, GLC2(s, uv)) + 2.0 * edge + diag) / 16.0;\n"
+    "    return 0.5 * tap(ti, ci, GLC2(s, BTC(uv))) + 0.125 * diag;\n"
+    "  vec4 edge = tap(ti, ci, GLC2(s, BTC(uv + vec2(d.x, 0.0)))) + tap(ti, ci, GLC2(s, BTC(uv - vec2(d.x, 0.0)))) +\n"
+    "              tap(ti, ci, GLC2(s, BTC(uv + vec2(0.0, d.y)))) + tap(ti, ci, GLC2(s, BTC(uv - vec2(0.0, d.y))));\n"
+    "  return (4.0 * tap(ti, ci, GLC2(s, BTC(uv))) + 2.0 * edge + diag) / 16.0;\n"
     "}\n";
 
 /* A D3D blend factor (Vulkan's as vk/draw.c blend_factor maps them) as a
@@ -590,6 +605,9 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
     put(&b, "#version 450\n#extension GL_EXT_nonuniform_qualifier : require\n%s%s",
         k->poly_smooth ? HLE_BARY_EXT_GLSL : "",
         hle_push_glsl());
+    if (k->zclamp & (HLE_PSH_STIPPLE | HLE_PSH_BTEX)) {
+        put(&b, "%s" HLE_VSH_BLOCK_GLSL, (k->zclamp & HLE_PSH_BTEX) ? "#define BTEX 1\n" : "");
+    }
     if (k->shadow_point >> 4) {
         /* The HILO dot mappings of an R16B16 sampled as stored (w16): its
          * two halves as filtered, at 16 bits, where dmap puts them together
@@ -673,6 +691,11 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "  uint ti = pc.tex[s] & 0xFFFFu, si = (pc.tex[s] >> 16) & 0xFFu;\n"
             "%s"
             "  vec2 sz = vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[0]), 0));\n"
+            /* The image starts four texels in. Clamp to the outermost border texel centres. */
+            "#ifdef BTEX\n"
+            "  if (bord[s].x > 0.0)\n"
+            "    uv = clamp(uv * bord[s].xy + 4.0, vec2(0.5), bord[s].xy + 7.5) / sz;\n"
+            "#endif\n"
             "  if ((pc.flags & (1u << s)) != 0u)\n"
             "    uv /= sz / ((pc.flags & (256u << s)) != 0u ? float(pc.flags >> 24) : 1.0);\n"
             /* a scaled surface holds a texel's own sample in its block's first pixel
@@ -708,14 +731,47 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "    uv += 0.000244140625 / sz;\n"
             "  return %s;\n"
             "}\n"
+            /* A direct 2D lookup's coordinates in a bordered buffer, as samp maps them. */
+            "vec2 bt2(uint s, vec2 uv) {\n"
+            "#ifdef BTEX\n"
+            "  if (bord[s].x > 0.0) {\n"
+            "    uint ti = pc.tex[s] & 0xFFFFu;\n"
+            "    vec2 sz = vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[0]), 0));\n"
+            "    return clamp(uv * bord[s].xy + 4.0, vec2(0.5), bord[s].xy + 7.5) / sz;\n"
+            "  }\n"
+            "#endif\n"
+            "  return uv;\n"
+            "}\n"
             "vec4 samp3(uint s, vec3 uvw) {\n"
             "  uint ti = pc.tex[s] & 0xFFFFu, si = (pc.tex[s] >> 16) & 0xFFu;\n"
+            "#ifdef BTEX\n"
+            "  if (bord[s].x > 0.0) {\n"
+            "    vec3 sz3 = vec3(textureSize(sampler3D(uTex3D[nonuniformEXT(ti)], uSmp[0]), 0));\n"
+            "    uvw = clamp(uvw * bord[s].xyz + 4.0, vec3(0.5), bord[s].xyz + 7.5) / sz3;\n"
+            "  }\n"
+            "#endif\n"
             "  return %s;\n"
             "}\n"
             "vec4 sampc(uint s, vec3 dir) {\n"
             "  uint ti = pc.tex[s] & 0xFFFFu, si = (pc.tex[s] >> 16) & 0xFFu;\n"
-            "  return texture(samplerCube(uTexCube[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), "
-            "dir);\n"
+            /* A zero-length direction: the NV2A takes the +X face at its corner
+             * (0, 0), from the smallest mip level the filter allows
+             * (nxdk_pgraph_tests' Texture cubemap, *ZeroVector*). Here the
+             * centre of that face's texel (0, 0), which lies in texel (0, 0)
+             * of every level; the sampler's LOD range picks the level. The
+             * ordinary lookup's derivatives are taken first, for every
+             * fragment (implicit ones are undefined after a branch that only
+             * some fragments of a quad take), so each fragment makes one
+             * lookup. */
+            "  vec3 gx = dFdx(dir), gy = dFdy(dir);\n"
+            "  if (dir == vec3(0.0)) {\n"
+            "    float n = float(textureSize(samplerCube(uTexCube[nonuniformEXT(ti)], "
+            "uSmp[nonuniformEXT(si)]), 0).x);\n"
+            "    return textureLod(samplerCube(uTexCube[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), "
+            "vec3(1.0, 1.0 - 1.0 / n, 1.0 - 1.0 / n), 1000.0);\n"
+            "  }\n"
+            "  return textureGrad(samplerCube(uTexCube[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), "
+            "dir, gx, gy);\n"
             "}\n"
             /* PSDotMapping of a texture color to a vector */
             "vec3 dmap(uint m, vec4 c) {\n"
@@ -999,9 +1055,9 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             put(&b, "  vec4 t%u;\n"
                     "  { uint ti = pc.tex[%u] & 0xFFFFu, si = (pc.tex[%u] >> 16) & 0xFFu;\n"
                     "    t%u = %s(sampler2D(uTex2D[nonuniformEXT(ti)], "
-                    "uSmp[nonuniformEXT(si)]), %s%s.%s); }\n",
+                    "uSmp[nonuniformEXT(si)]), %sbt2(%uu, %s.%s)); }\n",
                 s, s, s, s, gl ? "GLT2" : "texture", gl ? (snprintf(gls, sizeof(gls), "%uu, ", s), gls) : "",
-                tex_read(ts, sizeof(ts), k, in), m == HLE_PST_DPNDNT_AR ? "ar" : "gb");
+                s, tex_read(ts, sizeof(ts), k, in), m == HLE_PST_DPNDNT_AR ? "ar" : "gb");
             break;
         }
         case HLE_PST_DOT_STR_3D:                    /* stage 3: (dot1, dot2, dot3) */
@@ -1030,8 +1086,11 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             /* E the eye vector: the q coordinates of stages 1-3, or (CONST)
              * SET_EYE_VECTOR's, constant across the draw (this stage's bump
              * words) */
+            /* a zero N gives the zero direction whatever E is (0 / 0 on the
+             * NV2A; nxdk_pgraph_tests' DotReflectSpecZeroVector), sampc's case */
             put(&b, "  vec4 t%u;\n  { vec3 n = vec3(dot1, dot2, dot3), e = %s;\n"
-                    "    t%u = sampc(%uu, 2.0 * n * dot(n, e) / max(dot(n, n), 1e-8) - e); }\n",
+                    "    t%u = sampc(%uu, n == vec3(0.0) ? vec3(0.0) :\n"
+                    "                2.0 * n * dot(n, e) / max(dot(n, n), 1e-8) - e); }\n",
                 s, m == HLE_PST_DOT_RFLCT_SPEC ? "vec3(vTex1.w, vTex2.w, vTex3.w)"
                    : "vec3(uintBitsToFloat(pc.bump3), uintBitsToFloat(pc.bumpl[2]))", s, s);
             break;
@@ -1066,9 +1125,9 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
                 put(&b, "  vec4 t%u;\n"
                         "  { uint ti = pc.tex[%u] & 0xFFFFu, si = (pc.tex[%u] >> 16) & 0xFFu;\n"
                         "    t%u = %s(sampler2D(uTex2D[nonuniformEXT(ti)], "
-                        "uSmp[nonuniformEXT(si)]), %svec2(%s.a, %s.a)); }\n",
+                        "uSmp[nonuniformEXT(si)]), %sbt2(%uu, vec2(%s.a, %s.a))); }\n",
                     s, s, s, s, gl ? "GLT2" : "texture", gl ? (snprintf(gls, sizeof(gls), "%uu, ", s), gls) : "",
-                    ts, ts2);
+                    s, ts, ts2);
             }
             break;
         default:                        /* unknown modes */
@@ -1085,6 +1144,13 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
     unsigned n = k->count & 0xFF;
     for (unsigned s = 0; s < n && s < 8; s++) {
         stage(&b, k, s);
+    }
+    if (k->zclamp & HLE_PSH_STIPPLE) {
+        /* nxdk_pgraph_tests' Stipple tests: the bit order as its Asymmetric
+         * pattern shows on the console */
+        put(&b, "  { ivec2 sp = ivec2(gl_FragCoord.xy / float(max((pc.flags >> 16) & 255u, 1u)));\n"
+                "    uint row = uint(31 - (sp.y & 31));\n"
+                "    if (((stip[row >> 2][row & 3u] >> uint((sp.x & 31) ^ 7)) & 1u) == 0u) discard; }\n");
     }
     final_combiner(&b, k);
     put(&b, "  outc = clamp(outc, 0.0, 1.0);\n");
@@ -1212,7 +1278,26 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
     }
     /* the replaced depth replaces W-buffering's too: the fragment's, whatever
      * made it (the polygon offset with it) */
-    put(&b, "%s}\n", zr ? "  gl_FragDepth = zrep;\n" : k->wbuf ? HLE_WBUF_STORE_GLSL : "");
+    if (k->zclamp & HLE_PSH_ZF16) {
+        /* A 16-bit float depth buffer has no word for a depth under 2^-6 (its
+         * exponent 0) but 0: such a fragment is tested and stored as 0, while
+         * a clear's or the CPU's word under 0x1000 stays as written
+         * (nxdk_pgraph_tests' Depth buffer, z16 float cleared to 0x00f: the
+         * fragments up to word 0xfff pass LESS and leave 0). The image holds
+         * the depth times the largest float that keeps 511.9375 within 1
+         * (pb/pbdraw.c zfloat_scale). */
+        float sc = 1.0f / 511.9375f, lim;
+        while (511.9375f * sc > 1.0f) {
+            sc = nextafterf(sc, 0.0f);
+        }
+        lim = 0.015625f * sc;
+        uint32_t lb;
+        memcpy(&lb, &lim, 4);
+        const char *d = zr ? "zrep" : k->wbuf ? "wDepth" : "gl_FragCoord.z";
+        put(&b, "  gl_FragDepth = %s < uintBitsToFloat(0x%08xu) ? 0.0 : %s;\n}\n", d, lb, d);
+    } else {
+        put(&b, "%s}\n", zr ? "  gl_FragDepth = zrep;\n" : k->wbuf ? HLE_WBUF_STORE_GLSL : "");
+    }
     if (unsupported) {
         *unsupported = unsup;
     }

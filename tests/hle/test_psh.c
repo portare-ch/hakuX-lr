@@ -253,7 +253,95 @@ static void test_reflect(void)
     HT_CHECK(strstr(buf, "e = vec3(uintBitsToFloat(pc.bump3), uintBitsToFloat(pc.bumpl[2]))")
              != NULL);
     HT_CHECK(strstr(buf, "vTex3.w") == NULL);
-    HT_CHECK(strstr(buf, "t3 = sampc(3u, 2.0 * n * dot(n, e)") != NULL);
+    /* a zero N: the zero direction, whatever E is */
+    HT_CHECK(strstr(buf, "t3 = sampc(3u, n == vec3(0.0) ? vec3(0.0) :\n"
+                         "                2.0 * n * dot(n, e)") != NULL);
+    /* sampc: the derivatives for every fragment, then one lookup: a zero
+     * direction's (the +X face's texel (0, 0), the LOD by the sampler) or
+     * the ordinary one by those derivatives */
+    const char *all = strstr(buf, "  vec3 gx = dFdx(dir), gy = dFdy(dir);");
+    const char *zero = strstr(buf, "  if (dir == vec3(0.0)) {");
+    const char *lod = strstr(buf, "vec3(1.0, 1.0 - 1.0 / n, 1.0 - 1.0 / n), 1000.0);");
+    const char *grad = strstr(buf, "dir, gx, gy);");
+    HT_CHECK(all && zero && lod && grad && all < zero && zero < lod && lod < grad);
+    HT_CHECK(strstr(buf, "  vec4 c = texture(samplerCube(") == NULL);
+}
+
+/* Check stored-border coordinates for 2D and volume textures. */
+static void test_btex(void)
+{
+    uint32_t rs[HLE_PS_REGS] = { 0 };
+    rs[HLE_PS_TEXMODES] = HLE_PST_PROJECT2D | (unsigned)HLE_PST_PROJECT3D << 5;
+    rs[HLE_PS_RGB_IN] = IN4(R_T0, R_T1, R_ZERO, R_ZERO);
+    rs[HLE_PS_RGB_OUT] = R_R0 << 4;
+    rs[HLE_PS_COUNT] = 1;
+    HlePshKey k;
+    hle_psh_key(rs, &k);
+    k.vol = 2;
+    unsigned un = 99;
+    HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), &un) > 0);
+    HT_CHECK(strstr(buf, "#define BTEX") == NULL && strstr(buf, "VshConst") == NULL);
+    k.zclamp |= HLE_PSH_BTEX;
+    HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), &un) > 0);
+    dump("psh_btex");
+    HT_EQ_U32(un, 0);
+    const char *def = strstr(buf, "#define BTEX 1\n");
+    const char *blk = strstr(buf, "uvec4 stip[8]; vec4 bord[4]; };");
+    const char *s2 = strstr(buf, "    uv = clamp(uv * bord[s].xy + 4.0, vec2(0.5), bord[s].xy + 7.5) / sz;");
+    const char *s3 = strstr(buf, "    uvw = clamp(uvw * bord[s].xyz + 4.0, vec3(0.5), bord[s].xyz + 7.5) / sz3;");
+    HT_CHECK(def && blk && s2 && s3 && def < blk && blk < s2 && s2 < s3);
+    /* Convolution maps the centre before computing gradients. */
+    HT_CHECK(strstr(buf, "sampk") == NULL);
+    k.conv = 1;
+    k.conv_mm = 3;
+    HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), &un) > 0);
+    dump("psh_btex_conv");
+    const char *fk = strstr(buf, "vec4 sampk(uint s, vec2 uv, uint kern, uint when) {");
+    const char *mk = fk ? strstr(fk, "#ifdef BTEX\n  if (bord[s].x > 0.0)\n    uv = clamp(uv * "
+                                     "bord[s].xy + 4.0, vec2(0.5), bord[s].xy + 7.5) / sz;") : NULL;
+    const char *gk = fk ? strstr(fk, "vec2 gx = dFdx(uv), gy = dFdy(uv);") : NULL;
+    blk = strstr(buf, "uvec4 stip[8]; vec4 bord[4]; };");
+    HT_CHECK(blk && fk && mk && gk && blk < fk && mk < gk);
+    /* Each tap is clamped to the border texels, and direct lookups are mapped too. */
+    HT_CHECK(strstr(buf, "tap(ti, ci, BTC(uv - d))") != NULL);
+    HT_CHECK(strstr(buf, "vec2 bt2(uint s, vec2 uv) {") != NULL);
+}
+
+/* A 16-bit float depth target (zclamp's HLE_PSH_ZF16): a depth under 2^-6,
+ * scaled as the image holds it, is written as 0; of the fragment's depth,
+ * W-buffering's or the one DOT_ZW replaces. The key's size stays. */
+static void test_zf16(void)
+{
+    uint32_t rs[HLE_PS_REGS] = { 0 };
+    rs[HLE_PS_RGB_IN] = IN4(R_V0, R_V0, R_ZERO, R_ZERO);
+    rs[HLE_PS_RGB_OUT] = R_R0 << 4;
+    rs[HLE_PS_COUNT] = 1;
+    HlePshKey k;
+    hle_psh_key(rs, &k);
+    unsigned un = 99;
+    HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), &un) > 0);
+    HT_CHECK(strstr(buf, "gl_FragDepth") == NULL);
+    k.zclamp |= HLE_PSH_ZF16;
+    HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), &un) > 0);
+    dump("psh_zf16");
+    HT_EQ_U32(un, 0);
+    float sc = 1.0f / 511.9375f;
+    while (511.9375f * sc > 1.0f) {
+        sc = nextafterf(sc, 0.0f);
+    }
+    float lim = 0.015625f * sc;
+    uint32_t lb;
+    memcpy(&lb, &lim, 4);
+    char want[160];
+    snprintf(want, sizeof(want), "  gl_FragDepth = gl_FragCoord.z < uintBitsToFloat(0x%08xu) ? 0.0 : "
+             "gl_FragCoord.z;\n}\n", lb);
+    HT_CHECK(strstr(buf, want) != NULL);
+    HT_CHECK(lim * 511.9375f <= 0.015625f && nextafterf(lim, 1.0f) * 511.9375f > 0.015625f * 0.999f);
+    k.wbuf = 1;
+    HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), &un) > 0);
+    dump("psh_zf16_wbuf");
+    snprintf(want, sizeof(want), "  gl_FragDepth = wDepth < uintBitsToFloat(0x%08xu) ? 0.0 : wDepth;\n}\n", lb);
+    HT_CHECK(strstr(buf, want) != NULL);
 }
 
 /* The normalization HLE_ZNORM_GLSL emits (z * s + z * s * s for the integer
@@ -271,6 +359,33 @@ static float znorm(float z, float s)
  * dot3 is in depth-buffer units (nxdk_pgraph_tests' DotZW: its first
  * vertex's matrix makes 10000), normalized as a program's screen z,
  * rejected outside the buffer's range (clamped with ZCLAMP_EN) */
+/* SET_STIPPLE_ENABLE on a filled polygon: a bit of the key's zclamp, the
+ * pattern from the draw's constant block; the key's size stays */
+static void test_stipple(void)
+{
+    uint32_t rs[HLE_PS_REGS] = { 0 };
+    rs[HLE_PS_RGB_IN] = IN4(R_V0, R_V0, R_ZERO, R_ZERO);
+    rs[HLE_PS_RGB_OUT] = R_R0 << 4;
+    rs[HLE_PS_COUNT] = 1;
+    HlePshKey k;
+    hle_psh_key(rs, &k);
+    unsigned un = 99;
+    size_t n = hle_psh_glsl(&k, buf, sizeof(buf), &un);
+    HT_CHECK(n > 0 && n == strlen(buf));
+    HT_CHECK(strstr(buf, "stip[") == NULL && strstr(buf, "VshConst") == NULL);
+    k.zclamp |= HLE_PSH_STIPPLE;
+    n = hle_psh_glsl(&k, buf, sizeof(buf), &un);
+    HT_CHECK(n > 0 && n == strlen(buf));
+    dump("psh_stipple");
+    HT_EQ_U32(un, 0);
+    HT_CHECK(strstr(buf, "uniform VshConst { vec4 c[192]; vec4 vcur[16]; vec4 vpsz; uvec4 stip[8]; vec4 bord[4]; };") != NULL);
+    /* by guest pixel; row 31 the top row, pixel x bit x ^ 7 */
+    const char *sp = strstr(buf, "ivec2 sp = ivec2(gl_FragCoord.xy / float(max((pc.flags >> 16) & 255u, 1u)));");
+    const char *row = strstr(buf, "uint row = uint(31 - (sp.y & 31));");
+    const char *bit = strstr(buf, "if (((stip[row >> 2][row & 3u] >> uint((sp.x & 31) ^ 7)) & 1u) == 0u) discard;");
+    HT_CHECK(sp && row && bit && sp < row && row < bit);
+}
+
 static void test_dot_zw(void)
 {
     uint32_t rs[HLE_PS_REGS] = { 0 };
@@ -389,7 +504,7 @@ static void test_brdf(void)
     HT_CHECK(n > 0 && n == strlen(buf));
     dump("psh_brdf_2d");
     HT_EQ_U32(un, 0);
-    HT_CHECK(strstr(buf, "uSmp[nonuniformEXT(si)]), vec2(t0.a, t1.a)); }") != NULL);
+    HT_CHECK(strstr(buf, "uSmp[nonuniformEXT(si)]), bt2(2u, vec2(t0.a, t1.a))); }") != NULL);
     HT_CHECK(strstr(buf, "samp3(2u") == NULL);
     /* stage 3: stages 1 and 2 */
     rs[HLE_PS_TEXMODES] = 1 | 3u << 5 | 3u << 10 | (unsigned)HLE_PST_BRDF << 15;
@@ -672,7 +787,7 @@ static void test_sign(void)
     dump("psh_sign_dot");
     HT_CHECK(strstr(buf, "dot1 = dot(vTex1.xyz, dmap(0u, tsh(t0, bvec4(true, true, true, false))));")
              != NULL);
-    HT_CHECK(strstr(buf, "uSmp[nonuniformEXT(si)]), tsh(t0, bvec4(true, true, true, false)).gb); }")
+    HT_CHECK(strstr(buf, "uSmp[nonuniformEXT(si)]), bt2(2u, tsh(t0, bvec4(true, true, true, false)).gb)); }")
              != NULL);
     k.sgn_ob = 0;                                       /* unsigned: as before */
     HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), NULL) > 0);
@@ -1122,6 +1237,9 @@ int main(void)
     HT_RUN(test_dot_mux);
     HT_RUN(test_mux_bias);
     HT_RUN(test_reflect);
+    HT_RUN(test_stipple);
+    HT_RUN(test_zf16);
+    HT_RUN(test_btex);
     HT_RUN(test_dot_zw);
     HT_RUN(test_dot_zw_formats);
     HT_RUN(test_brdf);

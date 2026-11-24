@@ -370,11 +370,14 @@ Options (`options.c`): only what the emulator backs.
   per-second `hakuX-lr-hle-back` line counts the draws that ask for a signed
   blend (`signed_blend=`) and for a dithered blend into a 16-bit target
   (`dither_blend=`), whichever path they get.
-- The console's own settings, as its dashboard keeps them: screen format
-  (normal, widescreen, letterbox), language (auto: RetroArch's) and video
-  region (auto: the game's; NTSC-M, NTSC-J, PAL). 480p is on, as on the
-  component cable; PAL60 is set for PAL consoles, as RetroArch runs at
-  59.94 Hz; 720p and 1080i stay off.
+- Console settings include screen format (normal, widescreen or letterbox),
+  language (Auto uses RetroArch's language) and video region (Auto uses the
+  game's region, with NTSC-M, NTSC-J and PAL overrides).
+  Games read the EEPROM video flags to select a display mode. The core enables
+  480p by default and offers 720p as an option. PAL consoles also get PAL60.
+  The core displays 1280×720 at 16:9 and fits output within 3840×2160 at presentation.
+  A session's render scale is set by its first display mode: 720p has its own
+  (1-3x, 1x by default), other modes use the render scale.
 - The network (`net.c`): the console's cable, off or on. On, the console
   has Xbox Live through Insignia (upstream's NAT backend with Insignia's DNS
   server, or the first address in `insignia-dns.txt` in the save directory)

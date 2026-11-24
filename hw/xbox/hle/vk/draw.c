@@ -729,9 +729,10 @@ int hle_draw_init(void)
             return -1;
         }
     }
-    /* set 1: vertex-program constants, a dynamic window on the arena */
+    /* set 1: vertex-program constants, a dynamic window on the arena (the
+     * pixel shader of a stippled draw reads its pattern there) */
     VkDescriptorSetLayoutBinding cb = { 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1,
-                                        VK_SHADER_STAGE_VERTEX_BIT, NULL };
+                                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, NULL };
     VkDescriptorSetLayoutCreateInfo cci = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
         .bindingCount = 1, .pBindings = &cb };
@@ -4808,6 +4809,17 @@ static void draw_faces(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         k.pk.wbuf = zlin ? 2 : wbuf;
         /* a depth DOT_ZW replaces is clamped the same way (psh.c) */
         k.pk.zclamp = (zclamp && !zcull && hle_psh_zrep(k.pk.tex_modes) ? 1 : 0) | (pk_zcull ? HLE_PSH_ZCULL | (wz ? 4u : 0) : 0);
+        /* the polygon stipple: of filled polygons, not of lines or points
+         * (the pattern is in a program draw's constant block) */
+        if (s->stipple_en && prog && !lines && !points) {
+            k.pk.zclamp |= HLE_PSH_STIPPLE;
+        }
+        if (prog && (c->tex_lin >> 8 & 0xF)) {
+            k.pk.zclamp |= HLE_PSH_BTEX;
+        }
+        if (ds && (ds->d.xfmt == HLE_XFMT_F16 || ds->d.xfmt == HLE_XFMT_LIN_F16)) {
+            k.pk.zclamp |= HLE_PSH_ZF16;    /* a 16-bit float depth target (psh.c) */
+        }
     } else {
         k.ps.wbuf = zlin ? 2 : wbuf;
     }
