@@ -30,7 +30,6 @@ import com.rfandango.haku_x.ui.driver.GpuDriverScreen
 import com.rfandango.haku_x.ui.hdd.HddScreen
 import com.rfandango.haku_x.ui.insignia.InsigniaWizard
 import com.rfandango.haku_x.ui.library.LibraryScreen
-import com.rfandango.haku_x.ui.mods.ModsScreen
 import com.rfandango.haku_x.ui.settings.GameSettingsScreen
 import com.rfandango.haku_x.ui.settings.SettingsScreen
 import com.rfandango.haku_x.ui.setup.MigrateScreen
@@ -59,10 +58,6 @@ private object Routes {
   const val GAME = "game?key={key}&title={title}"
 
   fun game(key: String, title: String) = "game?key=${Uri.encode(key)}&title=${Uri.encode(title)}"
-  /** One disc's mods and cheats: its game key and title. */
-  const val MODS = "mods?key={key}&title={title}"
-
-  fun mods(key: String, title: String) = "mods?key=${Uri.encode(key)}&title=${Uri.encode(title)}"
 }
 
 /**
@@ -141,23 +136,6 @@ fun HakuXApp(
           val key = GameOverrides.gameKey(disc?.titleId ?: 0L, disc?.version ?: 0L, game.relativePath)
           nav.navigate(Routes.game(key, game.title))
         },
-        onMods = { game, disc ->
-          val key = GameOverrides.gameKey(disc.titleId, disc.version, game.relativePath)
-          nav.navigate(Routes.mods(key, game.title))
-        },
-      )
-    }
-    composable(
-      Routes.MODS,
-      arguments = listOf(
-        navArgument("key") { type = NavType.StringType; defaultValue = "" },
-        navArgument("title") { type = NavType.StringType; defaultValue = "" },
-      ),
-    ) { entry ->
-      ModsScreen(
-        gameKey = entry.arguments?.getString("key").orEmpty(),
-        title = entry.arguments?.getString("title").orEmpty(),
-        onBack = { nav.popBackStack() },
       )
     }
     composable(Routes.SETTINGS) {

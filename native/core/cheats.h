@@ -1,6 +1,6 @@
 /*
  * hakuX-lr native core — cheats: memory codes the app turns on and off
- * (patches/mods/README.md has the format). The engine is pure C: the guest's memory
+ * (hakux-lr-patches' README has the format). The engine is pure C: the guest's memory
  * through callbacks (mods.c gives it the VM's, the host tests a fake one).
  *
  * The cheats and their lines come in at boot, before the guest runs;

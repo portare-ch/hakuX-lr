@@ -26,15 +26,6 @@ core first, copy its libraries there, then build the APK.
   ```
 
   Set CMake's `HAKUX_FEX_DIR` to use another checkout.
-- The mods and cheats the APK ships
-  ([portare-ch/hakux-lr-patches](https://github.com/portare-ch/hakux-lr-patches))
-  live in `patches`; the build stops without them. `--remote` takes that
-  repository's current `main`, not the commit recorded here, so the APK
-  ships the patches as they are now:
-
-  ```
-  git submodule update --init --remote patches
-  ```
 - The core's third-party sources, outside the repository (CMake `NC_DEPS`):
 
 | Path in `NC_DEPS` | Revision |

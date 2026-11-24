@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **One patch format.** The upstream Android app kept in this tree no longer packs its own mods, and the `patches` submodule is removed: patches and cheats are RetroArch `.cht` files from [hakux-lr-patches](https://github.com/portare-ch/hakux-lr-patches) on every platform.
 - **Textures rewritten right after a draw.** A title that draws with a texture and goes straight on to write the next image into the same memory now has its draw read the old texels, as the console's GPU, close behind the pushes, does. A store into texels a draw has read waits until the pushed draws are decoded. nxdk_pgraph_tests' Texture signed components, Surface pitch and Vertex shader rounding gain six pictures.
 - **Signed textures upload faster.** A texture with signed colour channels had its sign offset applied in the upload arena, which is slow to read back: a 256 × 256 texture took about 105 ms of the decoder. It is now done in a scratch copy.
 - **HDTV modes.** Games can select 480p (on by default) or 720p (off by default). A game running in 720p uses its own **Render Scale (720p)**, 1× by default. The core scales output larger than 3840×2160 to fit.

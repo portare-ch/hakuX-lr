@@ -2,7 +2,3 @@
 	path = external/fex
 	url = https://github.com/portare-ch/FEX.git
 	branch = hakuX-2026-11-20
-[submodule "patches"]
-	path = patches
-	url = https://github.com/portare-ch/hakux-lr-patches.git
-	branch = main
