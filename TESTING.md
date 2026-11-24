@@ -60,14 +60,12 @@ systemctl start portarelauncher
 
 - **System:** ARM64 (aarch64) Linux with glibc 2.38 or newer, libstdc++ from
   GCC 13 or newer, and zlib.
-- **GPU driver:** Vulkan 1.3. Tested with Mesa Turnip on Adreno 740.
-  Vulkan 1.2 drivers use a compatibility path, which can be slower:
+- **GPU driver:** Vulkan 1.1 or newer with timeline semaphores. Tested
+  with Mesa Turnip on Adreno 740. Drivers below 1.3 use a compatibility
+  path, which can be slower:
   the core's log then says `compat: Vulkan below 1.3`, or names the missing
   feature if the driver can't run the core.
-- **Vulkan loader:** `libvulkan.so.1` 1.3 or newer, even with a 1.2 driver.
-  The core asks for a Vulkan 1.3 instance, and RetroArch refuses it on an
-  older loader: `Core requests apiVersion 1.3, but it is not supported by
-  loader`.
+- **Vulkan loader:** `libvulkan.so.1` 1.1 or newer.
 - **RetroArch:** with its `vulkan` video driver. 1.22.2 as PortareOS builds it
   is tested. Other video drivers copy frames through the CPU and are intended
   for diagnostics.
@@ -180,8 +178,15 @@ and `-L <core> --menu`. Confirm that restarts keep the save directory.
 
 ### Drivers below Vulkan 1.3
 
-A Vulkan 1.3 GPU can run the renderer's compatibility path, which Vulkan 1.2
-drivers use. It replaces dynamic rendering with render
+For Vulkan 1.1 testing, use a driver that exposes
+`VK_KHR_timeline_semaphore` and its `timelineSemaphore` feature. On hardware,
+record the loader, GPU and driver versions and the core's `vk: device` line.
+Run Dead or Alive 3 and Sega GT 2002 through gameplay, reset the core and
+rebuild RetroArch's video context. Check the picture and frame times before
+and after each restart.
+
+A Vulkan 1.3 GPU can run the renderer's compatibility path for 1.1 and 1.2
+drivers. It replaces dynamic rendering with render
 passes and synchronization2 with Vulkan 1.0's barriers and submits
 ([compat.c](hw/xbox/hle/vk/compat.c)). There are two ways to test it:
 
@@ -230,7 +235,8 @@ FEX on the Nova. KVM runs the game's code on the host CPU; the kernel,
 devices and renderer stay the same.
 
 **Requirements:** x86-64 Linux with `/dev/kvm`, TSC scaling, UMIP (AMD
-Zen 2 or newer; on Intel, KVM provides UMIP itself), and a Vulkan 1.3 GPU.
+Zen 2 or newer; on Intel, KVM provides UMIP itself), and a Vulkan 1.1 or
+newer GPU driver with timeline semaphores.
 Apple's `container` on a Mac can build it but cannot run KVM.
 
 **Setting up KVM:**

@@ -6,7 +6,7 @@
 # pinned sources, the core and its tests (linux-build.sh), the package
 # (linux-package.sh) and its checks (linux-verify.py), the pure HLE tests,
 # every shader they generate compiled by glslang (built from the pinned
-# source) for Vulkan 1.3, and the savestate lock. On a clean checkout: the
+# source) for Vulkan 1.1 and 1.3, and the savestate lock. On a clean checkout: the
 # package is the commit's.
 #   sh tools/native/linux-ci.sh <version>
 set -eu
@@ -43,11 +43,12 @@ done
 count=0
 for f in "$shaders"/*.vert "$shaders"/*.frag; do
     [ -f "$f" ] || continue
+    "$glslang/StandAlone/glslang" --target-env vulkan1.1 -o /dev/null "$f"
     "$glslang/StandAlone/glslang" --target-env vulkan1.3 -o /dev/null "$f"
     count=$((count + 1))
 done
 [ "$count" -gt 0 ]
-echo "PASS: $count generated shaders compile for Vulkan 1.3"
+echo "PASS: $count generated shaders compile for Vulkan 1.1 and 1.3"
 
 python3 tools/native/statelock.py
 python3 tools/native/statelock.py --sizes --build "$HAKUX_BUILD"

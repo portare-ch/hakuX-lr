@@ -62,8 +62,9 @@ hakuX-lr creates its Xbox storage the first time you start a game.
 | Android ARM64 (experimental) | `hakux-lr-<version>-android-arm64.zip`. Requires Android 9+ and 64-bit RetroArch. |
 | ROCKNIX on supported ARM64 devices | On images that include hakuX-lr, put games in `roms/xbox/` and select the Xbox core. Older images list it as **hakux**. [Device core lists](https://github.com/ROCKNIX/distribution/tree/next/documentation/PER_DEVICE_DOCUMENTATION) |
 
-Manual installs use 64-bit RetroArch and a Vulkan 1.2+ GPU driver. Vulkan 1.4
-is recommended. Linux also requires zlib and a Vulkan 1.3+ loader.
+Manual installs require 64-bit RetroArch and a Vulkan 1.1 or newer GPU driver
+with timeline semaphores (`VK_KHR_timeline_semaphore` on 1.1). Vulkan 1.4 is
+recommended. Linux also requires zlib and a Vulkan 1.1 or newer loader.
 
 <a id="play-on-steam-deck"></a>
 

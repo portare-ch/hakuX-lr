@@ -211,7 +211,6 @@ bool nc_lr_vk_negotiate(void)
 {
     static struct retro_hw_render_callback hw = {
         .context_type = RETRO_HW_CONTEXT_VULKAN,
-        .version_major = VK_API_VERSION_1_3,
         .context_reset = context_reset,
         .context_destroy = context_destroy,
         /* A reinit with the context cached keeps the device but rebuilds
