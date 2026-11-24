@@ -1,19 +1,12 @@
 # Changelog
 
-## Unreleased
+## linux-v0.38.0 (Linux ARM64, Linux x86-64, and Android ARM64)
 
-- **One patch format.** The upstream Android app kept in this tree no longer packs its own mods, and the `patches` submodule is removed: patches and cheats are RetroArch `.cht` files from [hakux-lr-patches](https://github.com/portare-ch/hakux-lr-patches) on every platform.
-- **Textures rewritten right after a draw.** A title that draws with a texture and goes straight on to write the next image into the same memory now has its draw read the old texels, as the console's GPU, close behind the pushes, does. A store into texels a draw has read waits until the pushed draws are decoded. nxdk_pgraph_tests' Texture signed components, Surface pitch and Vertex shader rounding gain six pictures.
-- **Signed textures upload faster.** A texture with signed colour channels had its sign offset applied in the upload arena, which is slow to read back: a 256 × 256 texture took about 105 ms of the decoder. It is now done in a scratch copy.
-- **HDTV modes.** Games can select 480p (on by default) or 720p (off by default). A game running in 720p uses its own **Render Scale (720p)**, 1× by default. The core scales output larger than 3840×2160 to fit.
-- **NV2A accuracy.** A cube map looked up with a zero-length direction returns the +X face's corner texel from the smallest mip level the filter allows, as on the console, and a specular reflection about a zero normal does the same. Texture cubemap goes from 66 to 72 of 83 pictures.
-- **NV2A accuracy.** In a 16-bit float depth buffer, a fragment depth below 2^-6 is tested and stored as 0, while a clear value under 0x1000 is kept. Depth buffer goes from 132 to 142 of 144 pictures and Depth buffer fixed function from 76 to 78 of 80.
-- **NV2A accuracy.** A `SET_POINT_SIZE` value above the register's range (0x1FF) is ignored instead of clamped, so the previous size stays. Point size goes from 11 to 15 of 22 pictures.
-- **NV2A texture borders.** A swizzled 2D or volume texture with a texture border (`BORDER_SOURCE_TEXTURE`), addressed by the border, now shows its own border texels: the four texels around the image, and beyond them the outermost border texel. Bordered volume textures were read with the wrong layout before. Texture border goes from 6 to 17 of 18 pictures.
-- **NV2A polygon stipple.** `SET_STIPPLE_ENABLE` and its 32 × 32 pattern now apply to filled polygons, by guest pixel at every render scale; lines and points are not stippled, as on the console. nxdk_pgraph_tests' Stipple tests go from 1 to 6 of 6 pictures.
-- **NV2A accuracy.** A NaN colour written by a vertex program saturates by its sign as on the console: -NaN is black, +NaN white, and a product with a NaN is white. nxdk_pgraph_tests' Attrib float goes from 2 to 12 of 12 pictures.
-- **NV2A accuracy.** Fixed-function reflection and sphere-map texture coordinates honour `SET_TEXGEN_VIEW_MODEL`'s infinite viewer. Texgen goes from 8 to 10 of 10 pictures.
-- **NV2A accuracy.** A `SET_DEPTH_FUNC` value that is no comparison function is refused when written, so the function written before it stays in effect. Depth function goes from 0 to 2 of 2 pictures.
+- **Native 720p.** Games can select 480p (on by default) or 720p (off by default). The new **Render Scale (720p)** option supports 1×, 2× and 3×, independently of the standard render scale. Output is capped at 3840×2160. Amped 2 was verified at native 720p and 4K (3×). [#310](https://github.com/portare-ch/hakuX-lr/pull/310)
+- **Dead or Alive 3.** A new [720p widescreen patch](https://github.com/portare-ch/hakux-lr-patches/pull/5) preserves menu, HUD and video layout. Set console memory to 128 MB, enable the RAM limit patch and 720p, and apply both cheat entries. Tested at 1× and 3× at 59.9 fps on Linux x86-64.
+- **NV2A accuracy.** Correct vertex-program NaN colours, reflection and sphere-map texture coordinates, invalid depth functions, out-of-range point sizes, polygon stipple, zero-direction cube map lookups and 16-bit floating-point depth underflow. Improve texture borders for swizzled 2D and volume textures. The 1× NV2A test run increased from 3,053 to 3,108 matching images out of 3,576. [#310](https://github.com/portare-ch/hakuX-lr/pull/310)
+- **Texture handling.** Synchronize texture writes following draws so that the GPU reads the correct texels. Apply signed texture offsets outside the write-combined upload arena, eliminating a slow readback. [#310](https://github.com/portare-ch/hakuX-lr/pull/310)
+- **RetroArch-only.** Remove the unused upstream standalone Android application and legacy mods submodule. Linux and Android continue to use the same Libretro core and [RetroArch cheat files](https://github.com/portare-ch/hakux-lr-patches). [#312](https://github.com/portare-ch/hakuX-lr/pull/312) · [#313](https://github.com/portare-ch/hakuX-lr/pull/313)
 
 ## linux-v0.37.5 (Linux ARM64, Linux x86-64, and Android ARM64)
 
