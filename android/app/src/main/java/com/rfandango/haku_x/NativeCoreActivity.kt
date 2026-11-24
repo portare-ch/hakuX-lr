@@ -32,13 +32,9 @@ import android.widget.Toast
 import android.window.OnBackInvokedDispatcher
 import androidx.documentfile.provider.DocumentFile
 import com.rfandango.haku_x.data.AppPrefs
-import com.rfandango.haku_x.data.CheatInfo
 import com.rfandango.haku_x.data.Controllers
 import com.rfandango.haku_x.data.GameOverrides
 import com.rfandango.haku_x.data.Logs
-import com.rfandango.haku_x.data.ModCatalog
-import com.rfandango.haku_x.data.ModChoices
-import com.rfandango.haku_x.data.ModRun
 import com.rfandango.haku_x.data.Network
 import com.rfandango.haku_x.data.PlayerSlot
 import com.rfandango.haku_x.data.RunSettings
@@ -282,8 +278,6 @@ class NativeCoreActivity : SDLActivity(), InputManager.InputDeviceListener {
       prefs.lanPeers.replace(" ", "").takeIf { it.isNotEmpty() }?.let { args += "lanpeers=$it" }
     }
     /* The core uses the manifest for legacy patch rollback even with Cheats off. */
-    args += "cheats=${if (prefs.cheats) 1 else 0}"
-    modsArg()?.let { args += it }
     /* The players with a controller plugged in at boot: player 1 and those a
      * connected controller plays as (later ones: syncPads). */
     plugged = Controllers.load(this).padMask(Controllers.connected())
@@ -600,42 +594,6 @@ class NativeCoreActivity : SDLActivity(), InputManager.InputDeviceListener {
     hitchView = hitch
   }
 
-  /** The run's cheats in the manifest's order (nativeSetCheat's index), and the game's key; empty: none. */
-  @Volatile private var runCheats: List<CheatInfo> = emptyList()
-  @Volatile private var runKey = ""
-
-  /** "mods=<manifest>" when the disc's title has mods or cheats (SDL's thread: may extract a mod's files). */
-  private fun modsArg(): String? {
-    if (discUri == null) return null
-    val key = gameKey()
-    if (!ModCatalog.has(this, key)) return null
-    val allowed = AppPrefs(this).cheats
-    return runCatching { ModRun.write(this, key) }
-      .onFailure { Log.e(TAG, "mods: ${it.message}") }
-      .getOrNull()
-      ?.let { (file, cheats) ->
-        runKey = key
-        runCheats = if (allowed) cheats else emptyList()
-        "mods=${file.absolutePath}"
-      }
-  }
-
-  /** The menu's Cheats: each on or off at once (from the next vblank), and so kept for the game. */
-  private fun showCheats() {
-    val cheats = runCheats
-    val choices = ModChoices(this, runKey)
-    val checked = BooleanArray(cheats.size) { choices.cheat(cheats[it].name) }
-    showMenuDialog(
-      AlertDialog.Builder(this)
-        .setTitle(R.string.overlay_menu_cheats)
-        .setMultiChoiceItems(cheats.map { it.name }.toTypedArray(), checked) { _, i, on ->
-          nativeSetCheat(i, on)
-          choices.setCheat(cheats[i].name, on)
-        }
-        .setPositiveButton(android.R.string.ok, null)
-    )
-  }
-
   /** The game's content URI, opened in this process; the core reads it by descriptor. */
   /** The running game's overrides: by its disc's title ID and version, else its path. */
   private fun gameOverrides(): GameOverrides? = discUri?.let { GameOverrides(this, gameKey()) }
@@ -750,9 +708,6 @@ class NativeCoreActivity : SDLActivity(), InputManager.InputDeviceListener {
     if (states) {
       items += getString(R.string.overlay_menu_save_state) to { saveStates.showSlots(save = true) }
       items += getString(R.string.overlay_menu_load_state) to { saveStates.showSlots(save = false) }
-    }
-    if (runCheats.isNotEmpty()) {
-      items += getString(R.string.overlay_menu_cheats) to ::showCheats
     }
     val exit = if (launchedExternally) R.string.overlay_menu_exit_frontend else R.string.overlay_menu_exit
     items += getString(exit) to ::exitGame
@@ -1242,9 +1197,5 @@ class NativeCoreActivity : SDLActivity(), InputManager.InputDeviceListener {
     /** Savestates work for the running game (push-buffer mode). */
     @JvmStatic
     external fun nativeStatesAvailable(): Boolean
-
-    /** A cheat of the run's manifest (its index there) on or off. */
-    @JvmStatic
-    external fun nativeSetCheat(index: Int, on: Boolean)
   }
 }

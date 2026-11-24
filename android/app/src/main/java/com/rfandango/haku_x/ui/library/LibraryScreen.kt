@@ -37,7 +37,6 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -105,7 +104,6 @@ import com.rfandango.haku_x.R
 import com.rfandango.haku_x.data.DiscInfo
 import com.rfandango.haku_x.data.Game
 import com.rfandango.haku_x.data.GameOverrides
-import com.rfandango.haku_x.data.ModCatalog
 import com.rfandango.haku_x.data.SaveStateStore
 import com.rfandango.haku_x.data.Updates
 import com.rfandango.haku_x.data.XisoConverter
@@ -124,8 +122,6 @@ fun LibraryScreen(
   onGameSettings: (Game, DiscInfo?) -> Unit,
   /** Start the game right into a savestate: its store and slot. */
   onLoadState: (Game, SaveStateStore, Int) -> Unit,
-  /** The game's mods and cheats (a disc whose title has some, mods/). */
-  onMods: (Game, DiscInfo) -> Unit,
   /** Start the dashboard without a disc. */
   onDashboard: () -> Unit,
   vm: LibraryViewModel = viewModel(),
@@ -181,7 +177,7 @@ fun LibraryScreen(
             TextButton(onClick = onOpenSettings) { Text(stringResource(R.string.settings_games_folder_title)) }
           }
           games.isEmpty() -> Message(stringResource(R.string.library_empty_games))
-          else -> GameList(games, state.info, state.icons, onLaunch, onGameSettings, onLoadState, onMods, vm::askConvert)
+          else -> GameList(games, state.info, state.icons, onLaunch, onGameSettings, onLoadState, vm::askConvert)
         }
       }
     }
@@ -213,7 +209,6 @@ private fun GameList(
   onLaunch: (Game) -> Unit,
   onGameSettings: (Game, DiscInfo?) -> Unit,
   onLoadState: (Game, SaveStateStore, Int) -> Unit,
-  onMods: (Game, DiscInfo) -> Unit,
   onConvert: (Game) -> Unit,
 ) {
   // The game whose long-press menu is open.
@@ -301,16 +296,6 @@ private fun GameList(
                 onClick = {
                   menuFor = null
                   statesFor = game to store
-                },
-              )
-            }
-            if (disc != null && ModCatalog.has(context, key)) {
-              DropdownMenuItem(
-                text = { Text(stringResource(R.string.library_menu_mods)) },
-                leadingIcon = { Icon(Icons.Filled.Star, contentDescription = null) },
-                onClick = {
-                  menuFor = null
-                  onMods(game, disc)
                 },
               )
             }

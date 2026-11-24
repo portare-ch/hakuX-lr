@@ -106,27 +106,7 @@ android {
     compose = true
     buildConfig = true    // BuildConfig.DEBUG: what only debug builds show (the hitch line)
   }
-
-  // Ship the patches submodule's mods in the APK.
-  sourceSets.getByName("main").assets.srcDir(layout.buildDirectory.dir("generated/modAssets").get().asFile)
 }
-
-// Bundle patches/mods as assets/mods, excluding its README.
-val modSources = rootProject.file("../patches/mods")
-// Fail if the submodule is missing; an empty Sync task would be skipped.
-val checkModSources = tasks.register("checkModSources") {
-  doLast {
-    if (!modSources.isDirectory) {
-      throw GradleException("patches/mods is missing: run git submodule update --init --remote patches")
-    }
-  }
-}
-val syncModAssets = tasks.register<Sync>("syncModAssets") {
-  dependsOn(checkModSources)
-  from(modSources) { exclude("README.md") }
-  into(layout.buildDirectory.dir("generated/modAssets/mods"))
-}
-tasks.named("preBuild") { dependsOn(syncModAssets) }
 
 dependencies {
   implementation("androidx.core:core-ktx:1.15.0")
