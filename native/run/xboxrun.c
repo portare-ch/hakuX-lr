@@ -9,8 +9,6 @@
  * scale=, asyncpipe=, mods=, video=, clock=, ...), and
  *   hdd=DIR          the hard disk folder (Partition0-5; made as needed),
  *                    default /data/local/tmp/native/hdd
- *   vkdriver=DIR|LIB|HOOKS  a custom Vulkan driver through adrenotools, as
- *                    the app's (native/app/vkdriver.c)
  *   capture=N[,N...] frames N written to frames/fN.png in the working
  *                    directory, as presented (frames count the HLE GPU's
  *                    swaps in this process: after loadstate=, since the load)
@@ -30,7 +28,6 @@
  * device was lost, 10 the title left (to the dashboard, a reboot, another
  * XBE). xboxrun.sh adds 4: the app is running.
  */
-#include "native/app/app.h"
 #include "native/core/core.h"
 #include "native/core/hostctx.h"
 #include "native/core/mmio.h"
@@ -396,8 +393,6 @@ int main(int argc, char **argv)
         }
         if (!strncmp(argv[i], "hdd=", 4)) {
             nc_io_set_hdd_root(argv[i] + 4);
-        } else if (!strncmp(argv[i], "vkdriver=", 9)) {
-            nc_vk_driver_load(argv[i] + 9);
         } else if (!strncmp(argv[i], "capture=", 8)) {
             capture = argv[i] + 8;
         } else if (!strncmp(argv[i], "frames=", 7)) {

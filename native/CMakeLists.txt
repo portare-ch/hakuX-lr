@@ -1,8 +1,7 @@
 # hakuX-lr native core (QEMU-free): FEXCore fork + reimplemented Xbox kernel.
 #
 # hakux_native is the core library; xboxrun runs a title from the command
-# line on the device (adb shell) for the frontier loop. Cross-compiled with
-# the NDK into build/native/core; the steps are in android/README.md.
+# line for the tests.
 cmake_minimum_required(VERSION 3.20)
 project(hakux_native C CXX)
 
@@ -54,16 +53,11 @@ endif()
 if(NOT ANDROID)
   target_compile_definitions(nc_platform INTERFACE _GNU_SOURCE)
 endif()
-option(HAKUX_BUILD_APP "Android: build the app's native library (hakuxcore)" ${ANDROID})
 option(HAKUX_BUILD_TESTS "Build native Linux smoke tests" ON)
 option(HAKUX_BUILD_LIBRETRO "Build the libretro core (hakux-lr_libretro.so; on Android hakux-lr_libretro_android.so), everything as PIC" OFF)
 option(HAKUX_LR_END_PROCESS "libretro, PortareOS's build: a stop that hangs ends RetroArch's process, and HAKUX_LR_STOP=0 brings back ending it when the game closes (a title's relaunch then starts it again)" OFF)
 set(HAKUX_VERSION "dev" CACHE STRING "The version the libretro core reports")
 if(HAKUX_BUILD_LIBRETRO)
-  if(ANDROID AND HAKUX_BUILD_APP)
-    message(FATAL_ERROR "On Android the libretro core and the app build in separate build directories: "
-                        "add -DHAKUX_BUILD_APP=OFF")
-  endif()
   if(ANDROID AND HAKUX_LR_END_PROCESS)
     message(FATAL_ERROR "HAKUX_LR_END_PROCESS ends RetroArch's process: PortareOS's build only")
   endif()
@@ -203,12 +197,8 @@ target_link_libraries(hakux_native PUBLIC hakux_hle hakux_apu nc_slirp nc_platfo
 target_compile_options(hakux_native PRIVATE -Wall -Wno-unused-parameter)
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/chd.cmake")
 
-# xboxrun shares the app's custom driver loader on Android.
-add_executable(xboxrun run/xboxrun.c run/capture.c app/vkdriver.c)
+add_executable(xboxrun run/xboxrun.c run/capture.c)
 target_link_libraries(xboxrun PRIVATE hakux_native hakux_hle z)
-if(ANDROID)
-  target_sources(xboxrun PRIVATE app/vklayer.c)
-endif()
 if(NC_APU_OUT_NULL)
   target_sources(xboxrun PRIVATE "${NC_APU_OUT_NULL}")
 endif()
@@ -221,10 +211,6 @@ if(NOT ANDROID)
 endif()
 target_link_libraries(nc_slirp PRIVATE hakux_native)   # nc_log
 
-# The hakuX app's native core library (native/app, cmake/app.cmake).
-if(HAKUX_BUILD_APP AND ANDROID)
-  include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/app.cmake")
-endif()
 
 # RetroArch's core (cmake/libretro.cmake).
 if(HAKUX_BUILD_LIBRETRO)

@@ -37,7 +37,7 @@ cmake -S native -B "$build" -G Ninja \
     -DCMAKE_TOOLCHAIN_FILE="$ndk/build/cmake/android.toolchain.cmake" \
     -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-28 -DCMAKE_BUILD_TYPE=Release \
     -DNC_DEPS="$deps" -DHAKUX_FEX_DIR="$deps/fex" \
-    -DHAKUX_BUILD_APP=OFF -DHAKUX_BUILD_TESTS=OFF -DHAKUX_BUILD_LIBRETRO=ON -DHAKUX_DSP_JIT=OFF \
+    -DHAKUX_BUILD_TESTS=OFF -DHAKUX_BUILD_LIBRETRO=ON -DHAKUX_DSP_JIT=OFF \
     -DHAKUX_VERSION="$version"
 cmake --build "$build" --target hakux_libretro -j "${JOBS:-4}"
 
