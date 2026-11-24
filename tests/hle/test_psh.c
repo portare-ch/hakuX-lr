@@ -253,7 +253,52 @@ static void test_reflect(void)
     HT_CHECK(strstr(buf, "e = vec3(uintBitsToFloat(pc.bump3), uintBitsToFloat(pc.bumpl[2]))")
              != NULL);
     HT_CHECK(strstr(buf, "vTex3.w") == NULL);
-    HT_CHECK(strstr(buf, "t3 = sampc(3u, 2.0 * n * dot(n, e)") != NULL);
+    /* a zero N: the zero direction, whatever E is */
+    HT_CHECK(strstr(buf, "t3 = sampc(3u, n == vec3(0.0) ? vec3(0.0) :\n"
+                         "                2.0 * n * dot(n, e)") != NULL);
+    /* sampc: the ordinary lookup for every fragment (its derivatives), then
+     * a zero direction's: the +X face's texel (0, 0), the LOD by the sampler */
+    const char *all = strstr(buf, "  vec4 c = texture(samplerCube(");
+    const char *zero = strstr(buf, "  if (dir == vec3(0.0)) {");
+    const char *lod = strstr(buf, "vec3(1.0, 1.0 - 1.0 / n, 1.0 - 1.0 / n), 1000.0);");
+    HT_CHECK(all && zero && lod && all < zero && zero < lod);
+}
+
+/* A 16-bit float depth target (zclamp's HLE_PSH_ZF16): a depth under 2^-6,
+ * scaled as the image holds it, is written as 0; of the fragment's depth,
+ * W-buffering's or the one DOT_ZW replaces. The key's size stays. */
+static void test_zf16(void)
+{
+    uint32_t rs[HLE_PS_REGS] = { 0 };
+    rs[HLE_PS_RGB_IN] = IN4(R_V0, R_V0, R_ZERO, R_ZERO);
+    rs[HLE_PS_RGB_OUT] = R_R0 << 4;
+    rs[HLE_PS_COUNT] = 1;
+    HlePshKey k;
+    hle_psh_key(rs, &k);
+    unsigned un = 99;
+    HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), &un) > 0);
+    HT_CHECK(strstr(buf, "gl_FragDepth") == NULL);
+    k.zclamp |= HLE_PSH_ZF16;
+    HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), &un) > 0);
+    dump("psh_zf16");
+    HT_EQ_U32(un, 0);
+    float sc = 1.0f / 511.9375f;
+    while (511.9375f * sc > 1.0f) {
+        sc = nextafterf(sc, 0.0f);
+    }
+    float lim = 0.015625f * sc;
+    uint32_t lb;
+    memcpy(&lb, &lim, 4);
+    char want[160];
+    snprintf(want, sizeof(want), "  gl_FragDepth = gl_FragCoord.z < uintBitsToFloat(0x%08xu) ? 0.0 : "
+             "gl_FragCoord.z;\n}\n", lb);
+    HT_CHECK(strstr(buf, want) != NULL);
+    HT_CHECK(lim * 511.9375f <= 0.015625f && nextafterf(lim, 1.0f) * 511.9375f > 0.015625f * 0.999f);
+    k.wbuf = 1;
+    HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), &un) > 0);
+    dump("psh_zf16_wbuf");
+    snprintf(want, sizeof(want), "  gl_FragDepth = wDepth < uintBitsToFloat(0x%08xu) ? 0.0 : wDepth;\n}\n", lb);
+    HT_CHECK(strstr(buf, want) != NULL);
 }
 
 /* The normalization HLE_ZNORM_GLSL emits (z * s + z * s * s for the integer
@@ -271,6 +316,33 @@ static float znorm(float z, float s)
  * dot3 is in depth-buffer units (nxdk_pgraph_tests' DotZW: its first
  * vertex's matrix makes 10000), normalized as a program's screen z,
  * rejected outside the buffer's range (clamped with ZCLAMP_EN) */
+/* SET_STIPPLE_ENABLE on a filled polygon: a bit of the key's zclamp, the
+ * pattern from the draw's constant block; the key's size stays */
+static void test_stipple(void)
+{
+    uint32_t rs[HLE_PS_REGS] = { 0 };
+    rs[HLE_PS_RGB_IN] = IN4(R_V0, R_V0, R_ZERO, R_ZERO);
+    rs[HLE_PS_RGB_OUT] = R_R0 << 4;
+    rs[HLE_PS_COUNT] = 1;
+    HlePshKey k;
+    hle_psh_key(rs, &k);
+    unsigned un = 99;
+    size_t n = hle_psh_glsl(&k, buf, sizeof(buf), &un);
+    HT_CHECK(n > 0 && n == strlen(buf));
+    HT_CHECK(strstr(buf, "stip[") == NULL && strstr(buf, "VshConst") == NULL);
+    k.zclamp |= HLE_PSH_STIPPLE;
+    n = hle_psh_glsl(&k, buf, sizeof(buf), &un);
+    HT_CHECK(n > 0 && n == strlen(buf));
+    dump("psh_stipple");
+    HT_EQ_U32(un, 0);
+    HT_CHECK(strstr(buf, "uniform VshConst { vec4 c[192]; vec4 vcur[16]; vec4 vpsz; uvec4 stip[8]; };") != NULL);
+    /* by guest pixel; row 31 the top row, pixel x bit x ^ 7 */
+    const char *sp = strstr(buf, "ivec2 sp = ivec2(gl_FragCoord.xy / float(max((pc.flags >> 16) & 255u, 1u)));");
+    const char *row = strstr(buf, "uint row = uint(31 - (sp.y & 31));");
+    const char *bit = strstr(buf, "if (((stip[row >> 2][row & 3u] >> uint((sp.x & 31) ^ 7)) & 1u) == 0u) discard;");
+    HT_CHECK(sp && row && bit && sp < row && row < bit);
+}
+
 static void test_dot_zw(void)
 {
     uint32_t rs[HLE_PS_REGS] = { 0 };
@@ -1122,6 +1194,8 @@ int main(void)
     HT_RUN(test_dot_mux);
     HT_RUN(test_mux_bias);
     HT_RUN(test_reflect);
+    HT_RUN(test_stipple);
+    HT_RUN(test_zf16);
     HT_RUN(test_dot_zw);
     HT_RUN(test_dot_zw_formats);
     HT_RUN(test_brdf);

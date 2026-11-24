@@ -281,7 +281,9 @@ typedef struct HleCmdState {
                                    outside the range is dropped */
     uint32_t znearfar;          /* ... ZMIN_MAX_CONTROL CULL_NEAR_FAR_EN (bit 0): under
                                    W-buffering the range is the program's z's too */
-    uint32_t znearfar_pad;      /* (the state is 8-byte words) */
+    uint32_t stipple_en;        /* NV2A SET_STIPPLE_ENABLE (0x147C): filled polygons draw
+                                   only the pixels whose bit of the 32 x 32 pattern is
+                                   set (the pattern: the draw's constant block, vsh.h) */
     uint32_t aactl;             /* NV2A SET_ANTI_ALIASING_CONTROL (0x1D7C): bit 0
                                    multisampling, 4 alpha-to-coverage, 8 alpha-to-one,
                                    31:16 the sample mask (as NV30's MULTISAMPLE_CONTROL);

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **NV2A accuracy.** A cube map looked up with a zero-length direction returns the +X face's corner texel from the smallest mip level the filter allows, as on the console, and a specular reflection about a zero normal does the same. Texture cubemap goes from 66 to 72 of 83 pictures.
+- **NV2A accuracy.** In a 16-bit float depth buffer, a fragment depth below 2^-6 is tested and stored as 0, while a clear value under 0x1000 is kept. Depth buffer goes from 132 to 142 of 144 pictures and Depth buffer fixed function from 76 to 78 of 80.
+- **NV2A accuracy.** A `SET_POINT_SIZE` value above the register's range (0x1FF) is ignored instead of clamped, so the previous size stays. Point size goes from 11 to 15 of 22 pictures.
+- **NV2A polygon stipple.** `SET_STIPPLE_ENABLE` and its 32 × 32 pattern now apply to filled polygons, by guest pixel at every render scale; lines and points are not stippled, as on the console. nxdk_pgraph_tests' Stipple tests go from 1 to 6 of 6 pictures.
+- **NV2A accuracy.** A NaN colour written by a vertex program saturates by its sign as on the console: -NaN is black, +NaN white, and a product with a NaN is white. nxdk_pgraph_tests' Attrib float goes from 2 to 12 of 12 pictures.
+- **NV2A accuracy.** Fixed-function reflection and sphere-map texture coordinates honour `SET_TEXGEN_VIEW_MODEL`'s infinite viewer. Texgen goes from 8 to 10 of 10 pictures.
+- **NV2A accuracy.** A `SET_DEPTH_FUNC` value that is no comparison function is refused when written, so the function written before it stays in effect. Depth function goes from 0 to 2 of 2 pictures.
+
 ## linux-v0.37.5 (Linux ARM64, Linux x86-64, and Android ARM64)
 
 - **Xbox Live game updates.** A game's updater ("Get Update" in Halo 2) no longer crashes on a console without the original dashboard. It draws with the dashboard's system fonts on C:, which a hakuX-lr hard disk did not have. The core now installs an open font (Roboto Mono, SIL Open Font License) as `C:\\Xbox.xtf` and `C:\\XBox Book.xtf` when the disk has neither, and the updater accepts it. Original fonts already on C: are left alone and still used. [#309](https://github.com/portare-ch/hakuX-lr/pull/309)

@@ -44,6 +44,15 @@ enum {
 };
 
 #define HLE_PSH_ZCULL 2u            /* HlePshKey.zclamp */
+/* HlePshKey.zclamp bit 3: SET_STIPPLE_ENABLE on a filled polygon. Fragments
+ * whose bit of SET_STIPPLE_PATTERN is clear are discarded: 32 rows of 32
+ * pixels (the draw's constant block, vsh.h stip[]), repeated over the target
+ * by guest pixel. Row 31 is the top one; in a row the pixel x is bit x ^ 7
+ * (its bytes from the low one, each from its top bit). */
+#define HLE_PSH_STIPPLE 8u
+/* HlePshKey.zclamp bit 4: the depth target is the NV2A's 16-bit float. A
+ * fragment's depth of exponent 0 (below 2^-6) is written, and tested, as 0. */
+#define HLE_PSH_ZF16 16u
 typedef struct HlePshKey {
     uint32_t rgb_in[8], rgb_out[8], alpha_in[8], alpha_out[8];
     uint32_t final_abcd, final_efg;

@@ -2655,6 +2655,7 @@ static uint64_t ff_program(void)
         k.texmat |= (uint8_t)((R(0x0420 + 4 * s) & 1) << s);
     }
     k.points = R(0x0318) & 1;
+    k.texgen_inf = R(0x09CC) & 1;                 /* SET_TEXGEN_VIEW_MODEL */
     k.two_side = R(0x17C4) & 1;                   /* SET_TWO_SIDE_LIGHT_EN */
     return send_vsh(&k, HLE_FFHW_SLOTS, &g_vh_ff);
 }
@@ -2676,7 +2677,7 @@ static void ff_consts(float (*c)[4])
     regs_f(c[HLE_FFHW_C_EMISSION], 0x03A8, 3);
     regs_f(c[HLE_FFHW_C_SPECULAR], 0x09E0, 3);              /* SET_SPECULAR_PARAMS 0..2 */
     regs_f(c[HLE_FFHW_C_BACK_SPECULAR], 0x1E28, 3);         /* ... _BACK */
-    c[HLE_FFHW_C_PARAMS][2] = MIN(R(0x043C), 0x1FFu) / 8.0f;
+    c[HLE_FFHW_C_PARAMS][2] = R(0x043C) / 8.0f;
     regs_f(c[HLE_FFHW_C_POINT], 0x0A30, 8);
     for (unsigned i = 0; i < 8; i++) {
         float (*l)[4] = &c[HLE_FFHW_C_LIGHTS + HLE_FFHW_LIGHT_VEC4 * i];
@@ -4335,15 +4336,15 @@ static void emit(HleCmdDraw *d)
      * block. Crimson Sea's 2300 draws a frame copied 3.3 KB each; a
      * fixed-function draw's block (ff_consts) holds while none of the
      * registers it is made of changed (ffgen). */
-    /* The Xbox clamps the 6.3 fixed-point SET_POINT_SIZE to 0x1FF. */
-    const float psz[2] = { MIN(R(0x043C), 0x1FFu) / 8.0f, (float)(R(0x0318) & 1) };
+    /* SET_POINT_SIZE: 6.3 fixed point (hle_pbd_method refuses more than 0x1FF) */
+    const float psz[2] = { R(0x043C) / 8.0f, (float)(R(0x0318) & 1) };
     if (g_pd.blk_ok && g_pd.blk_ff == ff && g_pd.blk_gen == g_pd.cgen &&
         (!ff || g_pd.blk_ffgen == g_pd.ffgen) && g_pd.blk_value == hle_fe_last_value() &&
         !memcmp(g_pd.blk_psz, psz, sizeof(psz))) {
         c_off = g_pd.blk_off;
         g_pd.blk_reused++;
     } else {
-        c_off = arena(sizeof(g_pd.consts) + sizeof(g_pd.cur) + 16, &cb);
+        c_off = arena(sizeof(g_pd.consts) + sizeof(g_pd.cur) + 16 * HLE_VSH_EXTRA_REGS, &cb);
         if (c_off == HLE_ARENA_FULL) {
             skip(SK_EMIT_ARENA);
             return;
@@ -4356,6 +4357,8 @@ static void emit(HleCmdDraw *d)
         memcpy(cb + sizeof(g_pd.consts), g_pd.cur, sizeof(g_pd.cur));
         const float vpsz[4] = { psz[0], psz[1], 0.0f, 0.0f };
         memcpy(cb + sizeof(g_pd.consts) + sizeof(g_pd.cur), vpsz, sizeof(vpsz));
+        /* SET_STIPPLE_PATTERN's 32 words (stip[], shader/vsh.h) */
+        memcpy(cb + sizeof(g_pd.consts) + sizeof(g_pd.cur) + sizeof(vpsz), &R(0x1480), 128);
         memcpy(g_pd.blk_psz, psz, sizeof(psz));
         g_pd.blk_ok = true;
         g_pd.blk_ff = ff;
@@ -5472,8 +5475,17 @@ void hle_pbd_method(uint32_t m, uint32_t v)
     if (!g_pd.on || m >= 0x2000) {
         return;
     }
+    if (m == 0x043C && v > 0x1FF) {
+        /* SET_POINT_SIZE past its 6.3 bits: ignored, not clamped or masked;
+         * the size before stays (nxdk_pgraph_tests' Point size: sizes rising
+         * by 2 pixels stop at 62, the last one within the range) */
+        return;
+    }
     if (g_pd.in_draw && g_pd.ndm < 12) {     /* debug: what an empty draw held */
         g_pd.dm[g_pd.ndm++] = m << 16 | (v & 0xFFFF);
+    }
+    if (m >= 0x1480 && m < 0x1500 && g_pd.r[m >> 2] != v) {
+        g_pd.cgen++;                        /* the stipple pattern: in the constant block */
     }
     if (g_pd.r[m >> 2] != v && (g_ff_regs[m >> 8] >> ((m >> 2) & 63) & 1)) {
         g_pd.ffgen++;                       /* (D3D sends matrices again unchanged) */

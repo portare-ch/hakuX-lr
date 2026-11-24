@@ -17,12 +17,14 @@
  *   first, the sum up to 2 unless clamped (EFG flags: 0x80 clamp, 0x40
  *   complement v1, 0x20 complement r0). Without one, the output is r0.
  */
+#include <math.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 #include "hw/xbox/hle/shader/ff.h"
 #include "hw/xbox/hle/shader/psh.h"
+#include "hw/xbox/hle/shader/vsh.h"
 
 typedef struct Buf {
     char *p;
@@ -590,6 +592,9 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
     put(&b, "#version 450\n#extension GL_EXT_nonuniform_qualifier : require\n%s%s",
         k->poly_smooth ? HLE_BARY_EXT_GLSL : "",
         hle_push_glsl());
+    if (k->zclamp & HLE_PSH_STIPPLE) {  /* the constant block: its stipple pattern */
+        put(&b, HLE_VSH_BLOCK_GLSL);
+    }
     if (k->shadow_point >> 4) {
         /* The HILO dot mappings of an R16B16 sampled as stored (w16): its
          * two halves as filtered, at 16 bits, where dmap puts them together
@@ -714,8 +719,23 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "}\n"
             "vec4 sampc(uint s, vec3 dir) {\n"
             "  uint ti = pc.tex[s] & 0xFFFFu, si = (pc.tex[s] >> 16) & 0xFFu;\n"
-            "  return texture(samplerCube(uTexCube[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), "
+            /* A zero-length direction: the NV2A takes the +X face at its corner
+             * (0, 0), from the smallest mip level the filter allows
+             * (nxdk_pgraph_tests' Texture cubemap, *ZeroVector*). Here the
+             * centre of that face's texel (0, 0), which lies in texel (0, 0)
+             * of every level; the sampler's LOD range picks the level. The
+             * ordinary lookup is made first, for every fragment: its implicit
+             * derivatives are undefined after a branch that only some
+             * fragments of a quad take. */
+            "  vec4 c = texture(samplerCube(uTexCube[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), "
             "dir);\n"
+            "  if (dir == vec3(0.0)) {\n"
+            "    float n = float(textureSize(samplerCube(uTexCube[nonuniformEXT(ti)], "
+            "uSmp[nonuniformEXT(si)]), 0).x);\n"
+            "    c = textureLod(samplerCube(uTexCube[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), "
+            "vec3(1.0, 1.0 - 1.0 / n, 1.0 - 1.0 / n), 1000.0);\n"
+            "  }\n"
+            "  return c;\n"
             "}\n"
             /* PSDotMapping of a texture color to a vector */
             "vec3 dmap(uint m, vec4 c) {\n"
@@ -1030,8 +1050,11 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             /* E the eye vector: the q coordinates of stages 1-3, or (CONST)
              * SET_EYE_VECTOR's, constant across the draw (this stage's bump
              * words) */
+            /* a zero N gives the zero direction whatever E is (0 / 0 on the
+             * NV2A; nxdk_pgraph_tests' DotReflectSpecZeroVector), sampc's case */
             put(&b, "  vec4 t%u;\n  { vec3 n = vec3(dot1, dot2, dot3), e = %s;\n"
-                    "    t%u = sampc(%uu, 2.0 * n * dot(n, e) / max(dot(n, n), 1e-8) - e); }\n",
+                    "    t%u = sampc(%uu, n == vec3(0.0) ? vec3(0.0) :\n"
+                    "                2.0 * n * dot(n, e) / max(dot(n, n), 1e-8) - e); }\n",
                 s, m == HLE_PST_DOT_RFLCT_SPEC ? "vec3(vTex1.w, vTex2.w, vTex3.w)"
                    : "vec3(uintBitsToFloat(pc.bump3), uintBitsToFloat(pc.bumpl[2]))", s, s);
             break;
@@ -1085,6 +1108,13 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
     unsigned n = k->count & 0xFF;
     for (unsigned s = 0; s < n && s < 8; s++) {
         stage(&b, k, s);
+    }
+    if (k->zclamp & HLE_PSH_STIPPLE) {
+        /* nxdk_pgraph_tests' Stipple tests: the bit order as its Asymmetric
+         * pattern shows on the console */
+        put(&b, "  { ivec2 sp = ivec2(gl_FragCoord.xy / float(max((pc.flags >> 16) & 255u, 1u)));\n"
+                "    uint row = uint(31 - (sp.y & 31));\n"
+                "    if (((stip[row >> 2][row & 3u] >> uint((sp.x & 31) ^ 7)) & 1u) == 0u) discard; }\n");
     }
     final_combiner(&b, k);
     put(&b, "  outc = clamp(outc, 0.0, 1.0);\n");
@@ -1212,7 +1242,26 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
     }
     /* the replaced depth replaces W-buffering's too: the fragment's, whatever
      * made it (the polygon offset with it) */
-    put(&b, "%s}\n", zr ? "  gl_FragDepth = zrep;\n" : k->wbuf ? HLE_WBUF_STORE_GLSL : "");
+    if (k->zclamp & HLE_PSH_ZF16) {
+        /* A 16-bit float depth buffer has no word for a depth under 2^-6 (its
+         * exponent 0) but 0: such a fragment is tested and stored as 0, while
+         * a clear's or the CPU's word under 0x1000 stays as written
+         * (nxdk_pgraph_tests' Depth buffer, z16 float cleared to 0x00f: the
+         * fragments up to word 0xfff pass LESS and leave 0). The image holds
+         * the depth times the largest float that keeps 511.9375 within 1
+         * (pb/pbdraw.c zfloat_scale). */
+        float sc = 1.0f / 511.9375f, lim;
+        while (511.9375f * sc > 1.0f) {
+            sc = nextafterf(sc, 0.0f);
+        }
+        lim = 0.015625f * sc;
+        uint32_t lb;
+        memcpy(&lb, &lim, 4);
+        const char *d = zr ? "zrep" : k->wbuf ? "wDepth" : "gl_FragCoord.z";
+        put(&b, "  gl_FragDepth = %s < uintBitsToFloat(0x%08xu) ? 0.0 : %s;\n}\n", d, lb, d);
+    } else {
+        put(&b, "%s}\n", zr ? "  gl_FragDepth = zrep;\n" : k->wbuf ? HLE_WBUF_STORE_GLSL : "");
+    }
     if (unsupported) {
         *unsupported = unsup;
     }

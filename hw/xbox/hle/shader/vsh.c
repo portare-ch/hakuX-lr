@@ -4,7 +4,11 @@
  * Semantics follow NV_vertex_program1_1 plus the NV2A rules games rely on:
  * - a MAC and an ILU operation in one slot read their operands before
  *   either writes (both results are computed into temporaries first);
- * - MUL/MAD: a zero factor gives zero even against inf/NaN;
+ * - MUL/MAD: a zero factor gives zero even against inf/NaN; any other
+ *   product with a NaN is the positive NaN, whatever the signs;
+ * - an output colour that is a NaN saturates by its sign: 1 positive, 0
+ *   negative (nxdk_pgraph_tests' Attrib float: a colour of -NaN passed
+ *   through is black, +NaN white, either times anything but 0 white);
  * - RCP(0) = +inf, RCC clamps the magnitude to [2^-64, 2^64];
  * - R12 is oPos;
  * - the program leaves oPos in screen space (the XDK appends the viewport
@@ -169,8 +173,13 @@ static void out_write(Buf *b, const Nv2aVshOutput *o, const char *val, bool *fog
 static const char k_lib[] =
     "vec4 mulz(vec4 a, vec4 b) {\n"
     "  vec4 r = a * b;\n"
+    "  vec4 n = vec4(isnan(a)) + vec4(isnan(b));\n"
+    "  r = mix(r, vec4(uintBitsToFloat(0x7FC00000u)), greaterThan(n, vec4(0.0)));\n"
     "  vec4 z = vec4(equal(a, vec4(0.0))) + vec4(equal(b, vec4(0.0)));\n"
     "  return mix(r, vec4(0.0), greaterThan(z, vec4(0.0)));\n"
+    "}\n"
+    "vec4 csat(vec4 c) {\n"
+    "  return mix(clamp(c, 0.0, 1.0), vec4(greaterThanEqual(floatBitsToInt(c), ivec4(0))), isnan(c));\n"
     "}\n"
     "vec4 dst4(vec4 a, vec4 b) { return vec4(1.0, a.y * b.y, a.z, b.w); }\n"
     "vec4 rcp4(float x) { return vec4(x == 0.0 ? uintBitsToFloat(0x7F800000u) : 1.0 / x); }\n"
@@ -210,9 +219,7 @@ static void head(Buf *bp, const HleVshKey *k)
     const char *interp = (k->flat & 1) ? "flat " : (k->flat & 2) ? "noperspective " : "";
     const char *np = (k->flat & 2) ? "noperspective " : "";
     put(&b, "#version 450\n%s", hle_push_glsl());
-    put(&b, "layout(set = 1, binding = 0, std140) uniform VshConst { vec4 c[192]; "
-            "vec4 vcur[16]; vec4 vpsz; };\n"
-            "invariant gl_Position;\n");
+    put(&b, HLE_VSH_BLOCK_GLSL "invariant gl_Position;\n");
     for (unsigned i = 0; i < 16; i++) {
         if (k->in_mask & (1u << i)) {
             put(&b, "layout(location = %u) in %s v%u_in;\n", i,
@@ -327,12 +334,12 @@ static void tail(Buf *bp, const HleVshKey *k, bool fogw)
      * LIGHT_CONTROL takes it from the material specular (the NV2A tests'
      * Lighting control, VS_*_LightOff: opaque meshes) */
     const char *d1 = k->spec_off ? "vec4(0.0, 0.0, 0.0, 1.0)" :
-                     k->spec_a1 ? "vec4(clamp(oD1.rgb, 0.0, 1.0), 1.0)" : "clamp(oD1, 0.0, 1.0)";
+                     k->spec_a1 ? "vec4(csat(oD1).rgb, 1.0)" : "csat(oD1)";
     const char *b1 = k->spec_off ? "vec4(0.0, 0.0, 0.0, 1.0)" :
-                     k->spec_a1 ? "vec4(clamp(oB1.rgb, 0.0, 1.0), 1.0)" : "clamp(oB1, 0.0, 1.0)";
-    put(&b, "  vDiffuse = clamp(oD0, 0.0, 1.0);\n"
+                     k->spec_a1 ? "vec4(csat(oB1).rgb, 1.0)" : "csat(oB1)";
+    put(&b, "  vDiffuse = csat(oD0);\n"
             "  vSpecular = %s;\n"
-            "  vBack0 = clamp(oB0, 0.0, 1.0);\n"
+            "  vBack0 = csat(oB0);\n"
             "  vBack1 = %s;\n"
             "  vTex0 = oT0; vTex1 = oT1; vTex2 = oT2; vTex3 = oT3;\n", d1, b1);
     /* the NV2A's vertex colours are bytes: rounded before they are
