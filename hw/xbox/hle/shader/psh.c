@@ -250,11 +250,15 @@ static void final_combiner(Buf *b, const HlePshKey *k)
            "    outc = vec4(A * B + (1.0 - A) * C + D, G);\n  }\n");
 }
 
-/* Map the convolution centre into the bordered buffer before computing tap offsets. */
+/* Map the convolution centre into the bordered buffer; BTC clamps each tap to its border texels. */
 #define K_CONV_BTEX \
+    "#undef BTC\n" \
     "#ifdef BTEX\n" \
     "  if (bord[s].x > 0.0)\n" \
     "    uv = clamp(uv * bord[s].xy + 4.0, vec2(0.5), bord[s].xy + 7.5) / sz;\n" \
+    "#define BTC(p) (bord[s].x > 0.0 ? clamp(p, vec2(0.5) / sz, (bord[s].xy + 7.5) / sz) : (p))\n" \
+    "#else\n" \
+    "#define BTC(p) (p)\n" \
     "#endif\n"
 
 /* The convolution filters at the texture's own texels (guest ones: a scaled
@@ -287,13 +291,13 @@ static const char k_conv_glsl[] =
     "    return textureGrad(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), "
     "uv, gx, gy);\n"
     "  vec2 d = sc / sz;\n"
-    "  vec4 diag = tap(ti, ci, uv - d) + tap(ti, ci, uv + d) +\n"
-    "              tap(ti, ci, uv + vec2(d.x, -d.y)) + tap(ti, ci, uv + vec2(-d.x, d.y));\n"
+    "  vec4 diag = tap(ti, ci, BTC(uv - d)) + tap(ti, ci, BTC(uv + d)) +\n"
+    "              tap(ti, ci, BTC(uv + vec2(d.x, -d.y))) + tap(ti, ci, BTC(uv + vec2(-d.x, d.y)));\n"
     "  if (kern == 1u)\n"
-    "    return 0.5 * tap(ti, ci, uv) + 0.125 * diag;\n"
-    "  vec4 edge = tap(ti, ci, uv + vec2(d.x, 0.0)) + tap(ti, ci, uv - vec2(d.x, 0.0)) +\n"
-    "              tap(ti, ci, uv + vec2(0.0, d.y)) + tap(ti, ci, uv - vec2(0.0, d.y));\n"
-    "  return (4.0 * tap(ti, ci, uv) + 2.0 * edge + diag) / 16.0;\n"
+    "    return 0.5 * tap(ti, ci, BTC(uv)) + 0.125 * diag;\n"
+    "  vec4 edge = tap(ti, ci, BTC(uv + vec2(d.x, 0.0))) + tap(ti, ci, BTC(uv - vec2(d.x, 0.0))) +\n"
+    "              tap(ti, ci, BTC(uv + vec2(0.0, d.y))) + tap(ti, ci, BTC(uv - vec2(0.0, d.y)));\n"
+    "  return (4.0 * tap(ti, ci, BTC(uv)) + 2.0 * edge + diag) / 16.0;\n"
     "}\n";
 /* Apply GL-style clamp to each convolution tap. */
 static const char k_conv_glc_glsl[] =
@@ -317,13 +321,13 @@ static const char k_conv_glc_glsl[] =
     "    return textureGrad(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), "
     "GLC2(s, uv), gx, gy);\n"
     "  vec2 d = sc / sz;\n"
-    "  vec4 diag = tap(ti, ci, GLC2(s, uv - d)) + tap(ti, ci, GLC2(s, uv + d)) +\n"
-    "              tap(ti, ci, GLC2(s, uv + vec2(d.x, -d.y))) + tap(ti, ci, GLC2(s, uv + vec2(-d.x, d.y)));\n"
+    "  vec4 diag = tap(ti, ci, GLC2(s, BTC(uv - d))) + tap(ti, ci, GLC2(s, BTC(uv + d))) +\n"
+    "              tap(ti, ci, GLC2(s, BTC(uv + vec2(d.x, -d.y)))) + tap(ti, ci, GLC2(s, BTC(uv + vec2(-d.x, d.y))));\n"
     "  if (kern == 1u)\n"
-    "    return 0.5 * tap(ti, ci, GLC2(s, uv)) + 0.125 * diag;\n"
-    "  vec4 edge = tap(ti, ci, GLC2(s, uv + vec2(d.x, 0.0))) + tap(ti, ci, GLC2(s, uv - vec2(d.x, 0.0))) +\n"
-    "              tap(ti, ci, GLC2(s, uv + vec2(0.0, d.y))) + tap(ti, ci, GLC2(s, uv - vec2(0.0, d.y)));\n"
-    "  return (4.0 * tap(ti, ci, GLC2(s, uv)) + 2.0 * edge + diag) / 16.0;\n"
+    "    return 0.5 * tap(ti, ci, GLC2(s, BTC(uv))) + 0.125 * diag;\n"
+    "  vec4 edge = tap(ti, ci, GLC2(s, BTC(uv + vec2(d.x, 0.0)))) + tap(ti, ci, GLC2(s, BTC(uv - vec2(d.x, 0.0)))) +\n"
+    "              tap(ti, ci, GLC2(s, BTC(uv + vec2(0.0, d.y)))) + tap(ti, ci, GLC2(s, BTC(uv - vec2(0.0, d.y))));\n"
+    "  return (4.0 * tap(ti, ci, GLC2(s, BTC(uv))) + 2.0 * edge + diag) / 16.0;\n"
     "}\n";
 
 /* A D3D blend factor (Vulkan's as vk/draw.c blend_factor maps them) as a
@@ -727,6 +731,17 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "    uv += 0.000244140625 / sz;\n"
             "  return %s;\n"
             "}\n"
+            /* A direct 2D lookup's coordinates in a bordered buffer, as samp maps them. */
+            "vec2 bt2(uint s, vec2 uv) {\n"
+            "#ifdef BTEX\n"
+            "  if (bord[s].x > 0.0) {\n"
+            "    uint ti = pc.tex[s] & 0xFFFFu;\n"
+            "    vec2 sz = vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[0]), 0));\n"
+            "    return clamp(uv * bord[s].xy + 4.0, vec2(0.5), bord[s].xy + 7.5) / sz;\n"
+            "  }\n"
+            "#endif\n"
+            "  return uv;\n"
+            "}\n"
             "vec4 samp3(uint s, vec3 uvw) {\n"
             "  uint ti = pc.tex[s] & 0xFFFFu, si = (pc.tex[s] >> 16) & 0xFFu;\n"
             "#ifdef BTEX\n"
@@ -1040,9 +1055,9 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             put(&b, "  vec4 t%u;\n"
                     "  { uint ti = pc.tex[%u] & 0xFFFFu, si = (pc.tex[%u] >> 16) & 0xFFu;\n"
                     "    t%u = %s(sampler2D(uTex2D[nonuniformEXT(ti)], "
-                    "uSmp[nonuniformEXT(si)]), %s%s.%s); }\n",
+                    "uSmp[nonuniformEXT(si)]), %sbt2(%uu, %s.%s)); }\n",
                 s, s, s, s, gl ? "GLT2" : "texture", gl ? (snprintf(gls, sizeof(gls), "%uu, ", s), gls) : "",
-                tex_read(ts, sizeof(ts), k, in), m == HLE_PST_DPNDNT_AR ? "ar" : "gb");
+                s, tex_read(ts, sizeof(ts), k, in), m == HLE_PST_DPNDNT_AR ? "ar" : "gb");
             break;
         }
         case HLE_PST_DOT_STR_3D:                    /* stage 3: (dot1, dot2, dot3) */
@@ -1110,9 +1125,9 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
                 put(&b, "  vec4 t%u;\n"
                         "  { uint ti = pc.tex[%u] & 0xFFFFu, si = (pc.tex[%u] >> 16) & 0xFFu;\n"
                         "    t%u = %s(sampler2D(uTex2D[nonuniformEXT(ti)], "
-                        "uSmp[nonuniformEXT(si)]), %svec2(%s.a, %s.a)); }\n",
+                        "uSmp[nonuniformEXT(si)]), %sbt2(%uu, vec2(%s.a, %s.a))); }\n",
                     s, s, s, s, gl ? "GLT2" : "texture", gl ? (snprintf(gls, sizeof(gls), "%uu, ", s), gls) : "",
-                    ts, ts2);
+                    s, ts, ts2);
             }
             break;
         default:                        /* unknown modes */

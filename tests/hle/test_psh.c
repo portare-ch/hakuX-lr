@@ -302,6 +302,9 @@ static void test_btex(void)
     const char *gk = fk ? strstr(fk, "vec2 gx = dFdx(uv), gy = dFdy(uv);") : NULL;
     blk = strstr(buf, "uvec4 stip[8]; vec4 bord[4]; };");
     HT_CHECK(blk && fk && mk && gk && blk < fk && mk < gk);
+    /* Each tap is clamped to the border texels, and direct lookups are mapped too. */
+    HT_CHECK(strstr(buf, "tap(ti, ci, BTC(uv - d))") != NULL);
+    HT_CHECK(strstr(buf, "vec2 bt2(uint s, vec2 uv) {") != NULL);
 }
 
 /* A 16-bit float depth target (zclamp's HLE_PSH_ZF16): a depth under 2^-6,
@@ -501,7 +504,7 @@ static void test_brdf(void)
     HT_CHECK(n > 0 && n == strlen(buf));
     dump("psh_brdf_2d");
     HT_EQ_U32(un, 0);
-    HT_CHECK(strstr(buf, "uSmp[nonuniformEXT(si)]), vec2(t0.a, t1.a)); }") != NULL);
+    HT_CHECK(strstr(buf, "uSmp[nonuniformEXT(si)]), bt2(2u, vec2(t0.a, t1.a))); }") != NULL);
     HT_CHECK(strstr(buf, "samp3(2u") == NULL);
     /* stage 3: stages 1 and 2 */
     rs[HLE_PS_TEXMODES] = 1 | 3u << 5 | 3u << 10 | (unsigned)HLE_PST_BRDF << 15;
@@ -784,7 +787,7 @@ static void test_sign(void)
     dump("psh_sign_dot");
     HT_CHECK(strstr(buf, "dot1 = dot(vTex1.xyz, dmap(0u, tsh(t0, bvec4(true, true, true, false))));")
              != NULL);
-    HT_CHECK(strstr(buf, "uSmp[nonuniformEXT(si)]), tsh(t0, bvec4(true, true, true, false)).gb); }")
+    HT_CHECK(strstr(buf, "uSmp[nonuniformEXT(si)]), bt2(2u, tsh(t0, bvec4(true, true, true, false)).gb)); }")
              != NULL);
     k.sgn_ob = 0;                                       /* unsigned: as before */
     HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), NULL) > 0);
