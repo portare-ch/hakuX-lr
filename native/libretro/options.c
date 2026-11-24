@@ -59,7 +59,7 @@ static bool steam_deck(const char *dir)
 #define COMBINER_PRECISION_DEFAULT "disabled"
 #endif
 
-enum { OPT_SCALE, OPT_ACCURACY, OPT_CROP, OPT_FORMAT, OPT_LANGUAGE, OPT_REGION, OPT_RUMBLE, OPT_NETWORK,
+enum { OPT_SCALE, OPT_ACCURACY, OPT_CROP, OPT_FORMAT, OPT_480P, OPT_720P, OPT_SCALE_720P, OPT_LANGUAGE, OPT_REGION, OPT_RUMBLE, OPT_NETWORK,
        OPT_COMMUNICATOR, OPT_MIC_GATE, OPT_RESAMPLER, OPT_PROCESSING, OPT_PRECISION, OPT_PACE,
        OPT_REPEAT, OPT_MODS, OPT_RAM, OPT_RAM_PATCH, OPT_COUNT };
 
@@ -101,6 +101,24 @@ static struct retro_core_option_v2_definition g_defs[OPT_COUNT + 1] = {
         {{"auto", "Auto"}, {"normal", "Normal (4:3)"}, {"widescreen", "Widescreen (16:9)"},
          {"letterbox", "Letterbox"}, {NULL, NULL}},
         "auto"},
+    [OPT_480P] = {
+        "hakux_video_480p", "480p", NULL,
+        "Allow games to select 480p." NEXT,
+        NULL, NULL,
+        {{"enabled", "On"}, {"disabled", "Off"}, {NULL, NULL}},
+        "enabled"},
+    [OPT_720P] = {
+        "hakux_video_720p", "720p", NULL,
+        "Allow games to select 720p (1280x720, 16:9)." NEXT,
+        NULL, NULL,
+        {{"disabled", "Off"}, {"enabled", "On"}, {NULL, NULL}},
+        "disabled"},
+    [OPT_SCALE_720P] = {
+        "hakux_render_scale_720p", "Render Scale (720p)", NULL,
+        "Render scale for games running in 720p. 3x is 3840x2160." NEXT,
+        NULL, NULL,
+        {{"1", "1x (1280x720)"}, {"2", "2x"}, {"3", "3x"}, {NULL, NULL}},
+        "1"},
     [OPT_LANGUAGE] = {
         "hakux_language", "Language", NULL,
         "Sets the language in games that support it. Auto uses RetroArch's language, "
@@ -338,6 +356,7 @@ static void display_update(void)
  * mode it asks for is the same either way (on a standard-definition cable
  * the mode's bit 28 tells), hence the list. */
 static bool g_format_auto;              /* atomic */
+static uint32_t g_video_base;           /* HDTV and PAL60 flags shared by all screen formats. */
 static int g_display_wide = -2;         /* atomic: the frontend's display is 16:10 or wider; -1 not known
                                            (-2: not asked yet) */
 
@@ -391,7 +410,7 @@ static void screen_auto(bool patch, uint32_t title_id)
     const bool listed = widescreen_title(title_id);
     const int wide = __atomic_load_n(&g_display_wide, __ATOMIC_ACQUIRE);
     const bool widescreen = patch || (listed && wide != 0);
-    nc_kernel_set_video(NC_VIDEO_480P | NC_VIDEO_PAL60 | (widescreen ? NC_VIDEO_WIDESCREEN : 0), NC_AV_PACK_HDTV);
+    nc_kernel_set_video(g_video_base | (widescreen ? NC_VIDEO_WIDESCREEN : 0), NC_AV_PACK_HDTV);
     nc_lr_video_set_widescreen(widescreen);
     nc_log("hakuX-lr", "screen format auto: %s (title %08X: %s)", widescreen ? "widescreen" : "normal", title_id,
            patch              ? "a widescreen patch is applied"
@@ -408,6 +427,8 @@ void nc_lr_options_apply(void)
     }
     const int scale = atoi(g_defs[OPT_SCALE].values[g_applied[OPT_SCALE]].value);
     nc_hle_set_render_scale(scale);
+    const int scale_720p = atoi(g_defs[OPT_SCALE_720P].values[g_applied[OPT_SCALE_720P]].value);
+    nc_hle_set_render_scale_720p(scale_720p);
     const bool crop = strcmp(g_defs[OPT_CROP].values[g_applied[OPT_CROP]].value, "disabled") != 0;
     nc_lr_video_set_crop(crop);
     const bool rumble = strcmp(g_defs[OPT_RUMBLE].values[g_applied[OPT_RUMBLE]].value, "enabled") == 0;
@@ -417,13 +438,14 @@ void nc_lr_options_apply(void)
     nc_core_set_ram((unsigned)atoi(g_defs[OPT_RAM].values[g_applied[OPT_RAM]].value));
     nc_xbe_set_unlimit(!strcmp(g_defs[OPT_RAM_PATCH].values[g_applied[OPT_RAM_PATCH]].value, "enabled"));
 
-    /* 480p, as a console on its component cable (the AV pack here) is set
-     * up: 4:3 480p is 00080000. PAL60 for a PAL console only (RetroArch
-     * runs at 59.94 Hz); ex.c drops it for NTSC, which has no such setting. */
+    /* ex.c clears PAL60 for NTSC consoles. */
     const char *format = g_defs[OPT_FORMAT].values[g_applied[OPT_FORMAT]].value;
-    const uint32_t flags = NC_VIDEO_480P | NC_VIDEO_PAL60 | (!strcmp(format, "widescreen") ? NC_VIDEO_WIDESCREEN
-                                             : !strcmp(format, "letterbox") ? NC_VIDEO_LETTERBOX
-                                                                            : 0);
+    const bool p480 = !strcmp(g_defs[OPT_480P].values[g_applied[OPT_480P]].value, "enabled");
+    const bool p720 = !strcmp(g_defs[OPT_720P].values[g_applied[OPT_720P]].value, "enabled");
+    g_video_base = NC_VIDEO_PAL60 | (p480 ? NC_VIDEO_480P : 0) | (p720 ? NC_VIDEO_720P : 0);
+    const uint32_t flags = g_video_base | (!strcmp(format, "widescreen") ? NC_VIDEO_WIDESCREEN
+                                           : !strcmp(format, "letterbox") ? NC_VIDEO_LETTERBOX
+                                                                          : 0);
     nc_kernel_set_video(flags, NC_AV_PACK_HDTV);
     nc_lr_video_set_widescreen(flags & NC_VIDEO_WIDESCREEN);
     /* Auto: normal until the booting XBE says widescreen (screen_auto) */
@@ -474,17 +496,18 @@ void nc_lr_options_apply(void)
     hle_accuracy_set(level, &acc);
     const bool precise = acc.precise_combiners;
     display_update();
-    nc_log("hakuX-lr", "options: render scale %dx, overscan %s, screen %s, language %d (%s), video region %s, "
+    nc_log("hakuX-lr", "options: render scale %dx, overscan %s, screen %s, HDTV modes%s%s%s, language %d (%s), video region %s, "
            "rumble %s, network %s, resampler %s, audio processing %s, frame pacing %s, communicator %s%s%s, "
-           "accuracy %s (combiners %s, signed blending %s, post-blend dithering %s)",
-           scale, crop ? "cropped" : "shown", format, language,
+           "accuracy %s (combiners %s, signed blending %s, post-blend dithering %s), render scale in 720p %dx",
+           scale, crop ? "cropped" : "shown", format, p480 ? " 480p" : "",
+           p720 ? " 720p" : "", p480 || p720 ? "" : " off", language,
            g_defs[OPT_LANGUAGE].values[g_applied[OPT_LANGUAGE]].value, region, rumble ? "on" : "off",
            strcmp(network, "disabled") ? "on" : "off", resampler,
            dsp ? "dsp" : deck && !strcmp(processing, "auto") ? "fast (Auto on a Steam Deck)" : "fast",
            pace_text(g_applied[OPT_PACE]), communicator ? "on (noise gate " : "off", communicator ? gate : "",
            communicator ? ")" : "", hle_accuracy_level_name(level), precise ? "accurate" : "fast",
            acc.precise_signed_blend ? "accurate" : "approximate",
-           acc.precise_postblend_dither ? "accurate" : "approximate");
+           acc.precise_postblend_dither ? "accurate" : "approximate", scale_720p);
 }
 
 void nc_lr_options_run(void)

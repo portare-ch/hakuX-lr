@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **HDTV modes.** Games can select 480p (on by default) or 720p (off by default). A game running in 720p uses its own **Render Scale (720p)**, 1× by default. The core scales output larger than 3840×2160 to fit.
 - **NV2A accuracy.** A cube map looked up with a zero-length direction returns the +X face's corner texel from the smallest mip level the filter allows, as on the console, and a specular reflection about a zero normal does the same. Texture cubemap goes from 66 to 72 of 83 pictures.
 - **NV2A accuracy.** In a 16-bit float depth buffer, a fragment depth below 2^-6 is tested and stored as 0, while a clear value under 0x1000 is kept. Depth buffer goes from 132 to 142 of 144 pictures and Depth buffer fixed function from 76 to 78 of 80.
 - **NV2A accuracy.** A `SET_POINT_SIZE` value above the register's range (0x1FF) is ignored instead of clamped, so the previous size stays. Point size goes from 11 to 15 of 22 pictures.

@@ -196,6 +196,18 @@ int hle_host_render_scale(void)
     return g_render_scale;
 }
 
+static int g_render_scale_720p = 1;
+
+void nc_hle_set_render_scale_720p(int scale)
+{
+    g_render_scale_720p = scale < 1 ? 1 : scale > 3 ? 3 : scale;
+}
+
+int hle_host_render_scale_720p(void)
+{
+    return g_render_scale_720p;
+}
+
 /* The decoder's frame pace (pb/pbdraw.c g_pace): the swaps back it waits
  * for, 0 off (the default). The decoder reads it at each swap, so the
  * libretro core's option switches it during the game. */

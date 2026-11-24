@@ -227,6 +227,9 @@ def main():
                                        'option: hakux_render_scale (Render Scale), default 2',
                                        'option: hakux_crop_overscan (Crop Overscan), default enabled',
                                        'option: hakux_screen_format (Screen Format), default auto',
+                                       'option: hakux_video_480p (480p), default enabled',
+                                       'option: hakux_video_720p (720p), default disabled',
+                                       'option: hakux_render_scale_720p (Render Scale (720p)), default 1',
                                        'option: hakux_language (Language), default auto',
                                        'option: hakux_video_region (Video Region), default auto',
                                        'option: hakux_rumble (Rumble), default disabled',
@@ -304,21 +307,25 @@ def main():
         disc(root / 'settings.iso', SETTINGS, imports=(24,))
         env = dict(os.environ, HARNESS_LANGUAGE='4')
         run([args.harness, args.core, root / 'settings.iso', 600, root / 'saves'], 0,
-            ('options: render scale 2x, overscan cropped, screen auto, language 3 (auto), video region auto',
+            ('options: render scale 2x, overscan cropped, screen auto, HDTV modes 480p, language 3 (auto), '
+             'video region auto',
              'aspect 1.333',
              'ex: video flags 00080000, AV pack 0, AV region 00400100, language 3', 'guest executed HLT'), env)
         env['HARNESS_OPTIONS'] = (f'{OFF};hakux_render_scale=1;hakux_screen_format=widescreen;hakux_language=french;'
+                                  'hakux_video_720p=enabled;'
                                   'hakux_video_region=ntsc-j')
         run([args.harness, args.core, root / 'settings.iso', 600, root / 'saves'], 0,
-            ('options: render scale 1x, overscan cropped, screen widescreen, language 4 (french), video region ntsc-j, '
+            ('options: render scale 1x, overscan cropped, screen widescreen, HDTV modes 480p 720p, language 4 (french), '
+             'video region ntsc-j, '
              'rumble off',
-             'aspect 1.778', 'ex: video flags 00090000, AV pack 0, AV region 00400200, language 4',
+             'aspect 1.778', 'ex: video flags 000b0000, AV pack 0, AV region 00400200, language 4',
              'guest executed HLT'), env)
         # A value the core doesn't know is its default.
-        env['HARNESS_OPTIONS'] = f'{OFF};hakux_render_scale=9;hakux_video_region=pal;hakux_crop_overscan=disabled'
+        env['HARNESS_OPTIONS'] = (f'{OFF};hakux_render_scale=9;hakux_video_region=pal;hakux_crop_overscan=disabled;'
+                                  'hakux_video_480p=disabled')
         run([args.harness, args.core, root / 'settings.iso', 600, root / 'saves'], 0,
-            ('options: render scale 2x, overscan shown, screen auto, language 3 (auto), video region pal',
-             'ex: video flags 00480000, AV pack 0, AV region 00800300, language 3'), env)
+            ('options: render scale 2x, overscan shown, screen auto, HDTV modes off, language 3 (auto), video region pal',
+             'ex: video flags 00400000, AV pack 0, AV region 00800300, language 3'), env)
         # Changed during the game (the menu), they wait for the next start;
         # the crop, rumble and frame pacing don't. Rumble on asks RetroArch
         # for its interface, which the harness doesn't have.
