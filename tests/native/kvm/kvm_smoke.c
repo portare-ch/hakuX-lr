@@ -35,6 +35,7 @@
 #define DATA  0x20000u
 #define FLAG  (DATA + 0x200)
 #define LATE  0x30000u /* unmapped until the guest touches it */
+#define LATE2 0x50000u /* the same, for a memory RSQRT's source */
 #define IDT   0x8001F000u
 #define MMIO  0xFE000000u
 #define OHCI  0xFED00000u
@@ -59,7 +60,9 @@ static struct {
 static unsigned nops;
 static NcCpuContext ctx[2];
 static int cur;
-static int irqs, hooks, late_faults;
+static int irqs, hooks, late_faults, late2_faults, own_faults, gp_ops;
+#define GP_SITE  (CODE + 0x210E) /* RSQRTPS from an unaligned source */
+#define OWN_SITE (CODE + 0x2115) /* RSQRTSS from a page of the backend's */
 static uint32_t irq_eip, irq_ecx;
 static uint16_t out_port;
 static uint32_t out_value;
@@ -88,6 +91,13 @@ static bool system_op(void *opaque, NcFrame *f, enum NcSysOp op, unsigned size)
         nops++;
     }
     switch (op) {
+    case NC_SYSOP_OTHER:
+        if (eip != GP_SITE || size) {
+            return false;
+        }
+        gp_ops++;
+        nc_frame_set_eip(f, eip + 7);
+        return true;
     case NC_SYSOP_INT: {
         const uint8_t v = *(const uint8_t *)nc_vm_host(&core.vm, eip + 1);
         if (v == 0x41) {
@@ -230,6 +240,19 @@ static int fault(void *opaque, NcFrame *f, uint32_t va, bool write, const char *
         }
         return nc_vm_view_prot(&core.vm, WP, NC_PAGE, PROT_READ | PROT_WRITE) == 0 ? 1 : 0;
     }
+    if (va == 0x7000u && nc_frame_eip(f) == OWN_SITE) {
+        own_faults++;
+        nc_frame_set_eip(f, OWN_SITE + 8);
+        return 2;
+    }
+    if (va - LATE2 < NC_PAGE) {
+        late2_faults++;
+        if (!nc_vm_alloc_at(&core.vm, LATE2, NC_PAGE, NULL)) {
+            return 0;
+        }
+        nc_wr32(nc_vm_host(&core.vm, LATE2 + 0x10), 0x40800000);
+        return 1;
+    }
     if (va - LATE < NC_PAGE) {
         late_faults++;
         return nc_vm_alloc_at(&core.vm, LATE, NC_PAGE, NULL) ? 1 : 0;
@@ -314,7 +337,7 @@ int main(void)
     cfg.hook_list = hook_list;
     /* Known instruction boundaries in the synthetic RSQRT program below.
      * Intel must ignore these; AMD alone installs the corrections. */
-    setenv("NC_KVM_RSQRT_SITES", "10a0e,10a19,10a4e,10a59", 1);
+    setenv("NC_KVM_RSQRT_SITES", "10a0e,10a19,10a4e,10a59,12008,1201c,1202a,12038,1204a,12052,12064,12069,1210e,12115", 1);
     cpu = core.cpu = nc_cpu_create(&cfg, core.kernel.kpcr_va);
     unsetenv("NC_KVM_RSQRT_SITES");
     if (!cpu) {
@@ -602,6 +625,89 @@ int main(void)
     check(nc_vm_rd32(&core.vm, DATA + 0x3D0) == 0x1F80, "RCP leaves guest MXCSR unchanged");
     check(*(uint8_t *)nc_vm_host(&core.vm, CODE + 0xA4E) == (nc_rsqrt_host_amd() ? 0xCC : 0xF3),
           "RCP patching uses actual AMD host CPUID only");
+
+    /* Memory forms, corrected in the guest as well: each kind of address,
+     * with the registers the handler uses among them, ESP's and a source
+     * on a page that isn't mapped yet. */
+    const uint8_t memory[] = {
+        0x0F, 0x10, 0x05, 0x00, 0x03, 0x02, 0x00,        /* movups xmm0, [0x20300] */
+        0xF9,                                            /* stc */
+        0xF3, 0x0F, 0x52, 0x05, 0x40, 0x03, 0x02, 0x00,  /* rsqrtss xmm0, [0x20340] */
+        0x9C, 0x8F, 0x05, 0xF0, 0x05, 0x02, 0x00,        /* pushfd; pop [0x205F0] */
+        0xBB, 0x00, 0x03, 0x02, 0x00,                    /* mov ebx, 0x20300 */
+        0x0F, 0x52, 0x4B, 0x40,                          /* rsqrtps xmm1, [ebx+0x40] */
+        0xB9, 0x10, 0x00, 0x00, 0x00,                    /* mov ecx, 0x10 */
+        0xBE, 0x00, 0x00, 0x02, 0x00,                    /* mov esi, 0x20000 */
+        0xF3, 0x0F, 0x53, 0x94, 0x8E, 0xA0, 0x03, 0x00, 0x00, /* rcpss xmm2, [esi+ecx*4+0x3A0] */
+        0x68, 0x00, 0x00, 0x80, 0x40,                    /* push 0x40800000 */
+        0xF3, 0x0F, 0x52, 0x1C, 0x24,                    /* rsqrtss xmm3, [esp] */
+        0x83, 0xC4, 0x04,                                /* add esp, 4 */
+        0xBD, 0x00, 0x03, 0x02, 0x00,                    /* mov ebp, 0x20300 */
+        0xBF, 0x08, 0x00, 0x00, 0x00,                    /* mov edi, 8 */
+        0x0F, 0x53, 0xA4, 0xFD, 0xA0, 0x00, 0x00, 0x00,  /* rcpps xmm4, [ebp+edi*8+0xA0] */
+        0xF3, 0x0F, 0x52, 0x2D, 0x10, 0x00, 0x05, 0x00,  /* rsqrtss xmm5, [LATE2+0x10] */
+        0xB8, 0x40, 0x03, 0x02, 0x00,                    /* mov eax, 0x20340 */
+        0xBA, 0x01, 0x00, 0x00, 0x00,                    /* mov edx, 1 */
+        0xF3, 0x0F, 0x52, 0x70, 0x04,                    /* rsqrtss xmm6, [eax+4] */
+        0xF3, 0x0F, 0x52, 0x3C, 0xD0,                    /* rsqrtss xmm7, [eax+edx*8] */
+        0x0F, 0x11, 0x05, 0x00, 0x05, 0x02, 0x00,        /* movups [0x20500], xmm0 */
+        0x0F, 0x11, 0x0D, 0x10, 0x05, 0x02, 0x00,        /* movups [0x20510], xmm1 */
+        0x0F, 0x11, 0x15, 0x20, 0x05, 0x02, 0x00,        /* movups [0x20520], xmm2 */
+        0x0F, 0x11, 0x1D, 0x30, 0x05, 0x02, 0x00,        /* movups [0x20530], xmm3 */
+        0x0F, 0x11, 0x25, 0x40, 0x05, 0x02, 0x00,        /* movups [0x20540], xmm4 */
+        0x0F, 0x11, 0x2D, 0x50, 0x05, 0x02, 0x00,        /* movups [0x20550], xmm5 */
+        0x0F, 0x11, 0x35, 0x60, 0x05, 0x02, 0x00,        /* movups [0x20560], xmm6 */
+        0x0F, 0x11, 0x3D, 0x70, 0x05, 0x02, 0x00,        /* movups [0x20570], xmm7 */
+        0xA3, 0xC0, 0x05, 0x02, 0x00,                    /* mov [0x205C0], eax */
+        0x89, 0x1D, 0xC4, 0x05, 0x02, 0x00,              /* mov [0x205C4], ebx */
+        0x89, 0x0D, 0xC8, 0x05, 0x02, 0x00,              /* mov [0x205C8], ecx */
+        0x89, 0x15, 0xCC, 0x05, 0x02, 0x00,              /* mov [0x205CC], edx */
+        0x89, 0x35, 0xD0, 0x05, 0x02, 0x00,              /* mov [0x205D0], esi */
+        0x89, 0x3D, 0xD4, 0x05, 0x02, 0x00,              /* mov [0x205D4], edi */
+        0x89, 0x2D, 0xD8, 0x05, 0x02, 0x00,              /* mov [0x205D8], ebp */
+        0x89, 0x25, 0xDC, 0x05, 0x02, 0x00,              /* mov [0x205DC], esp */
+        0xF4,                                            /* hlt */
+    };
+    put(CODE + 0x2000, memory, sizeof(memory));
+    run_at(CODE + 0x2000);
+    const bool amd = nc_rsqrt_host_amd();
+#define RSQ(x) (amd ? nc_rsqrt_intel(x) : nc_rsqrt_native(x))
+#define RCP(x) (amd ? nc_rcp_intel(x) : nc_rcp_native(x))
+    const uint32_t *out = nc_vm_host(&core.vm, DATA + 0x500);
+    check(out[0] == RSQ(inputs[0]) && !memcmp(out + 1, (uint8_t *)nc_vm_host(&core.vm, DATA + 0x300) + 4, 12),
+          "RSQRTSS [absolute]: the result and unchanged upper lanes");
+    check(out[4] == RSQ(inputs[0]) && out[5] == RSQ(inputs[1]) && out[6] == RSQ(inputs[2]) &&
+          out[7] == RSQ(inputs[3]), "RSQRTPS [ebx+disp8]: all four lanes");
+    check(out[8] == RCP(rcp_inputs[0]), "RCPSS [esi+ecx*4+disp32]");
+    check(out[12] == RSQ(0x40800000), "RSQRTSS [esp]: the title's stack pointer");
+    check(out[16] == RCP(rcp_inputs[0]) && out[17] == RCP(rcp_inputs[1]) && out[18] == RCP(rcp_inputs[2]) &&
+          out[19] == RCP(rcp_inputs[3]), "RCPPS [ebp+edi*8+disp32]: all four lanes");
+    check(out[20] == RSQ(0x40800000) && late2_faults == 1,
+          "RSQRTSS on an unmapped page: mapped by the fault path, the instruction run again");
+    check(out[24] == RSQ(inputs[1]) && out[28] == RSQ(inputs[2]), "RSQRTSS [eax+disp8] and [eax+edx*8]");
+    const uint32_t *regs = nc_vm_host(&core.vm, DATA + 0x5C0);
+    check(regs[0] == DATA + 0x340 && regs[1] == DATA + 0x300 && regs[2] == 0x10 && regs[3] == 1 &&
+          regs[4] == DATA && regs[5] == 8 && regs[6] == DATA + 0x300 && regs[7] == DATA + 0xF00 &&
+          (nc_vm_rd32(&core.vm, DATA + 0x5F0) & 1), "memory forms leave the general registers and EFLAGS alone");
+#undef RSQ
+#undef RCP
+    /* Sources the title's own instruction faults on: a packed one that
+     * isn't aligned (#GP), a page of the backend's (#PF). Nothing written. */
+    const uint8_t denied[] = {
+        0x0F, 0x10, 0x0D, 0x00, 0x03, 0x02, 0x00,       /* movups xmm1, [0x20300] */
+        0x0F, 0x10, 0x15, 0x00, 0x03, 0x02, 0x00,       /* movups xmm2, [0x20300] */
+        0x0F, 0x52, 0x0D, 0x44, 0x03, 0x02, 0x00,       /* rsqrtps xmm1, [0x20344] */
+        0xF3, 0x0F, 0x52, 0x15, 0x00, 0x70, 0x00, 0x00, /* rsqrtss xmm2, [0x7000] */
+        0x0F, 0x11, 0x0D, 0x00, 0x06, 0x02, 0x00,       /* movups [0x20600], xmm1 */
+        0x0F, 0x11, 0x15, 0x10, 0x06, 0x02, 0x00,       /* movups [0x20610], xmm2 */
+        0xF4,
+    };
+    put(CODE + 0x2100, denied, sizeof(denied));
+    run_at(CODE + 0x2100);
+    check(gp_ops == 1 && !memcmp(nc_vm_host(&core.vm, DATA + 0x600), nc_vm_host(&core.vm, DATA + 0x300), 16),
+          "RSQRTPS from an unaligned source: #GP at the instruction, XMM unchanged");
+    check(own_faults == 1 && !memcmp(nc_vm_host(&core.vm, DATA + 0x610), nc_vm_host(&core.vm, DATA + 0x300), 16),
+          "RSQRTSS from a page of the backend's: the title's page fault, XMM unchanged");
 
     /* Check write faults after protection changes between vCPU entries and
      * while the guest runs. Verify that guest INT 2 reaches the system-op handler. */

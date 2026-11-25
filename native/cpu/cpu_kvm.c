@@ -54,16 +54,18 @@ const char nc_cpu_backend[] = "kvm";
 #define LIN_STUBS 0x4000u
 #define LIN_STACK 0x7000u /* top of two pages: ESP0 */
 /* in-guest RSQRT and RCP: kvm_rsqrt_guest.h's #BP handler and lane
- * routines, a routine per form (scalar or packed, destination, source)
- * for both families, the Intel mantissas, the armed register-form sites;
- * up to where titles load */
+ * routines, a routine per form (scalar or packed, destination, source or
+ * memory) for both families, the Intel mantissas, the armed sites and
+ * from the end down a stub per memory form; up to where titles load */
 #define LIN_RSQ_CODE  0x7000u
 #define LIN_RSQ_LANE  0x7100u
 #define LIN_RCP_LANE  0x7180u
 #define LIN_RSQ_FAM   0x7200u /* {lane, table} of family 0 RSQRT, 1 RCP */
 #define LIN_RSQ_HITS  0x7210u /* the handler's corrections, counted (64 bits a family) */
-#define LIN_RSQ_RTN   0x8000u /* 128 routines */
-#define RSQ_RTN_SIZE  64u
+#define LIN_RSQ_RTN   0x8000u /* register forms: 64 packed of 64 bytes, 64 scalar of 32 */
+#define LIN_RSQ_MRTN  0x9800u /* memory forms: 16 of 64 bytes, by scalar and destination */
+#define LIN_RSQ_MEM   0x9C00u /* rsqrt_guest_mem */
+#define RSQ_STUB      16u
 #define LIN_RCP_TABLE 0xA000u /* 2048 u16 */
 #define LIN_RSQ_TABLE 0xB000u /* 2048 u16 */
 #define LIN_RSQ_SITES 0xC000u /* count, then {eip, u16 routine, u8 length, u8 family} each, ascending */
@@ -129,7 +131,7 @@ typedef struct RsqrtSite {
     uint8_t dst, src;           /* as decoded when armed */
     bool scalar, mem;
     bool rcp;                   /* RCPSS/RCPPS */
-    uint8_t left;               /* an RCP site left to the host CPU, counted once: 1 memory form, 2 no room */
+    bool left;                  /* an RCP register form left to the host CPU, counted once */
 } RsqrtSite;
 
 struct NcCpu {
@@ -178,12 +180,21 @@ struct NcCpu {
     bool rsqrt_guest_stale;     /* a site armed or disarmed since the guest's table was written */
     uint64_t rcp_hits;
     unsigned reg_armed[2];      /* armed register forms, RSQRT and RCP: RCP's are all in the guest's table */
-    unsigned rcp_left_mem, rcp_left_full;
+    unsigned rcp_left_full;
 };
+
+/* A register form's routine. */
+static uint32_t rsqrt_rtn(bool scalar, unsigned dst, unsigned src)
+{
+    const uint32_t form = dst << 3 | src;
+    return scalar ? LIN_RSQ_RTN + 64 * 64 + form * 32 : LIN_RSQ_RTN + form * 64;
+}
 
 static void rsqrt_patch(NcCpu *cpu, uint32_t va, uint32_t len);
 static void direct_pages(NcCpu *cpu);
 static void rsqrt_emit(NcCpu *cpu, uint32_t at, bool scalar, unsigned dst, unsigned src);
+static void rsqrt_emit_mem(NcCpu *cpu, uint32_t at, bool scalar, unsigned dst);
+static bool sysop(NcCpu *cpu, enum NcSysOp op, unsigned size);
 static void rsqrt_restore(NcCpu *cpu);
 
 static NcCpu *g_cpu; /* the one CPU, for nc_vm_prot_hook */
@@ -493,8 +504,12 @@ static void build_tables(NcCpu *cpu)
         nc_wr32(lin(cpu, LIN_RSQ_FAM + 4), LIN_RSQ_TABLE);
         nc_wr32(lin(cpu, LIN_RSQ_FAM + 8), LIN_RCP_LANE);
         nc_wr32(lin(cpu, LIN_RSQ_FAM + 12), LIN_RCP_TABLE);
+        memcpy(lin(cpu, LIN_RSQ_MEM), rsqrt_guest_mem, sizeof(rsqrt_guest_mem));
         for (unsigned form = 0; form < 128; form++) {
-            rsqrt_emit(cpu, LIN_RSQ_RTN + form * RSQ_RTN_SIZE, form >> 6, (form >> 3) & 7, form & 7);
+            rsqrt_emit(cpu, rsqrt_rtn(form >> 6, (form >> 3) & 7, form & 7), form >> 6, (form >> 3) & 7, form & 7);
+        }
+        for (unsigned form = 0; form < 16; form++) {
+            rsqrt_emit_mem(cpu, LIN_RSQ_MRTN + form * 64, form >> 3, form & 7);
         }
         nc_wr32(lin(cpu, LIN_RSQ_SITES), 0);
         idt[2 * 3] = (SEL_CODE0 << 16) | (LIN_RSQ_CODE & 0xFFFFu);
@@ -865,9 +880,8 @@ void nc_cpu_destroy(NcCpu *cpu)
         nc_log("hakuX-lr-native-kvm", "RSQRT: %llu instructions corrected in the guest, %llu through the host",
                (unsigned long long)guest[0], (unsigned long long)cpu->rsqrt_hits);
         nc_log("hakuX-lr-native-kvm", "RCP: %llu instructions corrected in the guest, %llu through the host; "
-               "%u memory forms and %u register forms past the guest's table left to the host CPU",
-               (unsigned long long)guest[1], (unsigned long long)cpu->rcp_hits, cpu->rcp_left_mem,
-               cpu->rcp_left_full);
+               "%u register forms past the guest's table left to the host CPU",
+               (unsigned long long)guest[1], (unsigned long long)cpu->rcp_hits, cpu->rcp_left_full);
     }
     if (cpu->guest_fault) {
         nc_log("hakuX-lr-native-kvm", "TLB: %llu pages dropped in the guest (%llu lists), the whole TLB %llu times",
@@ -1174,6 +1188,7 @@ static void frame_write(NcCpu *cpu)
         nc_wr32(k + 16, eflags);
         nc_wr32(k + 20, (uint32_t)f->regs[NC_ESP]);
         nc_wr32(k + 24, SEL_DATA3);
+        r.rsp = cpu->stub_esp;
     } else {
         r.rip = (uint32_t)f->rip;
         r.rsp = (uint32_t)f->regs[NC_ESP];
@@ -1485,40 +1500,114 @@ static void rsqrt_emit(NcCpu *cpu, uint32_t at, bool scalar, unsigned dst, unsig
 #undef EMIT
 }
 
+/* A memory form's routine (EDI the source, EBX the lane routine, EDX its
+ * table): each lane read where the title's instruction reads it, with 16
+ * bytes on the stack at every load, which rsqrt_mem_fault relies on. */
+static void rsqrt_emit_mem(NcCpu *cpu, uint32_t at, bool scalar, unsigned dst)
+{
+    uint8_t *b = lin(cpu, at);
+    unsigned n = 0;
+    const uint8_t d = (uint8_t)(dst << 3);
+#define EMIT(...) do { const uint8_t e_[] = {__VA_ARGS__}; memcpy(b + n, e_, sizeof(e_)); n += sizeof(e_); } while (0)
+    EMIT(0x83, 0xEC, 0x10);                             /* sub esp, 16 */
+    if (scalar) {
+        EMIT(0x0F, 0x11, 0x04 | d, 0x24);               /* movups [esp], dst */
+    }
+    for (uint8_t k = 0; k < (scalar ? 4 : 16); k += 4) {
+        EMIT(0x8B, 0x47, k);                            /* mov eax, [edi+k] */
+        EMIT(0xFF, 0xD3);                               /* call ebx */
+        EMIT(0x89, 0x44, 0x24, k);                      /* mov [esp+k], eax */
+    }
+    EMIT(0x0F, 0x10, 0x04 | d, 0x24);                   /* movups dst, [esp] */
+    EMIT(0x83, 0xC4, 0x10);                             /* add esp, 16 */
+    EMIT(0xC3);                                         /* ret */
+#undef EMIT
+}
+
+/* A memory form the guest's handler takes: no prefix but F3, so a 32-bit
+ * address in the title's flat segments. Its displacement, and the modes
+ * rsqrt_guest_mem reads. */
+static bool rsqrt_mem_operand(const RsqrtSite *s, uint32_t *disp, uint32_t *modes)
+{
+    const uint8_t *p = s->bytes + (s->bytes[0] == 0xF3);
+    unsigned n = 3;
+    if (!s->mem || p[0] != 0x0F || (p[1] != 0x52 && p[1] != 0x53)) {
+        return false;
+    }
+    const unsigned mod = p[2] >> 6;
+    unsigned base = p[2] & 7, index = 8, scale = 0;
+    if (base == 4) {
+        scale = p[n] >> 6;
+        index = (p[n] >> 3) & 7;
+        index = index == 4 ? 8 : index;
+        base = p[n++] & 7;
+    }
+    *disp = 0;
+    if (mod == 1) {
+        *disp = (uint32_t)(int8_t)p[n++];
+    } else if (mod == 2 || base == 5) {
+        base = mod ? base : 8;
+        *disp = nc_rd32(p + n);
+        n += 4;
+    }
+    *modes = base | index << 4 | scale << 8 | (uint32_t)s->dst << 10 | (uint32_t)s->scalar << 13 |
+             (uint32_t)s->len << 14 | (uint32_t)s->rcp << 18;
+    return p + n == s->bytes + s->len;
+}
+
 /* An armed register form: one for the guest's table. */
 static bool reg_form(const RsqrtSite *s)
 {
     return s->armed && !s->mem;
 }
 
-/* The guest's table of armed register-form sites, ascending as the
- * handler's search needs, rewritten once a site was armed or disarmed and
- * before the guest runs again. RSQRT's memory forms keep the exit (their
- * source may fault, which the host handles), as do its sites the table has
- * no room for; RCP sites are armed into the room RSQRT's leave, so every
- * armed one is in the table. */
+/* The guest's table of armed sites, ascending as the handler's search
+ * needs, rewritten once a site was armed or disarmed and before the guest
+ * runs again. Register forms come first: RSQRT's the table has no room for
+ * keep the exit, RCP's are armed into the room those leave, so every armed
+ * one is in the table. Memory forms take what is left, an entry and a stub
+ * each, and keep the exit without. */
 static void rsqrt_guest_sync(NcCpu *cpu)
 {
     if (!cpu->rsqrt_inguest || !cpu->rsqrt_guest_stale) {
         return;
     }
     cpu->rsqrt_guest_stale = false;
-    uint32_t n = 0, room = RSQ_GUEST_MAX - cpu->reg_armed[1];
+    uint32_t n = 0, stubs = 0, room = RSQ_GUEST_MAX - cpu->reg_armed[1];
+    const uint32_t reg = cpu->reg_armed[1] + (cpu->reg_armed[0] < room ? cpu->reg_armed[0] : room);
+    /* an entry is 8 bytes, a stub 16 */
+    uint32_t mem_room = (RSQ_GUEST_MAX - reg) / 3;
     for (unsigned i = 0; i < cpu->nrsqrt; i++) {
         const RsqrtSite *s = &cpu->rsqrt_sites[i];
-        if (!s->armed || s->mem) {
+        uint32_t routine, disp, modes;
+        if (!s->armed) {
             continue;
         }
-        if (!s->rcp) {
-            if (!room) {
+        if (s->mem) {
+            if (!mem_room || !rsqrt_mem_operand(s, &disp, &modes)) {
                 continue;
             }
-            room--;
+            mem_room--;
+            routine = LIN_END - RSQ_STUB * ++stubs;
+            uint8_t *b = lin(cpu, routine);
+            b[0] = 0xB8; /* mov eax, disp */
+            nc_wr32(b + 1, disp);
+            b[5] = 0xB9; /* mov ecx, modes */
+            nc_wr32(b + 6, modes);
+            b[10] = 0xE9; /* jmp rsqrt_guest_mem */
+            nc_wr32(b + 11, LIN_RSQ_MEM - (routine + 15));
+        } else {
+            if (!s->rcp) {
+                if (!room) {
+                    continue;
+                }
+                room--;
+            }
+            routine = rsqrt_rtn(s->scalar, s->dst, s->src);
         }
-        const unsigned form = (unsigned)s->scalar << 6 | (unsigned)s->dst << 3 | s->src;
         uint8_t *e = lin(cpu, LIN_RSQ_SITES + 4 + 8 * n);
         nc_wr32(e, s->eip);
-        nc_wr32(e + 4, (LIN_RSQ_RTN + form * RSQ_RTN_SIZE) | (uint32_t)s->len << 16 | (uint32_t)s->rcp << 24);
+        nc_wr32(e + 4, routine | (uint32_t)s->len << 16 | (uint32_t)s->rcp << 24);
         n++;
     }
     nc_wr32(lin(cpu, LIN_RSQ_SITES), n);
@@ -1587,17 +1676,15 @@ static void rsqrt_disarm(NcCpu *cpu, RsqrtSite *s)
     }
 }
 
-/* An RCP site left to the host CPU, counted once a reason: 1 a memory
- * form, 2 no room in the guest's table. */
-static void rcp_left(NcCpu *cpu, RsqrtSite *s, uint8_t why)
+/* An RCP register form left to the host CPU for want of room in the
+ * guest's table, counted once. */
+static void rcp_left(NcCpu *cpu, RsqrtSite *s)
 {
-    if (s->left & why) {
+    if (s->left) {
         return;
     }
-    s->left |= why;
-    if (why == 1) {
-        cpu->rcp_left_mem++;
-    } else if (!cpu->rcp_left_full++) {
+    s->left = true;
+    if (!cpu->rcp_left_full++) {
         nc_log("hakuX-lr-native-kvm", "RCP: the guest's table is full (%u sites), further register forms are "
                "left to the host CPU", RSQ_GUEST_MAX);
     }
@@ -1611,7 +1698,7 @@ static void rcp_evict(NcCpu *cpu)
         RsqrtSite *s = &cpu->rsqrt_sites[i];
         if (s->rcp && reg_form(s)) {
             rsqrt_disarm(cpu, s);
-            rcp_left(cpu, s, 2);
+            rcp_left(cpu, s);
             return;
         }
     }
@@ -1664,12 +1751,12 @@ static void rsqrt_patch(NcCpu *cpu, uint32_t va, uint32_t len)
             rsqrt_disarm(cpu, s);
             continue; /* not loaded yet, or not a supported RSQRT instruction */
         }
-        /* RCP: register forms only, and only into the guest's table's free room */
+        /* RCP register forms: only into the guest's table's free room */
         const bool full = cpu->rsqrt_inguest &&
                           cpu->reg_armed[0] + cpu->reg_armed[1] - reg_form(s) >= RSQ_GUEST_MAX;
-        if (in.rcp && (in.mem || full)) {
+        if (in.rcp && !in.mem && full) {
             rsqrt_disarm(cpu, s);
-            rcp_left(cpu, s, in.mem ? 1 : 2);
+            rcp_left(cpu, s);
             continue;
         }
         bool overlap = false;
@@ -1731,15 +1818,39 @@ static bool rsqrt_trap_site(NcCpu *cpu, uint32_t at)
         const unsigned count = in.scalar ? 1 : 4;
         if (in.mem) {
             if ((!in.scalar && (in.address & 15)) || (uint64_t)in.address + count * 4 > (1ull << 32)) {
-                fatal(cpu, "RSQRT source violates the guest's alignment or segment limit");
+                /* #GP, as the instruction's own */
+                if (!sysop(cpu, NC_SYSOP_OTHER, 0)) {
+                    nc_log("hakuX-lr-native-kvm", "RSQRT source at %08x, eip %08x: nobody took its #GP",
+                           in.address, at);
+                    abort();
+                }
+                return true;
             }
-            nc_vm_will_read(in.address, count * 4);
-            for (unsigned j = 0; j < count * 4; j++) {
+            /* a device's registers: a read each lane */
+            unsigned device = 0;
+            for (unsigned j = 0; j < count; j++) {
+                const uint32_t va = in.address + 4 * j;
+                if (!(cpu->vm->pte[va / NC_PAGE] & NC_PTE_VALID) && cpu->cfg.mmio_window && cpu->cfg.mmio &&
+                    cpu->cfg.mmio_window(va & ~(NC_PAGE - 1)) && cpu->cfg.mmio_window((va + 3) & ~(NC_PAGE - 1))) {
+                    device++;
+                }
+            }
+            for (unsigned j = 0; device == count && j < count; j++) {
+                uint64_t v = 0;
+                if (!cpu->cfg.mmio(in.address + 4 * j, 4, false, &v)) {
+                    v = UINT64_MAX;
+                }
+                input[j] = (uint32_t)v;
+            }
+            if (device != count) {
+                nc_vm_will_read(in.address, count * 4);
+            }
+            for (unsigned j = 0; device != count && j < count * 4; j++) {
                 const uint32_t va = in.address + j;
                 if (!(cpu->vm->vprot[va / NC_PAGE] & PROT_READ) ||
                     nc_vm_phys(cpu->vm, va) >= cpu->vm->ram_size) {
                     if (cpu->cfg.mmio_window && cpu->cfg.mmio_window(va & ~(NC_PAGE - 1))) {
-                        fatal(cpu, "RSQRT prototype requires a RAM source, not MMIO");
+                        fatal(cpu, "an RSQRT source partly in a device's registers");
                     }
                     const char *why = NULL;
                     const int fault = cpu->cfg.fault(cpu->cfg.opaque, f, va, false, &why);
@@ -1751,7 +1862,7 @@ static bool rsqrt_trap_site(NcCpu *cpu, uint32_t at)
                     return true; /* retry the instruction, or the fault handler's new frame */
                 }
             }
-            if (!guest_read(cpu, in.address, input, count * 4)) {
+            if (device != count && !guest_read(cpu, in.address, input, count * 4)) {
                 fatal(cpu, "reading an RSQRT source");
             }
         }
@@ -1775,6 +1886,48 @@ static bool rsqrt_trap_site(NcCpu *cpu, uint32_t at)
         return true;
     }
     return false;
+}
+
+/* A page fault in ring 0: a memory form's source, read by its routine
+ * in the guest. The title's state at the site is put back from the
+ * routine's stack, and the stub's frame is the trap's again, so the fault
+ * is handled as the title's instruction's and that runs again. */
+static void rsqrt_mem_fault(NcCpu *cpu)
+{
+    NcFrame *f = &cpu->frame;
+    /* vector, error, EIP, CS, EFLAGS; 16 bytes of lanes, the return to
+     * rsqrt_guest_mem; its zero, EDI, ESI, EBP, ESP, EBX, EDX, ECX, EAX;
+     * the trap's EIP, CS, EFLAGS, ESP, SS */
+    const uint8_t *k = lin(cpu, cpu->stub_esp);
+    if (!cpu->rsqrt_inguest || f->rip < LIN_RSQ_MRTN || f->rip >= LIN_RSQ_MEM || cpu->stub_esp + 96 != LIN_STACK) {
+        fatal(cpu, "a page fault in ring 0");
+    }
+    static const uint8_t reg[] = {NC_EDI, NC_ESI, NC_EBP, NC_ESP, NC_EBX, NC_EDX, NC_ECX, NC_EAX};
+    for (unsigned i = 0; i < 8; i++) {
+        f->regs[reg[i]] = nc_rd32(k + 44 + 4 * i);
+    }
+    /* the handler has moved the trap's EIP past the instruction, and counted it */
+    const uint32_t next = nc_rd32(k + 76);
+    const RsqrtSite *s = NULL;
+    for (unsigned i = rsqrt_from(cpu, next > 15 ? next - 15 : 0); i < cpu->nrsqrt && cpu->rsqrt_sites[i].eip < next; i++) {
+        const RsqrtSite *t = &cpu->rsqrt_sites[i];
+        if (t->armed && t->mem && t->eip + t->len == next) {
+            s = t;
+        }
+    }
+    if (!s) {
+        fatal(cpu, "a page fault in ring 0, at no memory form");
+    }
+    f->rip = s->eip;
+    f->eflags = nc_rd32(k + 84);
+    f->regs[NC_ESP] = nc_rd32(k + 88);
+    cpu->stub_esp = LIN_STACK - 28;
+    cpu->last_eip = s->eip;
+    uint8_t *hits = lin(cpu, LIN_RSQ_HITS + 8 * s->rcp);
+    uint64_t n;
+    memcpy(&n, hits, 8);
+    n--;
+    memcpy(hits, &n, 8);
 }
 
 /* An INT3 at a site: the instruction corrected here. false: not ours. */
@@ -1967,6 +2120,9 @@ static RunState stub_exit(NcCpu *cpu)
     uint8_t b = 0;
     switch (vector) {
     case 14:
+        if (!(nc_rd32(lin(cpu, cpu->stub_esp) + 12) & 3)) {
+            rsqrt_mem_fault(cpu);
+        }
         return page_fault(cpu, err);
     case 13: {
         Insn in;

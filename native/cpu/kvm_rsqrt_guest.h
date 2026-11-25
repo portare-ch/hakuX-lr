@@ -178,4 +178,95 @@ static const uint8_t rcp_guest_lane[102] = {
     0x25, 0x00, 0x00, 0x00, 0x80, 0xC3,
 };
 
+/* A memory form's source address and its routine, entered from the site's
+ * stub (mov eax, displacement; mov ecx, modes; jmp) in the handler's
+ * frame: modes holds the base register (bits 0-3) and the index (4-7), 8
+ * for none, the scale (8-9), the destination (10-12), scalar (13), the
+ * instruction's length (14-17) and its family (18). The title's registers
+ * are read from the ring-0 stack, in PUSHAD's order with a zero below them
+ * for "none". A source the title can't read here as its own instruction
+ * would (the backend's pages below 0x10000, the last bytes of the address
+ * space, a packed source that isn't aligned) goes to the host as a site
+ * the table doesn't hold: the count and the trap's EIP taken back, then
+ * the vector 3 stub.
+ *
+ *  add esp, 4                   # the handler's return address: not used
+ *  push dword ptr [esp + 28]    # the title's ESP, from the trap's frame past four registers
+ *  push ebp
+ *  push esi
+ *  push edi
+ *  push 0                       # register n at [esp + 32 - 4n], n 8 the zero
+ *  mov esi, ecx
+ *  and esi, 15
+ *  neg esi
+ *  add eax, [esp + esi*4 + 32]  # the base
+ *  mov esi, ecx
+ *  shr esi, 4
+ *  and esi, 15
+ *  neg esi
+ *  mov edi, [esp + esi*4 + 32]  # the index
+ *  mov esi, ecx
+ *  shr ecx, 8
+ *  and ecx, 3
+ *  shl edi, cl
+ *  add edi, eax                 # the source's address
+ *  lea eax, [edi - 0x10000]
+ *  cmp eax, 0xFFFEFFF0
+ *  ja host                      # not in 0x10000..0xFFFFFFF0
+ *  test esi, 0x2000
+ *  jnz go                       # scalar
+ *  test edi, 15
+ *  jnz host
+ * go:
+ *  shr esi, 4
+ *  and esi, 0x3C0
+ *  add esi, MEM_RTN
+ *  call esi                     # the routine: EDI the source, EBX the lane, EDX its table
+ *  pop eax
+ *  pop edi
+ *  pop esi
+ *  pop ebp
+ *  pop eax
+ *  pop ebx
+ *  pop edx
+ *  pop ecx
+ *  pop eax
+ *  iret
+ * host:
+ *  mov eax, esi
+ *  shr eax, 18
+ *  and eax, 1
+ *  sub dword ptr [eax*8 + HITS], 1
+ *  sbb dword ptr [eax*8 + HITS + 4], 0
+ *  shr esi, 14
+ *  and esi, 15
+ *  dec esi
+ *  sub [esp + 36], esi          # the trap's EIP: past the INT3 again
+ *  pop eax
+ *  pop edi
+ *  pop esi
+ *  pop ebp
+ *  pop eax
+ *  pop ebx
+ *  pop edx
+ *  pop ecx
+ *  pop eax
+ *  jmp STUB3
+ */
+static const uint8_t rsqrt_guest_mem[154] = {
+    0x83, 0xC4, 0x04, 0xFF, 0x74, 0x24, 0x1C, 0x55, 0x56, 0x57, 0x6A, 0x00,
+    0x89, 0xCE, 0x83, 0xE6, 0x0F, 0xF7, 0xDE, 0x03, 0x44, 0xB4, 0x20, 0x89,
+    0xCE, 0xC1, 0xEE, 0x04, 0x83, 0xE6, 0x0F, 0xF7, 0xDE, 0x8B, 0x7C, 0xB4,
+    0x20, 0x89, 0xCE, 0xC1, 0xE9, 0x08, 0x83, 0xE1, 0x03, 0xD3, 0xE7, 0x01,
+    0xC7, 0x8D, 0x87, 0x00, 0x00, 0xFF, 0xFF, 0x3D, 0xF0, 0xFF, 0xFE, 0xFF,
+    0x77, 0x2B, 0xF7, 0xC6, 0x00, 0x20, 0x00, 0x00, 0x75, 0x08, 0xF7, 0xC7,
+    0x0F, 0x00, 0x00, 0x00, 0x75, 0x1B, 0xC1, 0xEE, 0x04, 0x81, 0xE6, 0xC0,
+    0x03, 0x00, 0x00, 0x81, 0xC6, 0x00, 0x98, 0x00, 0x00, 0xFF, 0xD6, 0x58,
+    0x5F, 0x5E, 0x5D, 0x58, 0x5B, 0x5A, 0x59, 0x58, 0xCF, 0x89, 0xF0, 0xC1,
+    0xE8, 0x12, 0x83, 0xE0, 0x01, 0x83, 0x2C, 0xC5, 0x10, 0x72, 0x00, 0x00,
+    0x01, 0x83, 0x1C, 0xC5, 0x14, 0x72, 0x00, 0x00, 0x00, 0xC1, 0xEE, 0x0E,
+    0x83, 0xE6, 0x0F, 0x4E, 0x29, 0x74, 0x24, 0x24, 0x58, 0x5F, 0x5E, 0x5D,
+    0x58, 0x5B, 0x5A, 0x59, 0x58, 0xE9, 0x96, 0xA3, 0xFF, 0xFF,
+};
+
 #endif
