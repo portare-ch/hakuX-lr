@@ -178,4 +178,56 @@ static const uint8_t rcp_guest_lane[102] = {
     0x25, 0x00, 0x00, 0x00, 0x80, 0xC3,
 };
 
+/* A memory form's source address and its routine, entered from the site's
+ * stub (mov eax, displacement; mov ecx, modes; jmp) in the handler's
+ * frame: modes holds the base register (bits 0-3) and the index (4-7), 8
+ * for none, the scale (8-9), the destination (10-12) and scalar (13). The
+ * title's registers are read from the ring-0 stack, in PUSHAD's order with
+ * a zero below them for "none".
+ *
+ *  add esp, 4                   # the handler's return address: not used
+ *  push dword ptr [esp + 28]    # the title's ESP, from the trap's frame past four registers
+ *  push ebp
+ *  push esi
+ *  push edi
+ *  push 0                       # register n at [esp + 32 - 4n], n 8 the zero
+ *  mov esi, ecx
+ *  and esi, 15
+ *  neg esi
+ *  add eax, [esp + esi*4 + 32]  # the base
+ *  mov esi, ecx
+ *  shr esi, 4
+ *  and esi, 15
+ *  neg esi
+ *  mov edi, [esp + esi*4 + 32]  # the index
+ *  mov esi, ecx
+ *  shr ecx, 8
+ *  and ecx, 3
+ *  shl edi, cl
+ *  add edi, eax                 # the source's address
+ *  shr esi, 4
+ *  and esi, 0x3C0
+ *  add esi, MEM_RTN
+ *  call esi                     # the routine: EDI the source, EBX the lane, EDX its table
+ *  pop eax
+ *  pop edi
+ *  pop esi
+ *  pop ebp
+ *  pop eax
+ *  pop ebx
+ *  pop edx
+ *  pop ecx
+ *  pop eax
+ *  iret
+ */
+static const uint8_t rsqrt_guest_mem[76] = {
+    0x83, 0xC4, 0x04, 0xFF, 0x74, 0x24, 0x1C, 0x55, 0x56, 0x57, 0x6A, 0x00,
+    0x89, 0xCE, 0x83, 0xE6, 0x0F, 0xF7, 0xDE, 0x03, 0x44, 0xB4, 0x20, 0x89,
+    0xCE, 0xC1, 0xEE, 0x04, 0x83, 0xE6, 0x0F, 0xF7, 0xDE, 0x8B, 0x7C, 0xB4,
+    0x20, 0x89, 0xCE, 0xC1, 0xE9, 0x08, 0x83, 0xE1, 0x03, 0xD3, 0xE7, 0x01,
+    0xC7, 0xC1, 0xEE, 0x04, 0x81, 0xE6, 0xC0, 0x03, 0x00, 0x00, 0x81, 0xC6,
+    0x00, 0x98, 0x00, 0x00, 0xFF, 0xD6, 0x58, 0x5F, 0x5E, 0x5D, 0x58, 0x5B,
+    0x5A, 0x59, 0x58, 0xCF,
+};
+
 #endif
