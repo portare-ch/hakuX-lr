@@ -883,16 +883,21 @@ if [ "$mode" = kms ] && command -v python3 >/dev/null 2>&1 &&
         python3 "$here/vrr.py" "$c" 1 2>/dev/null && vrr="$vrr $c"
     done
     if [ -n "$vrr" ]; then
+        vrr_off() {
+            for c in $vrr; do
+                python3 "$here/vrr.py" "$c" 0 2>/dev/null || true
+            done
+        }
+        trap vrr_off EXIT
         "$RETROARCH" "$@" 2>"$corelog" &
         pid=$!
-        trap 'kill "$pid" 2>/dev/null' TERM INT HUP
+        trap 'kill "$pid" 2>/dev/null || true' TERM INT HUP
         rc=0
+        wait "$pid" || rc=$?
+        # a signal ends the wait before RetroArch has ended
         while kill -0 "$pid" 2>/dev/null; do
-            wait "$pid"
-            rc=$?
-        done
-        for c in $vrr; do
-            python3 "$here/vrr.py" "$c" 0 2>/dev/null
+            rc=0
+            wait "$pid" || rc=$?
         done
         exit $rc
     fi
@@ -949,13 +954,19 @@ def main():
     fd = os.open(sys.argv[1], os.O_RDWR | os.O_CLOEXEC)
     if not any(props(fd, c, CONNECTOR).get("vrr_capable", (0, 0))[1] for c in ids(fd, False)):
         return 1
-    done = 1
-    for crtc in ids(fd, True):
-        p = props(fd, crtc, CRTC).get("VRR_ENABLED")
-        if p:
-            io(fd, 0xBA, "Q3I4x", int(sys.argv[2]), p[0], crtc, CRTC)
-            done = 0
-    return done
+    was = []
+    try:
+        for crtc in ids(fd, True):
+            p = props(fd, crtc, CRTC).get("VRR_ENABLED")
+            if p:
+                io(fd, 0xBA, "Q3I4x", int(sys.argv[2]), p[0], crtc, CRTC)
+                was.append((crtc, p))
+    except OSError:
+        # all of them or none
+        for crtc, p in was:
+            io(fd, 0xBA, "Q3I4x", p[1], p[0], crtc, CRTC)
+        raise
+    return 0 if was else 1
 
 
 if __name__ == "__main__":
