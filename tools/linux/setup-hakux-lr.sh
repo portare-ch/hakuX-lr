@@ -569,6 +569,14 @@ video_fullscreen = "true"
 video_vsync = "false"
 video_threaded = "false"
 video_smooth = "true"
+# Low latency: no third swapchain image queued, the pad read late, an
+# audio buffer of a frame and a half.
+video_max_swapchain_images = "2"
+input_poll_type_behavior = "2"
+audio_latency = "24"
+# Variable refresh rate where the display has it: frames at the game's
+# pace. Straight on the screen start-hakux-lr.sh turns it on.
+vrr_runloop_enable = "true"
 menu_driver = "$menu"
 # RetroArch's Qt desktop window: of no use here, and without a display
 # server Qt aborts RetroArch once a game has loaded.
@@ -856,9 +864,96 @@ mkdir -p "$here/logs"
 [ ! -f "$corelog" ] || mv -f "$corelog" "$corelog.1"
 echo "start-hakux-lr: ${game:-RetroArch menu} ($mode, $audio)"
 echo "start-hakux-lr: logs: $corelog (the core), $here/logs/retroarch.log (RetroArch)"
+# Straight on the screen nothing turns variable refresh rate on: done here
+# for a display that has it, and undone afterwards for what draws next.
+if [ "$mode" = kms ] && command -v python3 >/dev/null 2>&1 &&
+    ! grep -qs '^ *vrr_runloop_enable *= *"false"' "$here/user.cfg"; then
+    vrr=
+    for c in /dev/dri/card[0-9]*; do
+        python3 "$here/vrr.py" "$c" 1 2>/dev/null && vrr="$vrr $c"
+    done
+    if [ -n "$vrr" ]; then
+        "$RETROARCH" "$@" 2>"$corelog" &
+        pid=$!
+        trap 'kill "$pid" 2>/dev/null' TERM INT HUP
+        rc=0
+        while kill -0 "$pid" 2>/dev/null; do
+            wait "$pid"
+            rc=$?
+        done
+        for c in $vrr; do
+            python3 "$here/vrr.py" "$c" 0 2>/dev/null
+        done
+        exit $rc
+    fi
+fi
 exec "$RETROARCH" "$@" 2>"$corelog"
 LAUNCHER
 chmod +x "$prefix/start-hakux-lr.sh"
+
+cat > "$prefix/vrr.py" <<'VRR'
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-or-later
+"""vrr.py <card> 0|1: variable refresh rate on a card's outputs, for a start
+straight on the screen (a compositor does this itself). Exit status 0: set,
+on a display that has it."""
+import ctypes
+import fcntl
+import os
+import struct
+import sys
+
+CRTC, CONNECTOR = 0xCCCCCCCC, 0xC0C0C0C0
+
+
+def io(fd, nr, fmt, *fields):
+    buf = bytearray(struct.pack(fmt, *fields))
+    fcntl.ioctl(fd, 3 << 30 | len(buf) << 16 | 0x64 << 8 | nr, buf)
+    return struct.unpack(fmt, buf)
+
+
+def ids(fd, crtcs):
+    """The card's CRTCs, or its connectors."""
+    n = io(fd, 0xA0, "4Q8I", *[0] * 12)
+    count = n[5] if crtcs else n[6]
+    buf = (ctypes.c_uint32 * max(count, 1))()
+    ptr = ctypes.addressof(buf)
+    io(fd, 0xA0, "4Q8I", 0, ptr if crtcs else 0, 0 if crtcs else ptr, 0,
+       0, count if crtcs else 0, 0 if crtcs else count, 0, 0, 0, 0, 0)
+    return list(buf)[:count]
+
+
+def props(fd, obj, kind):
+    """An object's properties: name to (id, value)."""
+    count = io(fd, 0xB9, "2Q3I4x", 0, 0, 0, obj, kind)[2]
+    p, v = (ctypes.c_uint32 * max(count, 1))(), (ctypes.c_uint64 * max(count, 1))()
+    count = min(count, io(fd, 0xB9, "2Q3I4x", ctypes.addressof(p), ctypes.addressof(v), count, obj, kind)[2])
+    out = {}
+    for i in range(count):
+        name = io(fd, 0xAA, "2Q2I32s2I", 0, 0, p[i], 0, b"", 0, 0)[4].split(b"\0")[0].decode()
+        out[name] = (p[i], v[i])
+    return out
+
+
+def main():
+    fd = os.open(sys.argv[1], os.O_RDWR | os.O_CLOEXEC)
+    if not any(props(fd, c, CONNECTOR).get("vrr_capable", (0, 0))[1] for c in ids(fd, False)):
+        return 1
+    done = 1
+    for crtc in ids(fd, True):
+        p = props(fd, crtc, CRTC).get("VRR_ENABLED")
+        if p:
+            io(fd, 0xBA, "Q3I4x", int(sys.argv[2]), p[0], crtc, CRTC)
+            done = 0
+    return done
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except (OSError, IndexError, ValueError, struct.error):
+        sys.exit(1)
+VRR
 
 if [ "$os_id" = steamos ]; then
     update="$prefix/.core-update"

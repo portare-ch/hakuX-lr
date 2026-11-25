@@ -198,6 +198,19 @@ class SetupTest(unittest.TestCase):
         self.install()
         self.assertTrue((self.prefix / "steam-added").exists())
 
+    def test_low_latency_defaults(self):
+        self.install("--no-steam")
+        config = (self.prefix / "retroarch.cfg").read_text()
+        self.assertIn('video_max_swapchain_images = "2"', config)
+        self.assertIn('input_poll_type_behavior = "2"', config)
+        self.assertIn('audio_latency = "24"', config)
+        self.assertIn('vrr_runloop_enable = "true"', config)
+        self.assertIn('video_vsync = "false"', config)
+        # the helper that turns variable refresh rate on straight on the screen
+        helper = self.prefix / "vrr.py"
+        compile(helper.read_text(), str(helper), "exec")
+        self.assertIn('"$here/vrr.py" "$c" 1', (self.prefix / "start-hakux-lr.sh").read_text())
+
     def test_no_steam_option(self):
         self.install("--no-steam")
         self.assertFalse(self.calls("steamos-add-to-steam"))
