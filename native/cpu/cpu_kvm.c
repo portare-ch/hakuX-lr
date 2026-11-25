@@ -53,16 +53,20 @@ const char nc_cpu_backend[] = "kvm";
 #define LIN_TSS   0x3000u
 #define LIN_STUBS 0x4000u
 #define LIN_STACK 0x7000u /* top of two pages: ESP0 */
-/* in-guest RSQRT: kvm_rsqrt_guest.h's #BP handler and lane routine, a
- * routine per form (RSQRTSS or RSQRTPS, destination, source), the Intel
- * mantissas, the armed register-form sites; up to where titles load */
+/* in-guest RSQRT and RCP: kvm_rsqrt_guest.h's #BP handler and lane
+ * routines, a routine per form (scalar or packed, destination, source)
+ * for both families, the Intel mantissas, the armed register-form sites;
+ * up to where titles load */
 #define LIN_RSQ_CODE  0x7000u
 #define LIN_RSQ_LANE  0x7100u
+#define LIN_RCP_LANE  0x7180u
+#define LIN_RSQ_FAM   0x7200u /* {lane, table} of family 0 RSQRT, 1 RCP */
 #define LIN_RSQ_RTN   0x8000u /* 128 routines */
-#define RSQ_RTN_SIZE  96u
+#define RSQ_RTN_SIZE  64u
+#define LIN_RCP_TABLE 0xA000u /* 2048 u16 */
 #define LIN_RSQ_TABLE 0xB000u /* 2048 u16 */
-#define LIN_RSQ_SITES 0xC000u /* count, then {eip, u16 routine, u16 length} each, ascending */
-#define LIN_RSQ_HITS (LIN_END - 8u) /* the handler's corrections, counted (64 bits) */
+#define LIN_RSQ_SITES 0xC000u /* count, then {eip, u16 routine, u8 length, u8 family} each, ascending */
+#define LIN_RSQ_HITS (LIN_END - 16u) /* the handler's corrections, counted (64 bits a family) */
 #define RSQ_GUEST_MAX ((LIN_RSQ_HITS - LIN_RSQ_SITES - 4u) / 8u)
 /* Guest #PF and NMI handlers, saved CR2, and TLB invalidation list. */
 #define LIN_FLT_PF   0x7400u
@@ -124,6 +128,8 @@ typedef struct RsqrtSite {
     bool armed;
     uint8_t dst, src;           /* as decoded when armed */
     bool scalar, mem;
+    bool rcp;                   /* RCPSS/RCPPS */
+    uint8_t left;               /* an RCP site left to the host CPU, counted once: 1 memory form, 2 no room */
 } RsqrtSite;
 
 struct NcCpu {
@@ -170,6 +176,10 @@ struct NcCpu {
     uint64_t rsqrt_hits;
     bool rsqrt_inguest;         /* register forms in the guest's #BP handler */
     bool rsqrt_guest_stale;     /* a site armed or disarmed since the guest's table was written */
+    bool rcp_on;                /* NC_KVM_RCP=1: RCPSS/RCPPS register forms too */
+    uint64_t rcp_hits;
+    unsigned rcp_armed;         /* armed RCP register forms: all in the guest's table */
+    unsigned rcp_left_mem, rcp_left_full;
 };
 
 static void rsqrt_patch(NcCpu *cpu, uint32_t va, uint32_t len);
@@ -477,7 +487,13 @@ static void build_tables(NcCpu *cpu)
          * 3's stub above, as every INT3 did */
         memcpy(lin(cpu, LIN_RSQ_CODE), rsqrt_guest_handler, sizeof(rsqrt_guest_handler));
         memcpy(lin(cpu, LIN_RSQ_LANE), rsqrt_guest_lane, sizeof(rsqrt_guest_lane));
+        memcpy(lin(cpu, LIN_RCP_LANE), rcp_guest_lane, sizeof(rcp_guest_lane));
         memcpy(lin(cpu, LIN_RSQ_TABLE), nc_rsqrt_intel_mantissa(), 2048 * sizeof(uint16_t));
+        memcpy(lin(cpu, LIN_RCP_TABLE), nc_rcp_intel_mantissa(), 2048 * sizeof(uint16_t));
+        nc_wr32(lin(cpu, LIN_RSQ_FAM), LIN_RSQ_LANE);
+        nc_wr32(lin(cpu, LIN_RSQ_FAM + 4), LIN_RSQ_TABLE);
+        nc_wr32(lin(cpu, LIN_RSQ_FAM + 8), LIN_RCP_LANE);
+        nc_wr32(lin(cpu, LIN_RSQ_FAM + 12), LIN_RCP_TABLE);
         for (unsigned form = 0; form < 128; form++) {
             rsqrt_emit(cpu, LIN_RSQ_RTN + form * RSQ_RTN_SIZE, form >> 6, (form >> 3) & 7, form & 7);
         }
@@ -599,15 +615,16 @@ static unsigned rsqrt_from(const NcCpu *cpu, uint32_t eip)
 }
 
 /* The instructions corrected are the title's own, found by a walk of its
- * code (kvm_rsqrt_scan.h; NC_KVM_RSQRT=0: none), or NC_KVM_RSQRT_SITES'
- * explicit addresses in their place for an A/B check: never bytes that
+ * code (kvm_rsqrt_scan.h; NC_KVM_RSQRT=0: no RSQRT, NC_KVM_RCP=1: RCP
+ * too), or NC_KVM_RSQRT_SITES' explicit addresses in their place for an
+ * A/B check: never bytes that
  * match in mixed code and data. Actual host CPUID, not cfg.cpuid's emulated
  * Pentium III. Intel pays neither scan, patch nor per-instruction cost. */
 static bool rsqrt_config(NcCpu *cpu)
 {
-    const char *p = getenv("NC_KVM_RSQRT_SITES"), *on = getenv("NC_KVM_RSQRT");
-    const bool listed = p && *p;
-    if (!nc_rsqrt_host_amd() || (!listed && ((on && !strcmp(on, "0")) || !cpu->cfg.title_image))) {
+    const char *p = getenv("NC_KVM_RSQRT_SITES"), *on = getenv("NC_KVM_RSQRT"), *rc = getenv("NC_KVM_RCP");
+    const bool listed = p && *p, rsqrt = !on || strcmp(on, "0"), rcp = rc && !strcmp(rc, "1");
+    if (!nc_rsqrt_host_amd() || (!listed && ((!rsqrt && !rcp) || !cpu->cfg.title_image))) {
         return true;
     }
     NcRsqrtScan scan = {0};
@@ -624,17 +641,29 @@ static bool rsqrt_config(NcCpu *cpu)
         const bool scanned = image && nc_rsqrt_scan_xbe(image, size, &scan);
         clock_gettime(CLOCK_MONOTONIC, &t1);
         free(image);
-        if (!scanned || !scan.nsites) {
+        if (!rsqrt) {
+            scan.nsites = 0;
+        }
+        if (!rcp) {
+            scan.nrcp = 0;
+        }
+        if (!scanned || !(scan.nsites + scan.nrcp)) {
             if (image && !scanned) {
                 nc_log("hakuX-lr-native-kvm", "Intel RSQRT: the title's code couldn't be scanned, none corrected");
             }
             nc_rsqrt_scan_free(&scan);
             return true;
         }
-        nc_log("hakuX-lr-native-kvm", "Intel RSQRT: %u instructions in the title's code (%u more unreached, %u "
-               "disputed), scanned in %ld ms", scan.nsites, scan.unreached, scan.disputed,
-               (long)((t1.tv_sec - t0.tv_sec) * 1000 + (t1.tv_nsec - t0.tv_nsec) / 1000000));
-        max = scan.nsites;
+        const long ms = (long)((t1.tv_sec - t0.tv_sec) * 1000 + (t1.tv_nsec - t0.tv_nsec) / 1000000);
+        if (rsqrt) {
+            nc_log("hakuX-lr-native-kvm", "Intel RSQRT: %u instructions in the title's code (%u more unreached, %u "
+                   "disputed), scanned in %ld ms", scan.nsites, scan.unreached, scan.disputed, ms);
+        }
+        if (rcp) {
+            nc_log("hakuX-lr-native-kvm", "Intel RCP: %u instructions in the title's code (%u more unreached, %u "
+                   "disputed), scanned in %ld ms", scan.nrcp, scan.rcp_unreached, scan.rcp_disputed, ms);
+        }
+        max = scan.nsites + scan.nrcp;
     }
     cpu->rsqrt_sites = calloc(max, sizeof(*cpu->rsqrt_sites));
     if (!cpu->rsqrt_sites) {
@@ -669,6 +698,9 @@ static bool rsqrt_config(NcCpu *cpu)
     for (unsigned i = 0; i < scan.nsites; i++) {
         cpu->rsqrt_sites[cpu->nrsqrt++].eip = scan.sites[i];
     }
+    for (unsigned i = 0; i < scan.nrcp; i++) {
+        cpu->rsqrt_sites[cpu->nrsqrt++].eip = scan.rcp_sites[i];
+    }
     nc_rsqrt_scan_free(&scan);
     qsort(cpu->rsqrt_sites, cpu->nrsqrt, sizeof(*cpu->rsqrt_sites), rsqrt_site_cmp);
     for (unsigned i = 1; i < cpu->nrsqrt; i++) {
@@ -677,10 +709,11 @@ static bool rsqrt_config(NcCpu *cpu)
         }
     }
     cpu->rsqrt_on = true;
+    cpu->rcp_on = rcp;
     const char *ig = getenv("NC_KVM_RSQRT_INGUEST");
     cpu->rsqrt_inguest = !ig || strcmp(ig, "0");
-    nc_log("hakuX-lr-native-kvm", "Intel RSQRT: %u AMD-only sites (%s), register forms %s",
-           cpu->nrsqrt, listed ? "NC_KVM_RSQRT_SITES" : "the title's",
+    nc_log("hakuX-lr-native-kvm", "Intel RSQRT%s: %u AMD-only sites (%s), register forms %s",
+           rcp ? " and RCP (NC_KVM_RCP)" : "", cpu->nrsqrt, listed ? "NC_KVM_RSQRT_SITES" : "the title's",
            cpu->rsqrt_inguest ? "corrected in the guest" : "through the host");
     return true;
 }
@@ -838,12 +871,18 @@ void nc_cpu_destroy(NcCpu *cpu)
     }
     rsqrt_restore(cpu);
     if (cpu->rsqrt_on) {
-        uint64_t guest = 0;
+        uint64_t guest[2] = {0, 0};
         if (cpu->sys && cpu->sys != MAP_FAILED) {
-            memcpy(&guest, lin(cpu, LIN_RSQ_HITS), sizeof(guest));
+            memcpy(guest, lin(cpu, LIN_RSQ_HITS), sizeof(guest));
         }
         nc_log("hakuX-lr-native-kvm", "RSQRT: %llu instructions corrected in the guest, %llu through the host",
-               (unsigned long long)guest, (unsigned long long)cpu->rsqrt_hits);
+               (unsigned long long)guest[0], (unsigned long long)cpu->rsqrt_hits);
+        if (cpu->rcp_on) {
+            nc_log("hakuX-lr-native-kvm", "RCP: %llu instructions corrected in the guest, %llu through the host; "
+                   "%u memory forms and %u register forms past the guest's table left to the host CPU",
+                   (unsigned long long)guest[1], (unsigned long long)cpu->rcp_hits, cpu->rcp_left_mem,
+                   cpu->rcp_left_full);
+        }
     }
     if (cpu->guest_fault) {
         nc_log("hakuX-lr-native-kvm", "TLB: %llu pages dropped in the guest (%llu lists), the whole TLB %llu times",
@@ -1427,34 +1466,31 @@ static void hooks_patch(NcCpu *cpu, uint32_t va, uint32_t len)
 /* ------------------------------------------------------------ RSQRT prototype */
 
 /* A register form's routine at linear address at (kvm_rsqrt_guest.h's
- * handler calls it with EAX, ECX, EDX free): the source through the ring-0
- * stack, each lane through the lane routine, the destination written back;
- * RSQRTSS keeps the destination's upper lanes. */
+ * handler calls it with EAX, ECX free, EBX the family's lane routine and
+ * EDX its table): the source through the ring-0 stack, each lane through
+ * the lane routine, the destination written back; the scalar form keeps
+ * the destination's upper lanes. */
 static void rsqrt_emit(NcCpu *cpu, uint32_t at, bool scalar, unsigned dst, unsigned src)
 {
     uint8_t *b = lin(cpu, at);
     unsigned n = 0;
     const uint8_t d = (uint8_t)(dst << 3), r = (uint8_t)(src << 3);
 #define EMIT(...) do { const uint8_t e_[] = {__VA_ARGS__}; memcpy(b + n, e_, sizeof(e_)); n += sizeof(e_); } while (0)
-#define CALL_LANE() do { EMIT(0xE8); nc_wr32(b + n, LIN_RSQ_LANE - (at + n + 4)); n += 4; } while (0)
-#define TABLE_EDX() do { EMIT(0xBA); nc_wr32(b + n, LIN_RSQ_TABLE); n += 4; } while (0)
     if (scalar) {
         EMIT(0x83, 0xEC, 0x20);                         /* sub esp, 32 */
         EMIT(0x0F, 0x11, 0x04 | r, 0x24);               /* movups [esp], src */
         EMIT(0x0F, 0x11, 0x44 | d, 0x24, 0x10);         /* movups [esp+16], dst */
         EMIT(0x8B, 0x44, 0x24, 0x00);                   /* mov eax, [esp] */
-        TABLE_EDX();
-        CALL_LANE();
+        EMIT(0xFF, 0xD3);                               /* call ebx */
         EMIT(0x89, 0x44, 0x24, 0x10);                   /* mov [esp+16], eax */
         EMIT(0x0F, 0x10, 0x44 | d, 0x24, 0x10);         /* movups dst, [esp+16] */
         EMIT(0x83, 0xC4, 0x20);                         /* add esp, 32 */
     } else {
         EMIT(0x83, 0xEC, 0x10);                         /* sub esp, 16 */
         EMIT(0x0F, 0x11, 0x04 | r, 0x24);               /* movups [esp], src */
-        TABLE_EDX();
         for (uint8_t k = 0; k < 16; k += 4) {
             EMIT(0x8B, 0x44, 0x24, k);                  /* mov eax, [esp+k] */
-            CALL_LANE();
+            EMIT(0xFF, 0xD3);                           /* call ebx */
             EMIT(0x89, 0x44, 0x24, k);                  /* mov [esp+k], eax */
         }
         EMIT(0x0F, 0x10, 0x44 | d, 0x24, 0x00);         /* movups dst, [esp] */
@@ -1462,30 +1498,41 @@ static void rsqrt_emit(NcCpu *cpu, uint32_t at, bool scalar, unsigned dst, unsig
     }
     EMIT(0xC3);                                         /* ret */
 #undef EMIT
-#undef CALL_LANE
-#undef TABLE_EDX
+}
+
+/* An armed RCP register form: one the guest's table has room for. */
+static bool rcp_in_guest(const RsqrtSite *s)
+{
+    return s->armed && s->rcp && !s->mem;
 }
 
 /* The guest's table of armed register-form sites, ascending as the
  * handler's search needs, rewritten once a site was armed or disarmed and
- * before the guest runs again. Memory forms keep the exit (their source
- * may fault, which the host handles), as do sites past the table's end. */
+ * before the guest runs again. RSQRT's memory forms keep the exit (their
+ * source may fault, which the host handles), as do its sites the table has
+ * no room for; every armed RCP site is in the table. */
 static void rsqrt_guest_sync(NcCpu *cpu)
 {
     if (!cpu->rsqrt_inguest || !cpu->rsqrt_guest_stale) {
         return;
     }
     cpu->rsqrt_guest_stale = false;
-    uint32_t n = 0;
-    for (unsigned i = 0; i < cpu->nrsqrt && n < RSQ_GUEST_MAX; i++) {
+    uint32_t n = 0, room = RSQ_GUEST_MAX - cpu->rcp_armed;
+    for (unsigned i = 0; i < cpu->nrsqrt; i++) {
         const RsqrtSite *s = &cpu->rsqrt_sites[i];
         if (!s->armed || s->mem) {
             continue;
         }
+        if (!s->rcp) {
+            if (!room) {
+                continue;
+            }
+            room--;
+        }
         const unsigned form = (unsigned)s->scalar << 6 | (unsigned)s->dst << 3 | s->src;
         uint8_t *e = lin(cpu, LIN_RSQ_SITES + 4 + 8 * n);
         nc_wr32(e, s->eip);
-        nc_wr32(e + 4, (LIN_RSQ_RTN + form * RSQ_RTN_SIZE) | (uint32_t)s->len << 16);
+        nc_wr32(e + 4, (LIN_RSQ_RTN + form * RSQ_RTN_SIZE) | (uint32_t)s->len << 16 | (uint32_t)s->rcp << 24);
         n++;
     }
     nc_wr32(lin(cpu, LIN_RSQ_SITES), n);
@@ -1548,6 +1595,7 @@ static void rsqrt_disarm(NcCpu *cpu, RsqrtSite *s)
         } else if (nc_vm_phys(cpu->vm, s->eip) != s->pa) {
             rsqrt_unpatch_phys(cpu, s);
         }
+        cpu->rcp_armed -= rcp_in_guest(s);
         s->armed = false;
         cpu->rsqrt_guest_stale = true;
     }
@@ -1600,6 +1648,22 @@ static void rsqrt_patch(NcCpu *cpu, uint32_t va, uint32_t len)
             rsqrt_disarm(cpu, s);
             continue; /* not loaded yet, or not a supported RSQRT instruction */
         }
+        /* RCP: register forms only, and only those the guest's table holds */
+        const bool full = cpu->rsqrt_inguest && !rcp_in_guest(s) && cpu->rcp_armed >= RSQ_GUEST_MAX;
+        if (in.rcp && (!cpu->rcp_on || in.mem || full)) {
+            const uint8_t why = in.mem ? 1 : 2;
+            if (cpu->rcp_on && !(s->left & why)) {
+                s->left |= why;
+                if (in.mem) {
+                    cpu->rcp_left_mem++;
+                } else if (!cpu->rcp_left_full++) {
+                    nc_log("hakuX-lr-native-kvm", "RCP: the guest's table is full (%u sites), further register "
+                           "forms are left to the host CPU", RSQ_GUEST_MAX);
+                }
+            }
+            rsqrt_disarm(cpu, s);
+            continue;
+        }
         bool overlap = false;
         for (unsigned j = rsqrt_from(cpu, s->eip > 14 ? s->eip - 14 : 0);
              j < cpu->nrsqrt && cpu->rsqrt_sites[j].eip < s->eip + in.len; j++) {
@@ -1610,15 +1674,18 @@ static void rsqrt_patch(NcCpu *cpu, uint32_t va, uint32_t len)
         if (overlap) {
             continue;
         }
+        cpu->rcp_armed -= rcp_in_guest(s);
         s->len = in.len;
         memcpy(s->bytes, bytes, in.len);
         s->dst = (uint8_t)in.dst;
         s->src = (uint8_t)in.src;
         s->scalar = in.scalar;
         s->mem = in.mem;
+        s->rcp = in.rcp;
         s->pa = nc_vm_phys(cpu->vm, s->eip);
         const uint8_t cc = 0xCC;
         s->armed = guest_write(cpu, s->eip, &cc, 1);
+        cpu->rcp_armed += rcp_in_guest(s);
         cpu->rsqrt_guest_stale = true;
     }
     rsqrt_guest_sync(cpu);
@@ -1644,6 +1711,7 @@ static bool rsqrt_trap_site(NcCpu *cpu, uint32_t at)
             memcmp(bytes, s->bytes, s->len)) {
             /* Changed code: let it execute from its original first byte. */
             guest_write(cpu, at, s->bytes, 1);
+            cpu->rcp_armed -= rcp_in_guest(s);
             s->armed = false;
             cpu->rsqrt_guest_stale = true;
             return true;
@@ -1681,14 +1749,18 @@ static bool rsqrt_trap_site(NcCpu *cpu, uint32_t at)
             memcpy(input, f->fpu.xmm[in.src], count * 4);
         }
         for (unsigned j = 0; j < count; j++) {
-            const uint32_t result = nc_rsqrt_intel(input[j]);
+            const uint32_t result = in.rcp ? nc_rcp_intel(input[j]) : nc_rsqrt_intel(input[j]);
             memcpy(f->fpu.xmm[in.dst] + 4 * j, &result, 4);
         }
-        /* RSQRT raises no numeric exceptions. Scalar upper lanes, MXCSR,
-         * x87/MMX state, GPRs and EFLAGS remain the guest's. */
+        /* RSQRT and RCP raise no numeric exceptions. Scalar upper lanes,
+         * MXCSR, x87/MMX state, GPRs and EFLAGS remain the guest's. */
         f->fpu_dirty = true;
         f->rip = at + in.len;
-        cpu->rsqrt_hits++;
+        if (in.rcp) {
+            cpu->rcp_hits++;
+        } else {
+            cpu->rsqrt_hits++;
+        }
         return true;
     }
     return false;

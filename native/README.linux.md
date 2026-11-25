@@ -178,6 +178,14 @@ each), as all do with `NC_KVM_RSQRT_INGUEST=0`.
 When the core is closed, the log reports how many instructions were
 corrected in the guest and how many through the host.
 
+`RCPSS` and `RCPPS` differ on AMD in the same way. `NC_KVM_RCP=1` corrects
+their register forms too, from the same scan, in the guest's handler with
+Intel's table (`native/cpu/intel_rcp_table.inc`, the one FEX uses). It is
+off by default. Memory forms keep the host CPU's result, as do register
+forms the guest's site table has no room for (2045 sites, RSQRT's
+included); the log counts both when the core is closed.
+`NC_KVM_RSQRT_SITES` takes the addresses of RCP instructions as well.
+
 `kvm-rsqrt-test` checks the Intel reference and the operand decoder without
 `/dev/kvm`; `kvm-rsqrt-test --exhaustive` compares the reference with the
 host's own `RSQRTSS` for all 2^32 input bit patterns, which must match on a
@@ -187,7 +195,7 @@ against the Intel reference (`--exhaustive` for all inputs),
 `kvm-rsqrt-scan-test` runs the scan and its instruction
 decoder on a synthetic XBE, and `kvm-smoke` runs scalar and packed
 instructions under KVM (`kvm-smoke-rsqrt-host` with the exit path).
-`kvm-rsqrt-bench ss|ps N` times a guest loop on either path. The standalone checks can also be built directly:
+`kvm-rsqrt-bench ss|ps|rcpss|rcpps N` times a guest loop on either path. The standalone checks can also be built directly:
 
 ```sh
 cc -O2 -I. tests/native/kvm/rsqrt_test.c native/cpu/kvm_rsqrt.c -o /tmp/rsqrt-test

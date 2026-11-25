@@ -1,12 +1,12 @@
 /* Copyright (C) 2026-present PortareOS */
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * kvm-rsqrt-bench ss|ps N: a guest loop of N RSQRTSS (or RSQRTPS) under
- * KVM, timed. The environment picks the path: no NC_KVM_RSQRT_SITES, the
- * host's own result; NC_KVM_RSQRT_SITES=1000c, an INT3 over the
- * instruction in the guest's #BP handler; with NC_KVM_RSQRT_INGUEST=0 as
- * well, a KVM exit per instruction. Prints the time per iteration and the
- * last result.
+ * kvm-rsqrt-bench ss|ps|rcpss|rcpps N: a guest loop of N RSQRTSS (RSQRTPS,
+ * RCPSS, RCPPS) under KVM, timed. The environment picks the path: no
+ * NC_KVM_RSQRT_SITES, the host's own result; NC_KVM_RSQRT_SITES=1000c (and
+ * NC_KVM_RCP=1 for RCP), an INT3 over the instruction in the guest's #BP
+ * handler; with NC_KVM_RSQRT_INGUEST=0 as well, a KVM exit per
+ * instruction. Prints the time per iteration and the last result.
  */
 #include "native/core/core.h"
 #include "native/hle/hle_native.h"
@@ -39,7 +39,8 @@ static void port_out(uint16_t port, unsigned bytes, uint32_t value)
 
 int main(int argc, char **argv)
 {
-    const bool packed = argc > 1 && !strcmp(argv[1], "ps");
+    const char *what = argc > 1 ? argv[1] : "ss";
+    const bool rcp = !strncmp(what, "rcp", 3), packed = !strcmp(what + (rcp ? 3 : 0), "ps");
     const uint32_t n = argc > 2 ? (uint32_t)strtoul(argv[2], NULL, 0) : 1000000u;
     if (!nc_vm_init(&core.vm, 64u << 20) || !nc_kernel_init(&core.kernel, &core.vm) ||
         !nc_vm_alloc_at(&core.vm, CODE, NC_PAGE, NULL) || !nc_vm_alloc_at(&core.vm, DATA, NC_PAGE, NULL)) {
@@ -68,6 +69,7 @@ int main(int argc, char **argv)
     const uint8_t ss[] = {0xF3, 0x0F, 0x52, 0xC1}, ps[] = {0x0F, 0x52, 0xD1};
     const unsigned len = packed ? 3 : 4;
     memcpy(code + k, packed ? ps : ss, len);
+    code[k + len - 2] += rcp; /* 0F 53: RCP */
     k += len;
     const uint8_t tail[] = {0x83, 0xE9, 0x01, 0x75, (uint8_t)-(int8_t)(len + 5)};
     memcpy(code + k, tail, sizeof(tail));
@@ -89,7 +91,7 @@ int main(int argc, char **argv)
     nc_cpu_run(cpu, &c);
     clock_gettime(CLOCK_MONOTONIC, &t1);
     const double ns = (double)(t1.tv_sec - t0.tv_sec) * 1e9 + (double)(t1.tv_nsec - t0.tv_nsec);
-    printf("%s %u iterations: %.1f ns each, result %08x %s\n", packed ? "rsqrtps" : "rsqrtss", n, ns / n,
+    printf("%s%s %u iterations: %.1f ns each, result %08x %s\n", rcp ? "rcp" : "rsqrt", packed ? "ps" : "ss", n, ns / n,
            nc_vm_rd32(&core.vm, DATA + 0x360),
            nc_vm_rd32(&core.vm, DATA + 0x360) == 0x3F7FF000u ? "(Intel)" : "(not Intel)");
     nc_cpu_destroy(cpu);

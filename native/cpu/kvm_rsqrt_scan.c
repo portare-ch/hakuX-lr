@@ -44,7 +44,7 @@ typedef struct Run {
 
 typedef struct Site {
     uint32_t va;
-    bool swept;
+    bool swept, rcp;
 } Site;
 
 typedef struct Item { /* a root waiting, or turned away by a family */
@@ -208,8 +208,8 @@ static int walk(Scan *sc, uint32_t root, bool strict, uint32_t *at)
                 s->state[o + k] |= INSIDE << WALK_SH;
             }
             PUSH(sc->journal, ((Run){va, in.len}));
-            if (in.rsqrt) {
-                PUSH(sc->sites, ((Site){va, false}));
+            if (in.rsqrt || in.rcp) {
+                PUSH(sc->sites, ((Site){va, false, in.rcp != 0}));
             }
             /* what may be the address of code: the next rank's seeds */
             uint32_t v;
@@ -655,11 +655,13 @@ static void sweep(Scan *sc, Site *sites, size_t n)
                 o++;
                 continue;
             }
-            if (in.rsqrt) {
-                const Site key = {s->va + o, false};
+            if (in.rsqrt || in.rcp) {
+                const Site key = {s->va + o, false, false};
                 Site *hit = bsearch(&key, sites, n, sizeof(Site), site_cmp);
                 if (hit) {
                     hit->swept = true;
+                } else if (in.rcp) {
+                    sc->out->rcp_unreached++;
                 } else {
                     sc->out->unreached++;
                 }
@@ -727,11 +729,19 @@ bool nc_rsqrt_scan(const NcRsqrtScanSection *secs, unsigned nsecs, const uint32_
     if (!sc->oom) {
         sweep(sc, sc->sites.p, n);
         out->sites = malloc((n ? n : 1) * sizeof(uint32_t));
-        sc->oom = !out->sites;
+        out->rcp_sites = malloc((n ? n : 1) * sizeof(uint32_t));
+        sc->oom = !out->sites || !out->rcp_sites;
     }
     for (size_t i = 0; i < n && !sc->oom; i++) {
-        if (sc->sites.p[i].swept) {
-            out->sites[out->nsites++] = sc->sites.p[i].va;
+        const Site *s = &sc->sites.p[i];
+        if (s->rcp) {
+            if (s->swept) {
+                out->rcp_sites[out->nrcp++] = s->va;
+            } else {
+                out->rcp_disputed++;
+            }
+        } else if (s->swept) {
+            out->sites[out->nsites++] = s->va;
         } else {
             out->disputed++;
         }
@@ -763,6 +773,7 @@ bool nc_rsqrt_scan(const NcRsqrtScanSection *secs, unsigned nsecs, const uint32_
 void nc_rsqrt_scan_free(NcRsqrtScan *scan)
 {
     free(scan->sites);
+    free(scan->rcp_sites);
     memset(scan, 0, sizeof(*scan));
 }
 

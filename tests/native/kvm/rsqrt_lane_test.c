@@ -33,23 +33,29 @@ int main(int argc, char **argv)
         return 1;
     }
     memcpy(code, rsqrt_guest_lane, sizeof(rsqrt_guest_lane));
-    memcpy(table, nc_rsqrt_intel_mantissa(), 2048 * sizeof(uint16_t));
+    memcpy(code + 2048, rcp_guest_lane, sizeof(rcp_guest_lane));
     if (mprotect(code, 4096, PROT_READ | PROT_EXEC)) {
         printf("FAIL: an executable page\n");
         return 1;
     }
-    uint64_t bad = 0, n = 0;
-    const uint32_t step = all ? 1u : 255u;      /* odd: every low bit pattern visited */
-    uint32_t i = 0;
-    do {
-        const uint32_t got = lane(code, i, (uint64_t)(uintptr_t)table), want = nc_rsqrt_intel(i);
-        if (got != want && bad++ < 5) {
-            printf("  input %08x: guest routine %08x, reference %08x\n", i, got, want);
-        }
-        n++;
-        i += step;
-    } while (all ? i != 0 : n < (1u << 24));
-    printf("%s: the guest lane routine on %llu inputs, %llu differ\n", bad ? "FAIL" : "PASS",
-           (unsigned long long)n, (unsigned long long)bad);
-    return bad != 0;
+    uint64_t failed = 0;
+    for (unsigned rcp = 0; rcp < 2; rcp++) {
+        memcpy(table, rcp ? nc_rcp_intel_mantissa() : nc_rsqrt_intel_mantissa(), 2048 * sizeof(uint16_t));
+        uint64_t bad = 0, n = 0;
+        const uint32_t step = all ? 1u : 255u;      /* odd: every low bit pattern visited */
+        uint32_t i = 0;
+        do {
+            const uint32_t got = lane(code + 2048 * rcp, i, (uint64_t)(uintptr_t)table);
+            const uint32_t want = rcp ? nc_rcp_intel(i) : nc_rsqrt_intel(i);
+            if (got != want && bad++ < 5) {
+                printf("  input %08x: guest routine %08x, reference %08x\n", i, got, want);
+            }
+            n++;
+            i += step;
+        } while (all ? i != 0 : n < (1u << 24));
+        printf("%s: the guest %s lane routine on %llu inputs, %llu differ\n", bad ? "FAIL" : "PASS",
+               rcp ? "RCP" : "RSQRT", (unsigned long long)n, (unsigned long long)bad);
+        failed += bad;
+    }
+    return failed != 0;
 }

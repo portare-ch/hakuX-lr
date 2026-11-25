@@ -314,9 +314,11 @@ int main(void)
     cfg.hook_list = hook_list;
     /* Known instruction boundaries in the synthetic RSQRT program below.
      * Intel must ignore these; AMD alone installs the corrections. */
-    setenv("NC_KVM_RSQRT_SITES", "10a0e,10a19", 1);
+    setenv("NC_KVM_RSQRT_SITES", "10a0e,10a19,10a4e,10a59", 1);
+    setenv("NC_KVM_RCP", "1", 1);
     cpu = core.cpu = nc_cpu_create(&cfg, core.kernel.kpcr_va);
     unsetenv("NC_KVM_RSQRT_SITES");
+    unsetenv("NC_KVM_RCP");
     if (!cpu) {
         printf("FAIL: a KVM guest CPU (needs /dev/kvm with TSC scaling and UMIP)\n");
         return 1;
@@ -572,6 +574,33 @@ int main(void)
     check(*(uint8_t *)nc_vm_host(&core.vm, CODE + 0xA0E) == (nc_rsqrt_host_amd() ? 0xCC : 0xF3),
           "RSQRT patching uses actual AMD host CPUID only");
 
+    /* The same for RCP (NC_KVM_RCP), its packed form on one register. */
+    const uint8_t rcp[] = {
+        0x0F, 0x10, 0x05, 0x00, 0x03, 0x02, 0x00, /* movups xmm0, [0x20300] */
+        0x0F, 0x10, 0x0D, 0x40, 0x03, 0x02, 0x00, /* movups xmm1, [0x20340] */
+        0xF3, 0x0F, 0x53, 0xC1,                   /* rcpss xmm0, xmm1 */
+        0x0F, 0x11, 0x05, 0xA0, 0x03, 0x02, 0x00, /* movups [0x203A0], xmm0 */
+        0x0F, 0x53, 0xC9,                         /* rcpps xmm1, xmm1 */
+        0x0F, 0x11, 0x0D, 0xC0, 0x03, 0x02, 0x00, /* movups [0x203C0], xmm1 */
+        0x0F, 0xAE, 0x1D, 0xD0, 0x03, 0x02, 0x00, /* stmxcsr [0x203D0] */
+        0xF4,
+    };
+    uint32_t rcp_expected[4];
+    for (unsigned i = 0; i < 4; i++) {
+        /* an Intel host keeps its own results */
+        rcp_expected[i] = nc_rsqrt_host_amd() ? nc_rcp_intel(inputs[i]) : nc_rcp_native(inputs[i]);
+    }
+    nc_wr32(scalar_expected, rcp_expected[0]);
+    put(CODE + 0xA40, rcp, sizeof(rcp));
+    run_at(CODE + 0xA40);
+    check(!memcmp(nc_vm_host(&core.vm, DATA + 0x3A0), scalar_expected, 16),
+          "RCPSS: Intel result and unchanged upper lanes");
+    check(!memcmp(nc_vm_host(&core.vm, DATA + 0x3C0), rcp_expected, sizeof(rcp_expected)),
+          "RCPPS: all four Intel results with source and destination the same register");
+    check(nc_vm_rd32(&core.vm, DATA + 0x3D0) == 0x1F80, "RCP leaves guest MXCSR unchanged");
+    check(*(uint8_t *)nc_vm_host(&core.vm, CODE + 0xA4E) == (nc_rsqrt_host_amd() ? 0xCC : 0xF3),
+          "RCP patching uses actual AMD host CPUID only");
+
     /* Check write faults after protection changes between vCPU entries and
      * while the guest runs. Verify that guest INT 2 reaches the system-op handler. */
     const uint8_t wp[] = {
@@ -672,6 +701,9 @@ int main(void)
     check(*(uint8_t *)nc_vm_host(&core.vm, CODE + 0xA0E) == 0xF3 &&
           *(uint8_t *)nc_vm_host(&core.vm, CODE + 0xA19) == 0x0F,
           "RSQRT original bytes restored on CPU destruction");
+    check(*(uint8_t *)nc_vm_host(&core.vm, CODE + 0xA4E) == 0xF3 &&
+          *(uint8_t *)nc_vm_host(&core.vm, CODE + 0xA59) == 0x0F,
+          "RCP original bytes restored on CPU destruction");
     struct sigaction kick;
     sigaction(SIGRTMIN + 3, NULL, &kick);
     check(kick.sa_handler == SIG_DFL, "the kick signal's handler given back on destroy");

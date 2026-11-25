@@ -166,6 +166,59 @@ int main(void)
     rsqrt_patch(cpu, CODE, sizeof(scalar));
     check(vm.phys[0] == 0xCC && !cpu->rsqrt_sites[0].armed, "existing HLE hook retains ownership of its address");
 
+    /* RCPSS/RCPPS: an opt-in (NC_KVM_RCP), register forms only. */
+    cpu->nhooks = 0;
+    const uint8_t rcpss[] = {0xF3, 0x0F, 0x53, 0xC1}, rcpps[] = {0x0F, 0x53, 0xD2}; /* xmm0, xmm1; xmm2, xmm2 */
+    const uint32_t rcp_expected[] = {0x3F7FF000, 0x3E7FF000, 0x407FF000, 0x3D7FF000};
+    memcpy(vm.phys, rcpss, sizeof(rcpss));
+    memcpy(vm.phys + 0x40, rcpps, sizeof(rcpps));
+    rsqrt_patch(cpu, CODE, NC_PAGE);
+    check(vm.phys[0] == 0xF3 && vm.phys[0x40] == 0x0F, "RCP sites stay the host CPU's without the opt-in");
+    cpu->rcp_on = true;
+    rsqrt_patch(cpu, CODE, NC_PAGE);
+    check(vm.phys[0] == 0xCC && vm.phys[0x40] == 0xCC && cpu->rcp_armed == 2 && nc_rd32(guest) == 2 &&
+          nc_rd32(guest + 8) == ((LIN_RSQ_RTN + (64 + 1) * RSQ_RTN_SIZE) | 4u << 16 | 1u << 24) &&
+          nc_rd32(guest + 16) == ((LIN_RSQ_RTN + (2 * 8 + 2) * RSQ_RTN_SIZE) | 3u << 16 | 1u << 24),
+          "RCP register forms are in the guest's table as family 1");
+    memset(cpu->frame.fpu.xmm, 0xA5, sizeof(cpu->frame.fpu.xmm));
+    memcpy(cpu->frame.fpu.xmm[1], inputs, 16);
+    memcpy(cpu->frame.fpu.xmm[2], inputs, 16);
+    before = cpu->frame.fpu;
+    check(rsqrt_trap(cpu, CODE) && cpu->frame.rip == CODE + sizeof(rcpss), "RCPSS trap advances past the instruction");
+    memcpy(before.xmm[0], rcp_expected, 4);
+    check(!memcmp(&before, &cpu->frame.fpu, sizeof(before)) && cpu->frame.eflags == 0x246,
+          "RCPSS preserves upper lanes, other registers, MXCSR and EFLAGS");
+    check(rsqrt_trap(cpu, CODE + 0x40), "RCPPS trap handled");
+    memcpy(before.xmm[2], rcp_expected, 16);
+    check(!memcmp(&before, &cpu->frame.fpu, sizeof(before)) && cpu->rcp_hits == 2,
+          "all four lanes of an aliased RCPPS corrected");
+    /* the table has no room: RSQRT sites keep the exit, RCP sites aren't armed */
+    memcpy(vm.phys + 0x40, packed, sizeof(packed));
+    rsqrt_patch(cpu, CODE + 0x40, sizeof(packed));
+    check(cpu->rcp_armed == 1 && nc_rd32(guest) == 2, "an RSQRT site replaces the RCP site at its address");
+    cpu->rcp_armed = RSQ_GUEST_MAX;
+    cpu->rsqrt_guest_stale = true;
+    rsqrt_guest_sync(cpu);
+    check(nc_rd32(guest) == 1 && nc_rd32(guest + 4) == CODE && cpu->rsqrt_sites[1].armed,
+          "with the table full of RCP sites an RSQRT site keeps the host exit");
+    cpu->rcp_armed = 1;
+    rsqrt_restore(cpu);
+    check(vm.phys[0] == 0xF3 && cpu->rcp_armed == 0, "RCP patches are restored");
+    cpu->rcp_armed = RSQ_GUEST_MAX;
+    rsqrt_patch(cpu, CODE, sizeof(rcpss));
+    check(vm.phys[0] == 0xF3 && cpu->rcp_left_full == 1, "an RCP site past the table's room stays the host CPU's");
+    cpu->rcp_armed = 0;
+    rsqrt_patch(cpu, CODE, sizeof(rcpss));
+    check(vm.phys[0] == 0xCC && cpu->rcp_armed == 1, "and is armed once there is room");
+    rsqrt_restore(cpu);
+    const uint8_t rcp_memory[] = {0xF3, 0x0F, 0x53, 0x05, 0, 0, 2, 0};
+    memcpy(vm.phys, rcp_memory, sizeof(rcp_memory));
+    rsqrt_patch(cpu, CODE, sizeof(rcp_memory));
+    rsqrt_patch(cpu, CODE, sizeof(rcp_memory));
+    check(vm.phys[0] == 0xF3 && !cpu->rsqrt_sites[0].armed && cpu->rcp_left_mem == 1 && nc_rd32(guest) == 0,
+          "an RCP memory form stays the host CPU's, counted once");
+    rsqrt_restore(cpu);
+
     free(cpu->rsqrt_sites);
     free(cpu->sys);
     free(vm.phys);
