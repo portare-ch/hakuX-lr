@@ -175,8 +175,10 @@ each one is replaced with (about 80 ns each on a Ryzen 7 9800X3D). A
 memory source is read there as the title's instruction reads it; a page
 fault on it is handled as the title's own and the instruction runs again.
 With `NC_KVM_RSQRT_INGUEST=0` every one causes a KVM exit instead (about
-5.5 µs each), as do those the guest's table has no room for and memory
-sources with a segment or address-size prefix.
+5.5 µs each), as do those the guest's table has no room for, memory
+sources with a segment or address-size prefix, and sources the title's own
+instruction faults on: a packed one that isn't aligned (its #GP) and the
+backend's pages (its page fault). A device's register is read once a lane.
 
 When the core is closed, the log reports how many instructions were
 corrected in the guest and how many through the host.

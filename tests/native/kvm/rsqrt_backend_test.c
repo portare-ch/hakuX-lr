@@ -26,6 +26,30 @@ static void check(bool ok, const char *what)
     failures += !ok;
 }
 
+#define DEVICE 0xFE000000u
+static unsigned device_reads, device_bytes, gp_faults;
+static uint32_t gp_eip;
+
+static bool device_window(uint32_t addr)
+{
+    return addr == DEVICE;
+}
+
+static bool device(uint32_t addr, unsigned bytes, bool store, uint64_t *v)
+{
+    device_reads += !store && addr == DEVICE + 0x40;
+    device_bytes += bytes;
+    *v = 0x40800000; /* 4.0 */
+    return true;
+}
+
+static bool system_op(void *opaque, NcFrame *f, enum NcSysOp op, unsigned size)
+{
+    gp_faults += op == NC_SYSOP_OTHER && !size;
+    gp_eip = nc_frame_eip(f);
+    return true;
+}
+
 static int fault(void *opaque, NcFrame *f, uint32_t va, bool write, const char **why)
 {
     NcVm *vm = opaque;
@@ -48,6 +72,9 @@ int main(void)
     cpu->vm = &vm;
     cpu->cfg.opaque = &vm;
     cpu->cfg.fault = fault;
+    cpu->cfg.mmio = device;
+    cpu->cfg.mmio_window = device_window;
+    cpu->cfg.sysop = system_op;
     cpu->frame.cpu = cpu;
     vm.pte[CODE / NC_PAGE] = NC_PTE_VALID;
     vm.vprot[CODE / NC_PAGE] = PROT_READ | PROT_WRITE;
@@ -121,7 +148,7 @@ int main(void)
     const uint8_t *stub = lin(cpu, LIN_END - RSQ_STUB);
     check(cpu->rsqrt_sites[0].armed && nc_rd32(guest) == 1 && nc_rd32(guest + 4) == CODE &&
           nc_rd32(guest + 8) == ((LIN_END - RSQ_STUB) | 8u << 16) && stub[0] == 0xB8 && nc_rd32(stub + 1) == DATA &&
-          stub[5] == 0xB9 && nc_rd32(stub + 6) == (0x88u | 1u << 13) && stub[10] == 0xE9 &&
+          stub[5] == 0xB9 && nc_rd32(stub + 6) == (0x88u | 1u << 13 | 8u << 14) && stub[10] == 0xE9 &&
           LIN_END - 1 + nc_rd32(stub + 11) == LIN_RSQ_MEM,
           "a memory form is in the guest's table with a stub: its displacement, modes and the jump");
     /* the operands the guest takes, and those it leaves to the exit */
@@ -149,17 +176,19 @@ int main(void)
         }
         t.dst = (uint8_t)in.dst;
         t.scalar = in.scalar;
+        t.rcp = in.rcp;
         uint32_t disp = 0, modes = 0;
         const bool taken = rsqrt_mem_operand(&t, &disp, &modes);
         if (i == 5) {
-            operands &= taken && disp == 0x100 && modes == (0x84u | 3 << 10 | 1 << 13); /* xmm3, [esp+256] */
+            operands &= taken && disp == 0x100 && modes == (0x84u | 3 << 10 | 1 << 13 | 9 << 14 | 1 << 18); /* xmm3, [esp+256] */
         } else if (i >= 7) {
             operands &= !taken;
         } else {
-            operands &= taken && disp == ops[i].disp && modes == ops[i].modes;
+            operands &= taken && disp == ops[i].disp &&
+                        modes == (ops[i].modes | (uint32_t)t.len << 14 | (uint32_t)in.rcp << 18);
         }
     }
-    check(operands, "memory operands: base, index, scale and displacement, none for a prefixed address");
+    check(operands, "memory operands: base, index, scale, displacement, length and family, none for a prefixed address");
     check(rsqrt_trap(cpu, CODE) && faults == 1 && cpu->frame.rip == CODE &&
           !memcmp(&before, &cpu->frame.fpu, sizeof(before)), "unmapped source faults without committing SSE state");
     check(rsqrt_trap(cpu, CODE) && cpu->frame.rip == CODE + sizeof(memory), "memory source retried after mapping");
@@ -247,6 +276,30 @@ int main(void)
     check(rsqrt_trap(cpu, CODE) && cpu->frame.rip == CODE + sizeof(rcp_memory) &&
           nc_rd32(cpu->frame.fpu.xmm[0]) == rcp_expected[0] && nc_rd32(cpu->frame.fpu.xmm[0] + 4) == 0xA5A5A5A5u,
           "and corrected through the host as well");
+    /* A device's register as the source: one read of four bytes. */
+    const uint8_t rcp_device[] = {0xF3, 0x0F, 0x53, 0x05, 0x40, 0, 0, 0xFE};
+    rsqrt_restore(cpu);
+    memcpy(vm.phys, rcp_device, sizeof(rcp_device));
+    rsqrt_patch(cpu, CODE, sizeof(rcp_device));
+    memset(cpu->frame.fpu.xmm, 0xA5, sizeof(cpu->frame.fpu.xmm));
+    check(rsqrt_trap(cpu, CODE) && cpu->frame.rip == CODE + sizeof(rcp_device) && device_reads == 1 &&
+          device_bytes == 4 && nc_rd32(cpu->frame.fpu.xmm[0]) == nc_rcp_intel(0x40800000) &&
+          nc_rd32(cpu->frame.fpu.xmm[0] + 4) == 0xA5A5A5A5u && nc_rd32(cpu->frame.fpu.xmm[0] + 12) == 0xA5A5A5A5u,
+          "RCPSS from a device's register: one four-byte read, the low lane corrected, the upper lanes kept");
+    /* A packed source that isn't aligned: the instruction's #GP, nothing written. */
+    const uint8_t unaligned[] = {0x0F, 0x53, 0x05, 0x04, 0, 2, 0};
+    rsqrt_restore(cpu);
+    memcpy(vm.phys, unaligned, sizeof(unaligned));
+    rsqrt_patch(cpu, CODE, sizeof(unaligned));
+    memset(cpu->frame.fpu.xmm, 0xA5, sizeof(cpu->frame.fpu.xmm));
+    before = cpu->frame.fpu;
+    check(rsqrt_trap(cpu, CODE) && gp_faults == 1 && gp_eip == CODE && cpu->frame.rip == CODE &&
+          !memcmp(&before, &cpu->frame.fpu, sizeof(before)),
+          "RCPPS from an unaligned source: #GP at the instruction, XMM unchanged");
+    rsqrt_restore(cpu);
+    memcpy(vm.phys, rcp_memory, sizeof(rcp_memory));
+    rsqrt_patch(cpu, CODE, sizeof(rcp_memory));
+
     /* A fault on the source inside the guest's routine: the title's state
      * at the site back from the ring-0 stack, the stub's frame the trap's. */
     const uint32_t ring0[] = {14, 0, LIN_RSQ_MRTN + 8 * 64 + 7, SEL_CODE0, 0x3006, 1, 2, 3, 4, LIN_RSQ_MEM + 67,

@@ -194,6 +194,7 @@ static void rsqrt_patch(NcCpu *cpu, uint32_t va, uint32_t len);
 static void direct_pages(NcCpu *cpu);
 static void rsqrt_emit(NcCpu *cpu, uint32_t at, bool scalar, unsigned dst, unsigned src);
 static void rsqrt_emit_mem(NcCpu *cpu, uint32_t at, bool scalar, unsigned dst);
+static bool sysop(NcCpu *cpu, enum NcSysOp op, unsigned size);
 static void rsqrt_restore(NcCpu *cpu);
 
 static NcCpu *g_cpu; /* the one CPU, for nc_vm_prot_hook */
@@ -1549,7 +1550,8 @@ static bool rsqrt_mem_operand(const RsqrtSite *s, uint32_t *disp, uint32_t *mode
         *disp = nc_rd32(p + n);
         n += 4;
     }
-    *modes = base | index << 4 | scale << 8 | (uint32_t)s->dst << 10 | (uint32_t)s->scalar << 13;
+    *modes = base | index << 4 | scale << 8 | (uint32_t)s->dst << 10 | (uint32_t)s->scalar << 13 |
+             (uint32_t)s->len << 14 | (uint32_t)s->rcp << 18;
     return p + n == s->bytes + s->len;
 }
 
@@ -1816,15 +1818,39 @@ static bool rsqrt_trap_site(NcCpu *cpu, uint32_t at)
         const unsigned count = in.scalar ? 1 : 4;
         if (in.mem) {
             if ((!in.scalar && (in.address & 15)) || (uint64_t)in.address + count * 4 > (1ull << 32)) {
-                fatal(cpu, "RSQRT source violates the guest's alignment or segment limit");
+                /* #GP, as the instruction's own */
+                if (!sysop(cpu, NC_SYSOP_OTHER, 0)) {
+                    nc_log("hakuX-lr-native-kvm", "RSQRT source at %08x, eip %08x: nobody took its #GP",
+                           in.address, at);
+                    abort();
+                }
+                return true;
             }
-            nc_vm_will_read(in.address, count * 4);
-            for (unsigned j = 0; j < count * 4; j++) {
+            /* a device's registers: a read each lane */
+            unsigned device = 0;
+            for (unsigned j = 0; j < count; j++) {
+                const uint32_t va = in.address + 4 * j;
+                if (!(cpu->vm->pte[va / NC_PAGE] & NC_PTE_VALID) && cpu->cfg.mmio_window && cpu->cfg.mmio &&
+                    cpu->cfg.mmio_window(va & ~(NC_PAGE - 1)) && cpu->cfg.mmio_window((va + 3) & ~(NC_PAGE - 1))) {
+                    device++;
+                }
+            }
+            for (unsigned j = 0; device == count && j < count; j++) {
+                uint64_t v = 0;
+                if (!cpu->cfg.mmio(in.address + 4 * j, 4, false, &v)) {
+                    v = UINT64_MAX;
+                }
+                input[j] = (uint32_t)v;
+            }
+            if (device != count) {
+                nc_vm_will_read(in.address, count * 4);
+            }
+            for (unsigned j = 0; device != count && j < count * 4; j++) {
                 const uint32_t va = in.address + j;
                 if (!(cpu->vm->vprot[va / NC_PAGE] & PROT_READ) ||
                     nc_vm_phys(cpu->vm, va) >= cpu->vm->ram_size) {
                     if (cpu->cfg.mmio_window && cpu->cfg.mmio_window(va & ~(NC_PAGE - 1))) {
-                        fatal(cpu, "RSQRT prototype requires a RAM source, not MMIO");
+                        fatal(cpu, "an RSQRT source partly in a device's registers");
                     }
                     const char *why = NULL;
                     const int fault = cpu->cfg.fault(cpu->cfg.opaque, f, va, false, &why);
@@ -1836,7 +1862,7 @@ static bool rsqrt_trap_site(NcCpu *cpu, uint32_t at)
                     return true; /* retry the instruction, or the fault handler's new frame */
                 }
             }
-            if (!guest_read(cpu, in.address, input, count * 4)) {
+            if (device != count && !guest_read(cpu, in.address, input, count * 4)) {
                 fatal(cpu, "reading an RSQRT source");
             }
         }

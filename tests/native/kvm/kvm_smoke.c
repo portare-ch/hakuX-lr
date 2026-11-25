@@ -60,7 +60,9 @@ static struct {
 static unsigned nops;
 static NcCpuContext ctx[2];
 static int cur;
-static int irqs, hooks, late_faults, late2_faults;
+static int irqs, hooks, late_faults, late2_faults, own_faults, gp_ops;
+#define GP_SITE  (CODE + 0x210E) /* RSQRTPS from an unaligned source */
+#define OWN_SITE (CODE + 0x2115) /* RSQRTSS from a page of the backend's */
 static uint32_t irq_eip, irq_ecx;
 static uint16_t out_port;
 static uint32_t out_value;
@@ -89,6 +91,13 @@ static bool system_op(void *opaque, NcFrame *f, enum NcSysOp op, unsigned size)
         nops++;
     }
     switch (op) {
+    case NC_SYSOP_OTHER:
+        if (eip != GP_SITE || size) {
+            return false;
+        }
+        gp_ops++;
+        nc_frame_set_eip(f, eip + 7);
+        return true;
     case NC_SYSOP_INT: {
         const uint8_t v = *(const uint8_t *)nc_vm_host(&core.vm, eip + 1);
         if (v == 0x41) {
@@ -231,6 +240,11 @@ static int fault(void *opaque, NcFrame *f, uint32_t va, bool write, const char *
         }
         return nc_vm_view_prot(&core.vm, WP, NC_PAGE, PROT_READ | PROT_WRITE) == 0 ? 1 : 0;
     }
+    if (va == 0x7000u && nc_frame_eip(f) == OWN_SITE) {
+        own_faults++;
+        nc_frame_set_eip(f, OWN_SITE + 8);
+        return 2;
+    }
     if (va - LATE2 < NC_PAGE) {
         late2_faults++;
         if (!nc_vm_alloc_at(&core.vm, LATE2, NC_PAGE, NULL)) {
@@ -323,7 +337,7 @@ int main(void)
     cfg.hook_list = hook_list;
     /* Known instruction boundaries in the synthetic RSQRT program below.
      * Intel must ignore these; AMD alone installs the corrections. */
-    setenv("NC_KVM_RSQRT_SITES", "10a0e,10a19,10a4e,10a59,12008,1201c,1202a,12038,1204a,12052,12064,12069", 1);
+    setenv("NC_KVM_RSQRT_SITES", "10a0e,10a19,10a4e,10a59,12008,1201c,1202a,12038,1204a,12052,12064,12069,1210e,12115", 1);
     cpu = core.cpu = nc_cpu_create(&cfg, core.kernel.kpcr_va);
     unsetenv("NC_KVM_RSQRT_SITES");
     if (!cpu) {
@@ -677,6 +691,23 @@ int main(void)
           (nc_vm_rd32(&core.vm, DATA + 0x5F0) & 1), "memory forms leave the general registers and EFLAGS alone");
 #undef RSQ
 #undef RCP
+    /* Sources the title's own instruction faults on: a packed one that
+     * isn't aligned (#GP), a page of the backend's (#PF). Nothing written. */
+    const uint8_t denied[] = {
+        0x0F, 0x10, 0x0D, 0x00, 0x03, 0x02, 0x00,       /* movups xmm1, [0x20300] */
+        0x0F, 0x10, 0x15, 0x00, 0x03, 0x02, 0x00,       /* movups xmm2, [0x20300] */
+        0x0F, 0x52, 0x0D, 0x44, 0x03, 0x02, 0x00,       /* rsqrtps xmm1, [0x20344] */
+        0xF3, 0x0F, 0x52, 0x15, 0x00, 0x70, 0x00, 0x00, /* rsqrtss xmm2, [0x7000] */
+        0x0F, 0x11, 0x0D, 0x00, 0x06, 0x02, 0x00,       /* movups [0x20600], xmm1 */
+        0x0F, 0x11, 0x15, 0x10, 0x06, 0x02, 0x00,       /* movups [0x20610], xmm2 */
+        0xF4,
+    };
+    put(CODE + 0x2100, denied, sizeof(denied));
+    run_at(CODE + 0x2100);
+    check(gp_ops == 1 && !memcmp(nc_vm_host(&core.vm, DATA + 0x600), nc_vm_host(&core.vm, DATA + 0x300), 16),
+          "RSQRTPS from an unaligned source: #GP at the instruction, XMM unchanged");
+    check(own_faults == 1 && !memcmp(nc_vm_host(&core.vm, DATA + 0x610), nc_vm_host(&core.vm, DATA + 0x300), 16),
+          "RSQRTSS from a page of the backend's: the title's page fault, XMM unchanged");
 
     /* Check write faults after protection changes between vCPU entries and
      * while the guest runs. Verify that guest INT 2 reaches the system-op handler. */
