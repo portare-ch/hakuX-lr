@@ -353,6 +353,9 @@ bool nc_x86_decode(const uint8_t *code, unsigned size, uint32_t va, NcX86Insn *o
         case 0x52:
             out->rsqrt = f3 ? 2 : 1;
             break;
+        case 0x53:
+            out->rcp = f3 ? 2 : 1;
+            break;
         case 0x71: case 0x72: case 0x73: /* shifts of an MMX register by an immediate */
             if (memory || !(reg == 2 || reg == 6 || (reg == 4 && op != 0x73) || ((reg & 3) == 3 && op == 0x73))) {
                 return false;

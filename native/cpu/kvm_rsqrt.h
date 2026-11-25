@@ -9,6 +9,7 @@
 typedef struct NcRsqrtInsn {
     unsigned len, dst, src;
     bool scalar, mem;
+    bool rcp;   /* RCPSS/RCPPS, not RSQRTSS/RSQRTPS */
     uint32_t address;
 } NcRsqrtInsn;
 
@@ -22,5 +23,9 @@ uint32_t nc_rsqrt_native(uint32_t bits);
 uint32_t nc_rsqrt_intel(uint32_t bits);
 /* nc_rsqrt_intel's 2048 mantissas (u16), for the in-guest routine */
 const uint16_t *nc_rsqrt_intel_mantissa(void);
+/* RCPSS/RCPPS as Intel's table has them (intel_rcp_table.inc), and its 2048 mantissas */
+uint32_t nc_rcp_native(uint32_t bits);
+uint32_t nc_rcp_intel(uint32_t bits);
+const uint16_t *nc_rcp_intel_mantissa(void);
 
 #endif

@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "native/cpu/intel_rcp_table.inc"
 #include "native/cpu/intel_rsqrt_table.inc"
 
 bool nc_rsqrt_decode(const uint8_t *code, unsigned size, const uint32_t regs[8],
@@ -30,13 +31,14 @@ bool nc_rsqrt_decode(const uint8_t *code, unsigned size, const uint32_t regs[8],
         }
         n++;
     }
-    if (size - n < 3 || code[n] != 0x0F || code[n + 1] != 0x52) {
+    if (size - n < 3 || code[n] != 0x0F || (code[n + 1] != 0x52 && code[n + 1] != 0x53)) {
         return false;
     }
+    const bool rcp = code[n + 1] == 0x53;
     n += 2;
     const uint8_t m = code[n++];
     const unsigned mod = m >> 6, rm = m & 7;
-    *out = (NcRsqrtInsn){.dst = (m >> 3) & 7, .src = rm, .scalar = scalar, .mem = mod != 3};
+    *out = (NcRsqrtInsn){.dst = (m >> 3) & 7, .src = rm, .scalar = scalar, .mem = mod != 3, .rcp = rcp};
     uint32_t address = 0;
     unsigned disp = 0;
     if (mod != 3 && addr16) {
@@ -127,4 +129,30 @@ uint32_t nc_rsqrt_intel(uint32_t bits)
 const uint16_t *nc_rsqrt_intel_mantissa(void)
 {
     return intel_rsqrt_mantissa;
+}
+
+uint32_t nc_rcp_native(uint32_t bits)
+{
+    const __m128 x = _mm_castsi128_ps(_mm_cvtsi32_si128((int)bits));
+    return (uint32_t)_mm_cvtsi128_si32(_mm_castps_si128(_mm_rcp_ss(x)));
+}
+
+uint32_t nc_rcp_intel(uint32_t bits)
+{
+    const uint32_t sign = bits & 0x80000000u, exponent = (bits >> 23) & 0xFFu;
+    if (exponent == 0xFFu) {
+        return bits & 0x007FFFFFu ? bits | 0x00400000u : sign; /* quiet NaN; 1/infinity */
+    }
+    if (!exponent) {
+        return sign | 0x7F800000u; /* signed zero/subnormal */
+    }
+    if (exponent >= 253u) {
+        return sign; /* underflow */
+    }
+    return sign | (253u - exponent) << 23 | (uint32_t)intel_rcp_mantissa[(bits >> 12) & 2047u] << 8;
+}
+
+const uint16_t *nc_rcp_intel_mantissa(void)
+{
+    return intel_rcp_mantissa;
 }

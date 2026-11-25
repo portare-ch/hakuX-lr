@@ -169,14 +169,27 @@ NC_KVM_RSQRT_SITES=0x00123456,0x001234AB retroarch -L hakux-lr_libretro.so Game.
 Those example addresses are placeholders. Each address must point to the
 start of a `RSQRTSS` or `RSQRTPS` instruction, including its prefixes.
 
-The startup log reports the scan's result. Instructions with a register
-source are corrected inside the guest, by a handler the backend installs
-for the breakpoint each one is replaced with (about 75 ns each).
-Instructions with a memory source cause a KVM exit instead (about 5.5 µs
-each), as all do with `NC_KVM_RSQRT_INGUEST=0`.
+The startup log reports the scan's result. The instructions are corrected
+inside the guest, by a handler the backend installs for the breakpoint
+each one is replaced with (about 80 ns each on a Ryzen 7 9800X3D). A
+memory source is read there as the title's instruction reads it; a page
+fault on it is handled as the title's own and the instruction runs again.
+With `NC_KVM_RSQRT_INGUEST=0` every one causes a KVM exit instead (about
+5.5 µs each), as do those the guest's table has no room for, memory
+sources with a segment or address-size prefix, and sources the title's own
+instruction faults on: a packed one that isn't aligned (its #GP) and the
+backend's pages (its page fault). A device's register is read once a lane.
 
 When the core is closed, the log reports how many instructions were
 corrected in the guest and how many through the host.
+
+`RCPSS` and `RCPPS` differ on AMD in the same way and are corrected with
+the others: from the same scan, in the guest's handler, with Intel's table
+(`native/cpu/intel_rcp_table.inc`, the one FEX uses). `NC_KVM_RSQRT=0`
+turns both off. The guest's table holds 2047 register forms, RSQRT's
+first; a memory form takes the room of three. An RCP register form without
+room keeps the host CPU's result, which the log counts.
+`NC_KVM_RSQRT_SITES` takes the addresses of RCP instructions as well.
 
 `kvm-rsqrt-test` checks the Intel reference and the operand decoder without
 `/dev/kvm`; `kvm-rsqrt-test --exhaustive` compares the reference with the
@@ -187,7 +200,7 @@ against the Intel reference (`--exhaustive` for all inputs),
 `kvm-rsqrt-scan-test` runs the scan and its instruction
 decoder on a synthetic XBE, and `kvm-smoke` runs scalar and packed
 instructions under KVM (`kvm-smoke-rsqrt-host` with the exit path).
-`kvm-rsqrt-bench ss|ps N` times a guest loop on either path. The standalone checks can also be built directly:
+`kvm-rsqrt-bench ss|ps|rcpss|rcpps[m] N` times a guest loop on either path (`m`: a memory source). The standalone checks can also be built directly:
 
 ```sh
 cc -O2 -I. tests/native/kvm/rsqrt_test.c native/cpu/kvm_rsqrt.c -o /tmp/rsqrt-test

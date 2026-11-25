@@ -25,6 +25,7 @@ typedef struct NcX86Insn {
     bool mem;          /* a ModRM memory operand */
     bool has_abs;      /* a memory operand that is an address alone (abs), no register */
     uint8_t rsqrt;     /* 1 rsqrtps, 2 rsqrtss */
+    uint8_t rcp;       /* 1 rcpps, 2 rcpss */
     uint8_t index;     /* NC_X86_JMP_TABLE: the index register (abs is the table) */
     uint8_t cmp_reg;   /* cmp r32, imm: the register + 1, and cmp_imm */
     uint8_t nimm;

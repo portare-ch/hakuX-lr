@@ -76,6 +76,10 @@ static void decoder(void)
               t[i].what);
     }
     NcX86Insn in;
+    const uint8_t rcpss[] = {0xF3, 0x0F, 0x53, 0xC1}, rcpps[] = {0x0F, 0x53, 0x08};
+    check(nc_x86_decode(rcpss, 4, 0x1000, &in) && in.rcp == 2 && !in.rsqrt && in.len == 4 &&
+          nc_x86_decode(rcpps, 3, 0x1000, &in) && in.rcp == 1 && !in.rsqrt && in.mem,
+          "rcpss and rcpps are told from rsqrt");
     const uint8_t cmp[] = {0x83, 0xF9, 0x07}, far_jmp[] = {0xFF, 0x2D, 0, 0x20, 0x01, 0};
     check(nc_x86_decode(cmp, 3, 0x1000, &in) && in.cmp_reg == 2 && in.cmp_imm == 7, "cmp ecx, 7 bounds a switch");
     check(nc_x86_decode(far_jmp, 6, 0x1000, &in) && in.has_abs && in.abs == 0x12000 && !in.nimm,
@@ -120,7 +124,7 @@ int main(void)
     /* the entry: a direct call, an immediate holding 0F 52 C1 (at 11007),
      * and main as XDK startup reaches it, through a pointer */
     put(text, 0x11000, "E81B000000" "B8900F52C1" "FF1500200100" "C3");
-    put(text, 0x11020, "F30F52C1" "C3");             /* called: rsqrtss xmm0, xmm1 */
+    put(text, 0x11020, "F30F52C1" "F30F53C1" "C3");  /* called: rsqrtss xmm0, xmm1; rcpss xmm0, xmm1 */
     /* through the pointer: rsqrtps xmm2, xmm1 and a two-case switch, its
      * table among the code (11044) */
     put(text, 0x11030, "0F52D1" "83F801" "7708" "FF248544100100");
@@ -128,8 +132,8 @@ int main(void)
     wr32(text + 0x44, 0x11050);
     wr32(text + 0x48, 0x11060);
     put(text, 0x11050, "F30F520510200100" "C3");     /* case 0: rsqrtss xmm0, [12010] */
-    put(text, 0x11060, "0F52C0" "C3");               /* case 1: rsqrtps xmm0, xmm0 */
-    put(text, 0x11070, "0F52C9" "C3");               /* nothing refers to this function */
+    put(text, 0x11060, "0F52C0" "0F53C8" "C3");      /* case 1: rsqrtps xmm0, xmm0; rcpps xmm1, xmm0 */
+    put(text, 0x11070, "0F52C9" "0F53C9" "C3");      /* nothing refers to this function */
     put(text, 0x11080, "F30F52C2" "C3");             /* a callback, only in data */
     /* mov eax, C1520FC3: its immediate reads as ret; rsqrtps xmm0, xmm1,
      * and a dword in the data happens to be that address (11092) */
@@ -166,6 +170,9 @@ int main(void)
     check(scan.unreached == 1, "the unreferenced function's RSQRT is left alone");
     check(scan.evicted_straddled == 2, "the seeds inside an instruction give way to the functions called over them");
     check(scan.disputed == 0, "the linear sweep agrees with every site");
+    check(scan.nrcp == 2 && scan.rcp_sites[0] == 0x11024 && scan.rcp_sites[1] == 0x11063 &&
+          scan.rcp_unreached == 1 && scan.rcp_disputed == 0,
+          "RCPSS and RCPPS sites are listed apart, the unreferenced function's left alone");
 
     /* the entry under the debug key, and a section table past the file */
     wr32(xbe + 0x128, TEXT ^ 0x94859D4Bu);

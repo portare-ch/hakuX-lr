@@ -55,6 +55,12 @@ static void decoder(void)
         rejected &= !nc_rsqrt_decode(wrong[i], sizeof(wrong[i]), regs, 0, &in);
     }
     check(rejected, "other opcodes and unsupported mandatory prefixes rejected");
+    const uint8_t rcpss[] = {0xF3, 0x0F, 0x53, 0xD9}, rcpps[] = {0x0F, 0x53, 0x05, 0x40, 0x30, 0x20, 0x10};
+    check(nc_rsqrt_decode(rcpss, sizeof(rcpss), regs, 0, &in) && in.rcp && in.scalar && !in.mem &&
+          in.len == 4 && in.dst == 3 && in.src == 1 &&
+          nc_rsqrt_decode(rcpps, sizeof(rcpps), regs, 0, &in) && in.rcp && !in.scalar && in.mem &&
+          in.address == 0x10203040u && nc_rsqrt_decode(scalar, sizeof(scalar), regs, 0, &in) && !in.rcp,
+          "RCPSS and RCPPS operands, told from RSQRT");
     const uint8_t too_long[] = {0x64, 0x64, 0x64, 0x64, 0x64, 0x64, 0x64, 0x64,
                                 0x64, 0x64, 0x64, 0x64, 0x64, 0xF3, 0x0F, 0x52, 0xC0};
     check(!nc_rsqrt_decode(too_long, sizeof(too_long), regs, 0, &in), "15-byte instruction limit");
@@ -82,12 +88,45 @@ int main(int argc, char **argv)
         }
     }
     check(!failures, "Xbox's four failing inputs, published Intel result and special values");
+    static const struct { uint32_t input, expected; } rcp[] = {
+        {0x3F800000, 0x3F7FF000}, {0x40000000, 0x3EFFF000},
+        {0x3F000000, 0x3FFFF000}, {0xC0800000, 0xBE7FF000},
+        {0x00800000, 0x7E7FF000}, {0x7E800000, 0}, {0xFF000000, 0x80000000},
+        {0, 0x7F800000}, {0x80000000, 0xFF800000},
+        {1, 0x7F800000}, {0x807FFFFF, 0xFF800000},
+        {0x7F800000, 0}, {0xFF800000, 0x80000000},
+        {0x7F800001, 0x7FC00001}, {0xFF800123, 0xFFC00123}, {0x7FC12345, 0x7FC12345},
+    };
+    unsigned rcp_failures = 0;
+    for (unsigned i = 0; i < sizeof(rcp) / sizeof(rcp[0]); i++) {
+        const uint32_t got = nc_rcp_intel(rcp[i].input);
+        if (got != rcp[i].expected) {
+            printf("FAIL: RCP input %08x expected %08x got %08x\n", rcp[i].input, rcp[i].expected, got);
+            rcp_failures++;
+        }
+    }
+    check(!rcp_failures, "RCP: powers of two, the exponent range's ends and special values");
+    /* Every bucket, against the table's rule: 2^25 / (4097 + 2 i) rounded
+     * to nearest, 12 bits kept. */
+    unsigned bucket_failures = 0;
+    for (uint32_t i = 0; i < 2048; i++) {
+        const uint32_t d = 4097 + 2 * i, q = ((2u << 25) + d) / (2 * d) - 4096;
+        for (uint32_t low = 0; low < 4096; low += 4095) {
+            const uint32_t got = nc_rcp_intel(0x40000000u | i << 12 | low), want = 0x3E800000u | q << 11;
+            if (got != want) {
+                printf("FAIL: RCP bucket %u expected %08x got %08x\n", i, want, got);
+                bucket_failures++;
+            }
+        }
+    }
+    failures += bucket_failures;
+    check(!bucket_failures, "RCP: all 2048 buckets, at both ends");
     /* The reference against a CPU that is one: every input on a host that
      * isn't AMD. An AMD host's own estimates differ, which is what the
      * correction is for: how many, for the record. */
     const bool exhaustive = argc == 2 && !strcmp(argv[1], "--exhaustive");
     const uint64_t limit = exhaustive ? 1ull << 32 : 1ull << 21;
-    uint64_t differ = 0;
+    uint64_t differ = 0, rcp_differ = 0;
     uint32_t random = 1, first = 0;
     for (uint64_t i = 0; i < limit; i++) {
         random ^= random << 13;
@@ -97,6 +136,7 @@ int main(int argc, char **argv)
         if (nc_rsqrt_native(bits) != nc_rsqrt_intel(bits) && !differ++) {
             first = bits;
         }
+        rcp_differ += nc_rcp_native(bits) != nc_rcp_intel(bits);
         if (exhaustive && (i & ((1u << 28) - 1)) == (1u << 28) - 1) {
             printf("Checked %llu / 4294967296 bit patterns\n", (unsigned long long)i + 1);
         }
@@ -112,5 +152,8 @@ int main(int argc, char **argv)
         check(!differ, exhaustive ? "all 2^32 input bit patterns: the reference is this CPU's RSQRT" :
                                     "2^21 pseudorandom inputs: the reference is this CPU's RSQRT");
     }
+    /* RCP's table is an Intel reference no Xbox has confirmed yet: counted, not checked */
+    printf("Host: its RCP differs from the Intel reference on %llu of %llu inputs\n",
+           (unsigned long long)rcp_differ, (unsigned long long)limit);
     return failures ? 1 : 0;
 }
