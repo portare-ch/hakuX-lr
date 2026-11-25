@@ -49,6 +49,8 @@ elif name == "retroarch":
         print("Vulkan: yes")
     elif "--version" in args:
         print("Version: 1.22.2")
+    else:
+        sys.exit(int(os.environ.get("RETROARCH_RESULT", "0")))
 elif name == "pgrep":
     sys.exit(0 if os.environ.get("STEAM_RUNNING", "1") == "1" else 1)
 elif name == "steamos-add-to-steam":
@@ -197,6 +199,49 @@ class SetupTest(unittest.TestCase):
         self.assertFalse((self.prefix / "steam-added").exists())
         self.install()
         self.assertTrue((self.prefix / "steam-added").exists())
+
+    def test_low_latency_is_an_option(self):
+        self.install("--no-steam")
+        config = (self.prefix / "retroarch.cfg").read_text()
+        for key in ("video_max_swapchain_images", "audio_latency", "vrr_runloop_enable"):
+            self.assertNotIn(key, config)
+        self.install("--no-steam", "--low-latency")
+        config = (self.prefix / "retroarch.cfg").read_text()
+        self.assertIn('video_max_swapchain_images = "2"', config)
+        self.assertIn('audio_latency = "24"', config)
+        self.assertIn('vrr_runloop_enable = "true"', config)
+        # the helper that turns variable refresh rate on straight on the screen
+        helper = self.prefix / "vrr.py"
+        compile(helper.read_text(), str(helper), "exec")
+        self.assertIn('"$here/vrr.py" "$c" 1', (self.prefix / "start-hakux-lr.sh").read_text())
+
+    def kms_start(self, *setup, user=None, result=0):
+        """A start straight on the screen, vrr.py a stand-in that notes its calls."""
+        if not any(os.access(card, os.R_OK | os.W_OK) for card in Path("/dev/dri").glob("card[0-9]*")):
+            self.skipTest("requires access to a /dev/dri card")
+        self.install("--no-steam", *setup)
+        noted = self.root / "vrr-calls"
+        (self.prefix / "vrr.py").write_text(
+            f"import sys\nopen({str(noted)!r}, 'a').write(sys.argv[2])\n")
+        if user:
+            (self.prefix / "user.cfg").write_text(user)
+        started = subprocess.run([str(self.prefix / "start-hakux-lr.sh")],
+                                 env=dict(self.env, HAKUX_DISPLAY="kms", RETROARCH_RESULT=str(result)),
+                                 capture_output=True, text=True)
+        return started.returncode, noted.read_text() if noted.exists() else ""
+
+    def test_kms_start_turns_vrr_on_and_off_again(self):
+        cards = len([c for c in Path("/dev/dri").glob("card[0-9]*")])
+        self.assertEqual(self.kms_start("--low-latency"), (0, "1" * cards + "0" * cards))
+
+    def test_kms_start_turns_vrr_off_after_a_failed_retroarch(self):
+        cards = len([c for c in Path("/dev/dri").glob("card[0-9]*")])
+        self.assertEqual(self.kms_start("--low-latency", result=3), (3, "1" * cards + "0" * cards))
+
+    def test_kms_start_leaves_vrr_alone_unless_asked(self):
+        self.assertEqual(self.kms_start(), (0, ""))
+        self.assertEqual(self.kms_start("--low-latency", user='vrr_runloop_enable = "false"\n'), (0, ""))
+        self.assertEqual(self.kms_start(user='vrr_runloop_enable = "true"\n')[1][:1], "1")
 
     def test_no_steam_option(self):
         self.install("--no-steam")

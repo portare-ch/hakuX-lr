@@ -20,6 +20,9 @@
 #                     RetroArch's AppImage.
 #   --no-steam        on SteamOS, don't add hakuX-lr to the Steam library
 #   --no-auto-update  on SteamOS, disable automatic core updates
+#   --low-latency     RetroArch settings for less lag: two swapchain images,
+#                     24 ms of audio, variable refresh rate. Tested on one
+#                     AMD64 desktop only; pass it again with every run
 #
 # It installs RetroArch, Vulkan and menu assets with the distribution's
 # package manager (pacman, apt, dnf or zypper; asks for the sudo password),
@@ -62,6 +65,7 @@ games=
 rakind=
 steam=1
 auto_update=1
+low_latency=0
 prefix="${XDG_DATA_HOME:-$HOME/.local/share}/hakux-lr"
 packages=1
 while [ $# -gt 0 ]; do
@@ -75,6 +79,7 @@ while [ $# -gt 0 ]; do
         --retroarch) [ $# -ge 2 ] || die "$1 needs a value"; rakind=$2; shift ;;
         --no-steam) steam=0 ;;
         --no-auto-update) auto_update=0 ;;
+        --low-latency) low_latency=1 ;;
         -h|--help) usage; exit 0 ;;
         *) die "unknown option: $1 (see --help)" ;;
     esac
@@ -591,6 +596,17 @@ preemptive_frames_enable = "false"
 savestate_auto_save = "false"
 savestate_auto_load = "false"
 EOF
+    if [ $low_latency = 1 ]; then
+        cat <<'EOF'
+
+# --low-latency: no third swapchain image queued, an audio buffer of a
+# frame and a half, and variable refresh rate where the display has it
+# (straight on the screen start-hakux-lr.sh turns it on).
+video_max_swapchain_images = "2"
+audio_latency = "24"
+vrr_runloop_enable = "true"
+EOF
+    fi
 } > "$prefix/retroarch.cfg"
 
 if [ ! -f "$prefix/user.cfg" ]; then
@@ -856,9 +872,109 @@ mkdir -p "$here/logs"
 [ ! -f "$corelog" ] || mv -f "$corelog" "$corelog.1"
 echo "start-hakux-lr: ${game:-RetroArch menu} ($mode, $audio)"
 echo "start-hakux-lr: logs: $corelog (the core), $here/logs/retroarch.log (RetroArch)"
+# With variable refresh rate asked for (--low-latency, or user.cfg) nothing
+# turns it on straight on the screen: done here for a display that has it,
+# and undone afterwards for what draws next.
+if [ "$mode" = kms ] && command -v python3 >/dev/null 2>&1 &&
+    grep -qs '^ *vrr_runloop_enable *= *"true"' "$here/retroarch.cfg" "$here/user.cfg" &&
+    ! grep -qs '^ *vrr_runloop_enable *= *"false"' "$here/user.cfg"; then
+    vrr=
+    for c in /dev/dri/card[0-9]*; do
+        python3 "$here/vrr.py" "$c" 1 2>/dev/null && vrr="$vrr $c"
+    done
+    if [ -n "$vrr" ]; then
+        vrr_off() {
+            for c in $vrr; do
+                python3 "$here/vrr.py" "$c" 0 2>/dev/null || true
+            done
+        }
+        trap vrr_off EXIT
+        "$RETROARCH" "$@" 2>"$corelog" &
+        pid=$!
+        trap 'kill "$pid" 2>/dev/null || true' TERM INT HUP
+        rc=0
+        wait "$pid" || rc=$?
+        # a signal ends the wait before RetroArch has ended
+        while kill -0 "$pid" 2>/dev/null; do
+            rc=0
+            wait "$pid" || rc=$?
+        done
+        exit $rc
+    fi
+fi
 exec "$RETROARCH" "$@" 2>"$corelog"
 LAUNCHER
 chmod +x "$prefix/start-hakux-lr.sh"
+
+cat > "$prefix/vrr.py" <<'VRR'
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-or-later
+"""vrr.py <card> 0|1: variable refresh rate on a card's outputs, for a start
+straight on the screen (a compositor does this itself). Exit status 0: set,
+on a display that has it."""
+import ctypes
+import fcntl
+import os
+import struct
+import sys
+
+CRTC, CONNECTOR = 0xCCCCCCCC, 0xC0C0C0C0
+
+
+def io(fd, nr, fmt, *fields):
+    buf = bytearray(struct.pack(fmt, *fields))
+    fcntl.ioctl(fd, 3 << 30 | len(buf) << 16 | 0x64 << 8 | nr, buf)
+    return struct.unpack(fmt, buf)
+
+
+def ids(fd, crtcs):
+    """The card's CRTCs, or its connectors."""
+    n = io(fd, 0xA0, "4Q8I", *[0] * 12)
+    count = n[5] if crtcs else n[6]
+    buf = (ctypes.c_uint32 * max(count, 1))()
+    ptr = ctypes.addressof(buf)
+    io(fd, 0xA0, "4Q8I", 0, ptr if crtcs else 0, 0 if crtcs else ptr, 0,
+       0, count if crtcs else 0, 0 if crtcs else count, 0, 0, 0, 0, 0)
+    return list(buf)[:count]
+
+
+def props(fd, obj, kind):
+    """An object's properties: name to (id, value)."""
+    count = io(fd, 0xB9, "2Q3I4x", 0, 0, 0, obj, kind)[2]
+    p, v = (ctypes.c_uint32 * max(count, 1))(), (ctypes.c_uint64 * max(count, 1))()
+    count = min(count, io(fd, 0xB9, "2Q3I4x", ctypes.addressof(p), ctypes.addressof(v), count, obj, kind)[2])
+    out = {}
+    for i in range(count):
+        name = io(fd, 0xAA, "2Q2I32s2I", 0, 0, p[i], 0, b"", 0, 0)[4].split(b"\0")[0].decode()
+        out[name] = (p[i], v[i])
+    return out
+
+
+def main():
+    fd = os.open(sys.argv[1], os.O_RDWR | os.O_CLOEXEC)
+    if not any(props(fd, c, CONNECTOR).get("vrr_capable", (0, 0))[1] for c in ids(fd, False)):
+        return 1
+    was = []
+    try:
+        for crtc in ids(fd, True):
+            p = props(fd, crtc, CRTC).get("VRR_ENABLED")
+            if p:
+                io(fd, 0xBA, "Q3I4x", int(sys.argv[2]), p[0], crtc, CRTC)
+                was.append((crtc, p))
+    except OSError:
+        # all of them or none
+        for crtc, p in was:
+            io(fd, 0xBA, "Q3I4x", p[1], p[0], crtc, CRTC)
+        raise
+    return 0 if was else 1
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except (OSError, IndexError, ValueError, struct.error):
+        sys.exit(1)
+VRR
 
 if [ "$os_id" = steamos ]; then
     update="$prefix/.core-update"
