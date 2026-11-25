@@ -1,5 +1,12 @@
 # Changelog
 
+## linux-v0.39.0 (Linux ARM64, Linux x86-64, and Android ARM64)
+
+- **Vulkan 1.1 support.** hakuX-lr now runs with Vulkan 1.1 loaders that support timeline semaphores. RetroArch and the core negotiate the highest Vulkan version the loader supports, up to 1.4. [#314](https://github.com/portare-ch/hakuX-lr/pull/314)
+- **AMD KVM CPU accuracy.** Use the Intel reciprocal estimates for `RCPSS` and `RCPPS` on Linux x86-64, including memory operands. The correction is enabled by default on AMD. Set `NC_KVM_RSQRT=0` to turn off both RCP and RSQRT correction. [#316](https://github.com/portare-ch/hakuX-lr/pull/316) · [#317](https://github.com/portare-ch/hakuX-lr/pull/317)
+- **AMD KVM performance.** Correct common memory forms of RCP and RSQRT inside the guest, avoiding a KVM exit. In the tested gameplay segment of RalliSport Challenge 2 on a Ryzen 7 9800X3D, frame rate rose from 44–48 to 60 fps with correction enabled. [Test results](https://github.com/portare-ch/hakuX-lr/pull/317#issuecomment-7176501872)
+- **RetroArch core info.** Linux and Android packages now use the same core metadata.
+
 ## linux-v0.38.0 (Linux ARM64, Linux x86-64, and Android ARM64)
 
 - **Native 720p.** Games can select 480p (on by default) or 720p (off by default). The new **Render Scale (720p)** option supports 1×, 2× and 3×, independently of the standard render scale. Output is capped at 3840×2160. Amped 2 was verified at native 720p and 4K (3×). [#310](https://github.com/portare-ch/hakuX-lr/pull/310)
