@@ -198,14 +198,16 @@ class SetupTest(unittest.TestCase):
         self.install()
         self.assertTrue((self.prefix / "steam-added").exists())
 
-    def test_low_latency_defaults(self):
+    def test_low_latency_is_an_option(self):
         self.install("--no-steam")
         config = (self.prefix / "retroarch.cfg").read_text()
+        for key in ("video_max_swapchain_images", "audio_latency", "vrr_runloop_enable"):
+            self.assertNotIn(key, config)
+        self.install("--no-steam", "--low-latency")
+        config = (self.prefix / "retroarch.cfg").read_text()
         self.assertIn('video_max_swapchain_images = "2"', config)
-        self.assertIn('input_poll_type_behavior = "2"', config)
         self.assertIn('audio_latency = "24"', config)
         self.assertIn('vrr_runloop_enable = "true"', config)
-        self.assertIn('video_vsync = "false"', config)
         # the helper that turns variable refresh rate on straight on the screen
         helper = self.prefix / "vrr.py"
         compile(helper.read_text(), str(helper), "exec")

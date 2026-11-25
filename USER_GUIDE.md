@@ -42,7 +42,9 @@ of a game’s name to start it directly. The launcher uses the desktop session
 when available and KMS for direct display on a system without a desktop.
 
 Run the installer again to update the setup. `--version`, `--tarball` and `--core` select
-a specific release or local build. Run `sh setup-hakux-lr.sh --help` for all
+a specific release or local build. `--low-latency` writes RetroArch settings
+for less lag (two swapchain images, 24 ms of audio, variable refresh rate); it
+has been tested on one AMD64 desktop only. Run `sh setup-hakux-lr.sh --help` for all
 options. Settings and logs default to `~/.local/share/hakux-lr/`. Place
 personal RetroArch settings in its `user.cfg` to carry them across updates.
 

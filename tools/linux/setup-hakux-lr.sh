@@ -20,6 +20,9 @@
 #                     RetroArch's AppImage.
 #   --no-steam        on SteamOS, don't add hakuX-lr to the Steam library
 #   --no-auto-update  on SteamOS, disable automatic core updates
+#   --low-latency     RetroArch settings for less lag: two swapchain images,
+#                     24 ms of audio, variable refresh rate. Tested on one
+#                     AMD64 desktop only; pass it again with every run
 #
 # It installs RetroArch, Vulkan and menu assets with the distribution's
 # package manager (pacman, apt, dnf or zypper; asks for the sudo password),
@@ -62,6 +65,7 @@ games=
 rakind=
 steam=1
 auto_update=1
+low_latency=0
 prefix="${XDG_DATA_HOME:-$HOME/.local/share}/hakux-lr"
 packages=1
 while [ $# -gt 0 ]; do
@@ -75,6 +79,7 @@ while [ $# -gt 0 ]; do
         --retroarch) [ $# -ge 2 ] || die "$1 needs a value"; rakind=$2; shift ;;
         --no-steam) steam=0 ;;
         --no-auto-update) auto_update=0 ;;
+        --low-latency) low_latency=1 ;;
         -h|--help) usage; exit 0 ;;
         *) die "unknown option: $1 (see --help)" ;;
     esac
@@ -569,14 +574,6 @@ video_fullscreen = "true"
 video_vsync = "false"
 video_threaded = "false"
 video_smooth = "true"
-# Low latency: no third swapchain image queued, the pad read late, an
-# audio buffer of a frame and a half.
-video_max_swapchain_images = "2"
-input_poll_type_behavior = "2"
-audio_latency = "24"
-# Variable refresh rate where the display has it: frames at the game's
-# pace. Straight on the screen start-hakux-lr.sh turns it on.
-vrr_runloop_enable = "true"
 menu_driver = "$menu"
 # RetroArch's Qt desktop window: of no use here, and without a display
 # server Qt aborts RetroArch once a game has loaded.
@@ -599,6 +596,17 @@ preemptive_frames_enable = "false"
 savestate_auto_save = "false"
 savestate_auto_load = "false"
 EOF
+    if [ $low_latency = 1 ]; then
+        cat <<'EOF'
+
+# --low-latency: no third swapchain image queued, an audio buffer of a
+# frame and a half, and variable refresh rate where the display has it
+# (straight on the screen start-hakux-lr.sh turns it on).
+video_max_swapchain_images = "2"
+audio_latency = "24"
+vrr_runloop_enable = "true"
+EOF
+    fi
 } > "$prefix/retroarch.cfg"
 
 if [ ! -f "$prefix/user.cfg" ]; then
@@ -864,9 +872,11 @@ mkdir -p "$here/logs"
 [ ! -f "$corelog" ] || mv -f "$corelog" "$corelog.1"
 echo "start-hakux-lr: ${game:-RetroArch menu} ($mode, $audio)"
 echo "start-hakux-lr: logs: $corelog (the core), $here/logs/retroarch.log (RetroArch)"
-# Straight on the screen nothing turns variable refresh rate on: done here
-# for a display that has it, and undone afterwards for what draws next.
+# With variable refresh rate asked for (--low-latency, or user.cfg) nothing
+# turns it on straight on the screen: done here for a display that has it,
+# and undone afterwards for what draws next.
 if [ "$mode" = kms ] && command -v python3 >/dev/null 2>&1 &&
+    grep -qs '^ *vrr_runloop_enable *= *"true"' "$here/retroarch.cfg" "$here/user.cfg" &&
     ! grep -qs '^ *vrr_runloop_enable *= *"false"' "$here/user.cfg"; then
     vrr=
     for c in /dev/dri/card[0-9]*; do
