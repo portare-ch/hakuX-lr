@@ -315,10 +315,8 @@ int main(void)
     /* Known instruction boundaries in the synthetic RSQRT program below.
      * Intel must ignore these; AMD alone installs the corrections. */
     setenv("NC_KVM_RSQRT_SITES", "10a0e,10a19,10a4e,10a59", 1);
-    setenv("NC_KVM_RCP", "1", 1);
     cpu = core.cpu = nc_cpu_create(&cfg, core.kernel.kpcr_va);
     unsetenv("NC_KVM_RSQRT_SITES");
-    unsetenv("NC_KVM_RCP");
     if (!cpu) {
         printf("FAIL: a KVM guest CPU (needs /dev/kvm with TSC scaling and UMIP)\n");
         return 1;
@@ -574,10 +572,11 @@ int main(void)
     check(*(uint8_t *)nc_vm_host(&core.vm, CODE + 0xA0E) == (nc_rsqrt_host_amd() ? 0xCC : 0xF3),
           "RSQRT patching uses actual AMD host CPUID only");
 
-    /* The same for RCP (NC_KVM_RCP), its packed form on one register. */
+    /* The same for RCP, its packed form on one register: 1.5 first, where
+     * AMD's own result isn't Intel's. */
     const uint8_t rcp[] = {
         0x0F, 0x10, 0x05, 0x00, 0x03, 0x02, 0x00, /* movups xmm0, [0x20300] */
-        0x0F, 0x10, 0x0D, 0x40, 0x03, 0x02, 0x00, /* movups xmm1, [0x20340] */
+        0x0F, 0x10, 0x0D, 0xE0, 0x03, 0x02, 0x00, /* movups xmm1, [0x203E0] */
         0xF3, 0x0F, 0x53, 0xC1,                   /* rcpss xmm0, xmm1 */
         0x0F, 0x11, 0x05, 0xA0, 0x03, 0x02, 0x00, /* movups [0x203A0], xmm0 */
         0x0F, 0x53, 0xC9,                         /* rcpps xmm1, xmm1 */
@@ -585,11 +584,14 @@ int main(void)
         0x0F, 0xAE, 0x1D, 0xD0, 0x03, 0x02, 0x00, /* stmxcsr [0x203D0] */
         0xF4,
     };
+    const uint32_t rcp_inputs[] = {0x3FC00000, 0x40400000, 0x3C23D70A, 0x41800000};
     uint32_t rcp_expected[4];
     for (unsigned i = 0; i < 4; i++) {
         /* an Intel host keeps its own results */
-        rcp_expected[i] = nc_rsqrt_host_amd() ? nc_rcp_intel(inputs[i]) : nc_rcp_native(inputs[i]);
+        rcp_expected[i] = nc_rsqrt_host_amd() ? nc_rcp_intel(rcp_inputs[i]) : nc_rcp_native(rcp_inputs[i]);
     }
+    memcpy(nc_vm_host(&core.vm, DATA + 0x3E0), rcp_inputs, sizeof(rcp_inputs));
+    check(nc_rcp_intel(rcp_inputs[0]) == 0x3F2AA000, "RCP: the Intel result of 1.5");
     nc_wr32(scalar_expected, rcp_expected[0]);
     put(CODE + 0xA40, rcp, sizeof(rcp));
     run_at(CODE + 0xA40);

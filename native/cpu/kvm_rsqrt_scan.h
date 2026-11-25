@@ -25,7 +25,7 @@ typedef struct NcRsqrtScan {
     unsigned nsites;
     unsigned disputed;    /* reached, but the linear sweep decodes otherwise: left out */
     unsigned unreached;   /* in the linear sweep only: unreferenced code, or not code */
-    uint32_t *rcp_sites;  /* the same for RCPSS/RCPPS (NC_KVM_RCP) */
+    uint32_t *rcp_sites;  /* the same for RCPSS/RCPPS */
     unsigned nrcp, rcp_disputed, rcp_unreached;
     /* how the walk went */
     unsigned regions;     /* runs of code kept, each from one root */

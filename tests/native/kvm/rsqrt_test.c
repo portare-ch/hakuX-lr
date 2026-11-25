@@ -106,6 +106,21 @@ int main(int argc, char **argv)
         }
     }
     check(!rcp_failures, "RCP: powers of two, the exponent range's ends and special values");
+    /* Every bucket, against the table's rule: 2^25 / (4097 + 2 i) rounded
+     * to nearest, 12 bits kept. */
+    unsigned bucket_failures = 0;
+    for (uint32_t i = 0; i < 2048; i++) {
+        const uint32_t d = 4097 + 2 * i, q = ((2u << 25) + d) / (2 * d) - 4096;
+        for (uint32_t low = 0; low < 4096; low += 4095) {
+            const uint32_t got = nc_rcp_intel(0x40000000u | i << 12 | low), want = 0x3E800000u | q << 11;
+            if (got != want) {
+                printf("FAIL: RCP bucket %u expected %08x got %08x\n", i, want, got);
+                bucket_failures++;
+            }
+        }
+    }
+    failures += bucket_failures;
+    check(!bucket_failures, "RCP: all 2048 buckets, at both ends");
     /* The reference against a CPU that is one: every input on a host that
      * isn't AMD. An AMD host's own estimates differ, which is what the
      * correction is for: how many, for the record. */

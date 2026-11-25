@@ -178,12 +178,12 @@ each), as all do with `NC_KVM_RSQRT_INGUEST=0`.
 When the core is closed, the log reports how many instructions were
 corrected in the guest and how many through the host.
 
-`RCPSS` and `RCPPS` differ on AMD in the same way. `NC_KVM_RCP=1` corrects
-their register forms too, from the same scan, in the guest's handler with
-Intel's table (`native/cpu/intel_rcp_table.inc`, the one FEX uses). It is
-off by default. Memory forms keep the host CPU's result, as do register
-forms the guest's site table has no room for (2045 sites, RSQRT's
-included); the log counts both when the core is closed.
+`RCPSS` and `RCPPS` differ on AMD in the same way, and their register
+forms are corrected with the others: from the same scan, in the guest's
+handler, with Intel's table (`native/cpu/intel_rcp_table.inc`, the one FEX
+uses). `NC_KVM_RSQRT=0` turns both off. Memory forms keep the host CPU's
+result, as do register forms the guest's site table has no room for (2047
+sites, RSQRT's first); the log counts both when the core is closed.
 `NC_KVM_RSQRT_SITES` takes the addresses of RCP instructions as well.
 
 `kvm-rsqrt-test` checks the Intel reference and the operand decoder without

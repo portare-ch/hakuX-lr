@@ -3,8 +3,7 @@
 /*
  * kvm-rsqrt-bench ss|ps|rcpss|rcpps N: a guest loop of N RSQRTSS (RSQRTPS,
  * RCPSS, RCPPS) under KVM, timed. The environment picks the path: no
- * NC_KVM_RSQRT_SITES, the host's own result; NC_KVM_RSQRT_SITES=1000c (and
- * NC_KVM_RCP=1 for RCP), an INT3 over the instruction in the guest's #BP
+ * NC_KVM_RSQRT_SITES, the host's own result; NC_KVM_RSQRT_SITES=1000c, an INT3 over the instruction in the guest's #BP
  * handler; with NC_KVM_RSQRT_INGUEST=0 as well, a KVM exit per
  * instruction. Prints the time per iteration and the last result.
  */

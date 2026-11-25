@@ -166,17 +166,14 @@ int main(void)
     rsqrt_patch(cpu, CODE, sizeof(scalar));
     check(vm.phys[0] == 0xCC && !cpu->rsqrt_sites[0].armed, "existing HLE hook retains ownership of its address");
 
-    /* RCPSS/RCPPS: an opt-in (NC_KVM_RCP), register forms only. */
+    /* RCPSS/RCPPS: register forms only. */
     cpu->nhooks = 0;
     const uint8_t rcpss[] = {0xF3, 0x0F, 0x53, 0xC1}, rcpps[] = {0x0F, 0x53, 0xD2}; /* xmm0, xmm1; xmm2, xmm2 */
     const uint32_t rcp_expected[] = {0x3F7FF000, 0x3E7FF000, 0x407FF000, 0x3D7FF000};
     memcpy(vm.phys, rcpss, sizeof(rcpss));
     memcpy(vm.phys + 0x40, rcpps, sizeof(rcpps));
     rsqrt_patch(cpu, CODE, NC_PAGE);
-    check(vm.phys[0] == 0xF3 && vm.phys[0x40] == 0x0F, "RCP sites stay the host CPU's without the opt-in");
-    cpu->rcp_on = true;
-    rsqrt_patch(cpu, CODE, NC_PAGE);
-    check(vm.phys[0] == 0xCC && vm.phys[0x40] == 0xCC && cpu->rcp_armed == 2 && nc_rd32(guest) == 2 &&
+    check(vm.phys[0] == 0xCC && vm.phys[0x40] == 0xCC && cpu->reg_armed[1] == 2 && nc_rd32(guest) == 2 &&
           nc_rd32(guest + 8) == ((LIN_RSQ_RTN + (64 + 1) * RSQ_RTN_SIZE) | 4u << 16 | 1u << 24) &&
           nc_rd32(guest + 16) == ((LIN_RSQ_RTN + (2 * 8 + 2) * RSQ_RTN_SIZE) | 3u << 16 | 1u << 24),
           "RCP register forms are in the guest's table as family 1");
@@ -192,25 +189,12 @@ int main(void)
     memcpy(before.xmm[2], rcp_expected, 16);
     check(!memcmp(&before, &cpu->frame.fpu, sizeof(before)) && cpu->rcp_hits == 2,
           "all four lanes of an aliased RCPPS corrected");
-    /* the table has no room: RSQRT sites keep the exit, RCP sites aren't armed */
     memcpy(vm.phys + 0x40, packed, sizeof(packed));
     rsqrt_patch(cpu, CODE + 0x40, sizeof(packed));
-    check(cpu->rcp_armed == 1 && nc_rd32(guest) == 2, "an RSQRT site replaces the RCP site at its address");
-    cpu->rcp_armed = RSQ_GUEST_MAX;
-    cpu->rsqrt_guest_stale = true;
-    rsqrt_guest_sync(cpu);
-    check(nc_rd32(guest) == 1 && nc_rd32(guest + 4) == CODE && cpu->rsqrt_sites[1].armed,
-          "with the table full of RCP sites an RSQRT site keeps the host exit");
-    cpu->rcp_armed = 1;
+    check(cpu->reg_armed[1] == 1 && cpu->reg_armed[0] == 1 && nc_rd32(guest) == 2,
+          "an RSQRT site replaces the RCP site at its address");
     rsqrt_restore(cpu);
-    check(vm.phys[0] == 0xF3 && cpu->rcp_armed == 0, "RCP patches are restored");
-    cpu->rcp_armed = RSQ_GUEST_MAX;
-    rsqrt_patch(cpu, CODE, sizeof(rcpss));
-    check(vm.phys[0] == 0xF3 && cpu->rcp_left_full == 1, "an RCP site past the table's room stays the host CPU's");
-    cpu->rcp_armed = 0;
-    rsqrt_patch(cpu, CODE, sizeof(rcpss));
-    check(vm.phys[0] == 0xCC && cpu->rcp_armed == 1, "and is armed once there is room");
-    rsqrt_restore(cpu);
+    check(vm.phys[0] == 0xF3 && cpu->reg_armed[1] == 0 && cpu->reg_armed[0] == 0, "RCP patches are restored");
     const uint8_t rcp_memory[] = {0xF3, 0x0F, 0x53, 0x05, 0, 0, 2, 0};
     memcpy(vm.phys, rcp_memory, sizeof(rcp_memory));
     rsqrt_patch(cpu, CODE, sizeof(rcp_memory));
@@ -218,6 +202,60 @@ int main(void)
     check(vm.phys[0] == 0xF3 && !cpu->rsqrt_sites[0].armed && cpu->rcp_left_mem == 1 && nc_rd32(guest) == 0,
           "an RCP memory form stays the host CPU's, counted once");
     rsqrt_restore(cpu);
+
+    /* The guest's table at its limit: a site every four bytes of three pages,
+     * RSQRT but for the RCP at either end. */
+    enum { FULL = RSQ_GUEST_MAX, LAST = FULL + 1 };
+    free(cpu->rsqrt_sites);
+    cpu->rsqrt_sites = calloc(LAST + 1, sizeof(*cpu->rsqrt_sites));
+    if (!cpu->rsqrt_sites || (LAST + 1) * 4 > 3 * NC_PAGE) {
+        return 1;
+    }
+    cpu->nrsqrt = LAST + 1;
+    for (unsigned i = 1; i <= 2; i++) {
+        vm.pte[CODE / NC_PAGE + i] = (i + 1) * NC_PAGE | NC_PTE_VALID;
+        vm.vprot[CODE / NC_PAGE + i] = PROT_READ | PROT_WRITE;
+    }
+#define SITE(i) (vm.phys + ((i) * 4u < NC_PAGE ? (i) * 4u : NC_PAGE + (i) * 4u))
+    for (unsigned i = 0; i <= LAST; i++) {
+        cpu->rsqrt_sites[i].eip = CODE + i * 4;
+        memcpy(SITE(i), i == LAST ? rcpss : scalar, 4);
+    }
+    /* RSQRT fills the table, the RCP after it finds no room */
+    memset(SITE(0), 0x90, 4);
+    rsqrt_patch(cpu, CODE + 4, FULL * 4);
+    rsqrt_patch(cpu, CODE + LAST * 4, 4);
+    bool all_rsqrt = nc_rd32(guest) == FULL;
+    for (unsigned i = 0; i < FULL; i++) {
+        all_rsqrt &= nc_rd32(guest + 4 + 8 * i) == CODE + (i + 1) * 4 && !(nc_rd32(guest + 8 + 8 * i) >> 24);
+    }
+    check(all_rsqrt && cpu->reg_armed[0] == FULL && cpu->reg_armed[1] == 0 && *SITE(LAST) == 0xF3 &&
+          cpu->rcp_left_full == 1, "a table full of RSQRT sites keeps them all: the RCP site is left, and counted");
+    rsqrt_patch(cpu, CODE + LAST * 4, 4);
+    check(cpu->rcp_left_full == 1, "once");
+    rsqrt_restore(cpu);
+    /* an RCP armed while there was room gives its place to the last RSQRT */
+    memcpy(SITE(0), rcpss, 4);
+    rsqrt_patch(cpu, CODE, FULL * 4);
+    check(*SITE(0) == 0xCC && cpu->reg_armed[1] == 1 && cpu->reg_armed[0] == FULL - 1 && nc_rd32(guest) == FULL &&
+          nc_rd32(guest + 4) == CODE && nc_rd32(guest + 8) >> 24 == 1, "an RCP site takes the room RSQRT leaves");
+    rsqrt_patch(cpu, CODE + FULL * 4, 4);
+    all_rsqrt = nc_rd32(guest) == FULL;
+    for (unsigned i = 0; i < FULL; i++) {
+        all_rsqrt &= nc_rd32(guest + 4 + 8 * i) == CODE + (i + 1) * 4 && !(nc_rd32(guest + 8 + 8 * i) >> 24);
+    }
+    check(all_rsqrt && *SITE(0) == 0xF3 && !cpu->rsqrt_sites[0].armed && cpu->reg_armed[1] == 0 &&
+          cpu->rcp_left_full == 2, "and gives it up to an RSQRT site armed later, counted");
+    /* past the table RSQRT keeps the exit, as before */
+    memcpy(SITE(LAST), scalar, 4);
+    rsqrt_patch(cpu, CODE + LAST * 4, 4);
+    check(*SITE(LAST) == 0xCC && cpu->rsqrt_sites[LAST].armed && nc_rd32(guest) == FULL &&
+          cpu->reg_armed[0] == FULL + 1, "an RSQRT site past the table keeps the host exit");
+    rsqrt_restore(cpu);
+    rsqrt_patch(cpu, CODE, 4);
+    check(*SITE(0) == 0xCC && cpu->reg_armed[1] == 1 && nc_rd32(guest) == 1, "an RCP site left is armed once there is room");
+    rsqrt_restore(cpu);
+#undef SITE
 
     free(cpu->rsqrt_sites);
     free(cpu->sys);
