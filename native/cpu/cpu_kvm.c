@@ -1954,7 +1954,7 @@ static bool sysop(NcCpu *cpu, enum NcSysOp op, unsigned size)
  * NC_KVM_DIRECT=0 (for an A/B check), the page stays a window whose every
  * access exits. */
 #define DIRECT_SLOT 2
-#define DIRECT_MAX  8
+#define DIRECT_MAX  NC_MMIO_DIRECT_MAX
 
 static void direct_pages(NcCpu *cpu)
 {

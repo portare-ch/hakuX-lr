@@ -31,14 +31,16 @@ static unsigned g_logged;
 static uint64_t g_total;
 static uint64_t g_other;       /* accesses whose site found no slot in a few probes */
 
-#define MAX_DIRECT 8
-static NcMmioDirect g_direct[MAX_DIRECT];
+static NcMmioDirect g_direct[NC_MMIO_DIRECT_MAX];
 static unsigned g_ndirect;
 
 void nc_mmio_direct(const NcMmioDirect *page)
 {
-    if (g_ndirect < MAX_DIRECT) {
+    if (g_ndirect < NC_MMIO_DIRECT_MAX) {
         g_direct[g_ndirect++] = *page;
+    } else {
+        nc_log("hakuX-lr-native", "mmio: device page %08x stays a window: no room for more than %d",
+               page->addr, NC_MMIO_DIRECT_MAX);
     }
 }
 

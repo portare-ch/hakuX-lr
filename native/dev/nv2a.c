@@ -875,6 +875,13 @@ void nc_dev_nv2a_init(uint32_t ram)
     const NcMmioDirect pfb = {NV2A_BASE + (NV_PFB_WBC & ~0xFFFu), g_regs + (NV_PFB_WBC & ~0xFFFu),
                               NV2A_BASE + NV_PFB_WBC};
     nc_mmio_direct(&pfb);
+    /* PGRAPH's first two pages, where every register reads as stored too:
+     * D3D's interrupt handler reads seven of them for a software method's
+     * trap, thousands of times a second in some titles. */
+    for (uint32_t page = NV_PGRAPH_INTR & ~0xFFFu; page <= (NV_PGRAPH_INTR & ~0xFFFu) + 0x1000u; page += 0x1000u) {
+        const NcMmioDirect pgraph = {NV2A_BASE + page, g_regs + page, 0};
+        nc_mmio_direct(&pgraph);
+    }
     g_vbt.quit = 0;
     g_vbt.started = pthread_create(&g_vbt.th, NULL, vblank_thread, NULL) == 0;
 }
