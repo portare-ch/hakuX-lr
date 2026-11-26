@@ -205,6 +205,16 @@ static void census_log(void)
     }
 }
 
+/* Push-buffer mode: CACHE1's PUT, GET and REF also in channel 0's page, which the guest reads directly. */
+static void user_mirror(uint32_t off)
+{
+    if (__atomic_load_n(&g_pbmode, __ATOMIC_ACQUIRE) && off >= NV_PFIFO_CACHE1_DMA_PUT &&
+        off < NV_PFIFO_CACHE1_REF + 4) {
+        const uint32_t word = off & ~3u;
+        __atomic_store_n(reg(word - NV_PFIFO_CACHE1_DMA_PUT + NV_USER_DMA_PUT), ld(word), __ATOMIC_RELEASE);
+    }
+}
+
 /* CACHE1_STATUS reads left that still say "not empty" after the pusher was
  * read busy (nv2a_read_reg) */
 static unsigned g_cache1_busy_reads;
@@ -538,6 +548,7 @@ static void nv2a_write(void *opaque, uint32_t off, uint64_t value, unsigned size
         }
         __atomic_store_n(reg(off - NV_USER_DMA_PUT + NV_PFIFO_CACHE1_DMA_PUT), (uint32_t)value,
                          __ATOMIC_RELEASE);
+        user_mirror(off - NV_USER_DMA_PUT + NV_PFIFO_CACHE1_DMA_PUT);
         if (off == NV_USER_DMA_PUT) {
             hle_pb_put();
         } else if (off == NV_USER_DMA_GET) {
@@ -656,6 +667,7 @@ static void nv2a_write(void *opaque, uint32_t off, uint64_t value, unsigned size
         break;
     }
     memcpy(g_regs + off, &value, size);
+    user_mirror(off);
     if (off < NV_PFB_WBC + 4 && off + size > NV_PFB_WBC) {
         /* The write-combine flush D3D asks for before each kick, and then
          * polls: never pending here, so the bit isn't kept, whatever the
@@ -875,6 +887,9 @@ void nc_dev_nv2a_init(uint32_t ram)
     const NcMmioDirect pfb = {NV2A_BASE + (NV_PFB_WBC & ~0xFFFu), g_regs + (NV_PFB_WBC & ~0xFFFu),
                               NV2A_BASE + NV_PFB_WBC};
     nc_mmio_direct(&pfb);
+    /* Channel 0's page: D3D reads its GET after each kick (user_mirror). */
+    const NcMmioDirect user = {NV2A_BASE + (NV_USER_DMA_PUT & ~0xFFFu), g_regs + (NV_USER_DMA_PUT & ~0xFFFu), 0};
+    nc_mmio_direct(&user);
     g_vbt.quit = 0;
     g_vbt.started = pthread_create(&g_vbt.th, NULL, vblank_thread, NULL) == 0;
 }
@@ -959,6 +974,7 @@ void hle_host_gpu_reg_set(uint32_t off, uint32_t v)
 {
     if (g_regs && off < NV2A_SIZE - 3) {
         __atomic_store_n(reg(off & ~3u), v, __ATOMIC_RELEASE);
+        user_mirror(off);
     }
 }
 
@@ -971,6 +987,7 @@ void hle_host_gpu_reg_mask(uint32_t off, uint32_t mask, uint32_t bits)
     while (!__atomic_compare_exchange_n(r, &v, (v & ~mask) | (bits & mask), false,
                                         __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
     }
+    user_mirror(off);
 }
 
 void hle_host_gpu_irq_update(void)
@@ -983,6 +1000,9 @@ void hle_host_gpu_irq_update(void)
 void hle_host_pb_mode(bool on)
 {
     __atomic_store_n(&g_pbmode, on, __ATOMIC_RELEASE);
+    for (uint32_t r = NV_PFIFO_CACHE1_DMA_PUT; on && g_regs && r <= NV_PFIFO_CACHE1_REF; r += 4) {
+        user_mirror(r);
+    }
     nc_log("hakuX-lr-native", "nv2a: push-buffer mode %s", on ? "on" : "off");
 }
 

@@ -47,6 +47,8 @@ uint64_t hle_pbd_const_reuses(void);
 /* debug: vertex ranges read in place and copied; submissions closed for a
  * barrier's waiter; DRAW_ARRAYS drawn without indices (one run in order) */
 void hle_pbd_vb_counts(uint64_t *in_place, uint64_t *copied, uint64_t *bnd_kicks, uint64_t *unindexed);
+/* Copies of ranges copied again in a frame, since the last call. */
+uint32_t hle_pbd_take_recopies(void);
 /* debug: small targets copied back to guest memory (writeback_small) */
 uint64_t hle_pbd_writebacks(void);
 /* Decode thread, between methods: a guest store waits for `value` (the

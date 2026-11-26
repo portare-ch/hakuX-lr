@@ -83,6 +83,8 @@ static struct {
     HleThread th;
     HleSem kick;
     uint32_t kicks;                     /* hle_pb_kick calls */
+    uint32_t frame_kicks;               /* ... at the last flip */
+    bool puts_wait;                     /* hle_pb_puts_wait (atomic) */
     HlePusher p;
     bool synced;                        /* the pusher's DMA object and GET are the GPU's */
     uint32_t inst;
@@ -294,6 +296,8 @@ static bool flip_done(void)
     return surf_get(SURF_READ) != surf_get(SURF_WRITE);
 }
 
+static void puts_wait_frame(void);
+
 /* The Kelvin methods kelvin() acts on (its cases, by method / 4): every
  * other one is only its two register shadows' (hle_kelvin_method,
  * hle_pbd_method) and takes no look through the switch. */
@@ -334,6 +338,7 @@ static int kelvin(uint32_t m, uint32_t v)
         surf_field(SURF_WRITE, mod ? (surf_get(SURF_WRITE) + 1) % mod : 0);
         hle_host_gpu_trace(HLE_GTR_FLIP_INC, surf_get(SURF_WRITE));
         g_pb.flips++;
+        puts_wait_frame();
         break;
     }
     case NV097_FLIP_STALL:
@@ -1162,6 +1167,7 @@ static struct {
                                          * waiting for arena room, the frame pace */
 } g_cu;
 static __thread bool t_decoder;
+static bool g_catch_up_on;
 
 /* the decode thread, after each pass */
 static void catch_up_check(void)
@@ -1190,7 +1196,7 @@ static void consume(void)
     catch_up_check();
 }
 
-/* the guest's thread, at its store (barrier.c) */
+/* the guest's thread, at its store (barrier.c) or its PUT write (hle_pb_put) */
 static void catch_up(void)
 {
     if (!g_pb.on || t_decoder) {
@@ -1201,13 +1207,30 @@ static void catch_up(void)
         return;
     }
     const int64_t t0 = hle_now_ns();
-    hle_host_guest_hold(true);              /* the guest's time stands still meanwhile */
     while (hle_sem_trywait(&g_cu.sem)) {
-        /* a post that came as an earlier wait timed out */
+        /* a post that came as an earlier wait timed out, or was spun for */
     }
     g_cu.target = put;
     __atomic_store_n(&g_cu.state, 1, __ATOMIC_RELEASE);
     hle_pb_kick();
+    /* a draw or two takes the decoder microseconds */
+    for (unsigned i = 0; __atomic_load_n(&g_cu.state, __ATOMIC_ACQUIRE) == 1; i++) {
+#if defined(__x86_64__)
+        __builtin_ia32_pause();
+#elif defined(__aarch64__)
+        __asm__ volatile("yield");
+#endif
+        if ((i & 31) == 31 && hle_now_ns() - t0 > 100000) {
+            break;
+        }
+    }
+    if (__atomic_load_n(&g_cu.state, __ATOMIC_ACQUIRE) == 2) {
+        __atomic_store_n(&g_cu.state, 0, __ATOMIC_RELEASE);
+        g_cu.ns += (uint64_t)(hle_now_ns() - t0);
+        __atomic_fetch_add(&g_cu.waits, 1, __ATOMIC_RELAXED);
+        return;
+    }
+    hle_host_guest_hold(true);              /* the guest's time stands still meanwhile */
     /* in 2 ms slices: a decoder out of arena room waits for the GPU to finish
      * all it was given (uncapped, the Story fight: over 50 ms), and the guest
      * doesn't wait for the GPU */
@@ -1467,6 +1490,21 @@ static uint32_t scout(void)
 
 /* the barrier's, while a read of a report waits: the decoder waits on the
  * guest itself (the catch-up's reasons to give up) */
+bool hle_pb_puts_wait(void)
+{
+    return __atomic_load_n(&g_pb.puts_wait, __ATOMIC_RELAXED);
+}
+
+/* At a flip: the next frame's PUT writes wait if this one copied the same
+ * vertex ranges hundreds of times, about a kick each (a store fault a draw). */
+static void puts_wait_frame(void)
+{
+    const uint32_t kicks = g_pb.kicks - g_pb.frame_kicks, recopies = hle_pbd_take_recopies();
+    g_pb.frame_kicks = g_pb.kicks;
+    __atomic_store_n(&g_pb.puts_wait, recopies >= 256 && kicks >= recopies / 2 &&
+                                      g_catch_up_on, __ATOMIC_RELAXED);
+}
+
 static bool decoder_held(void)
 {
     return g_pb.trap_wait || g_pb.flip_wait || g_pb.pace_wait || !fifo_open();
@@ -1510,6 +1548,23 @@ static bool kick_wait_brief(uint32_t seen)
             return false;
         }
     }
+#elif defined(__x86_64__)
+    /* PAUSE burns the core: only while passes follow each other closely (a kick a draw) */
+    static int64_t last;
+    const int64_t t0 = hle_now_ns();
+    const bool close = t0 - last < 60000;
+    last = t0;
+    for (unsigned i = 0; close; i++) {
+        if (__atomic_load_n(&g_pb.kicks, __ATOMIC_ACQUIRE) != seen || g_pb.stop) {
+            last = hle_now_ns();
+            return true;
+        }
+        __builtin_ia32_pause();
+        if ((i & 31) == 31 && hle_now_ns() - t0 > 100000) {
+            break;
+        }
+    }
+    return false;
 #else
     (void)seen;
     return false;
@@ -1733,6 +1788,9 @@ void hle_pb_put(void)
     }
     hle_barrier_rearm_texels();
     hle_pb_kick();
+    if (hle_pb_puts_wait()) {
+        catch_up();
+    }
 }
 
 void hle_pb_start(void)
@@ -1757,7 +1815,8 @@ void hle_pb_start(void)
     hle_barrier_set_flush(boundary_request);
     {   /* debug: HAKUX_HLE_PB_CATCHUP=0, no catch-up (A/B) */
         const char *e = getenv("HAKUX_HLE_PB_CATCHUP");
-        hle_barrier_set_catch_up(e && !strcmp(e, "0") ? NULL : catch_up);
+        g_catch_up_on = !(e && !strcmp(e, "0"));
+        hle_barrier_set_catch_up(g_catch_up_on ? catch_up : NULL);
     }
     {   /* debug: HAKUX_HLE_PB_VISGATE=0, no report gate (A/B) */
         const char *e = getenv("HAKUX_HLE_PB_VISGATE");

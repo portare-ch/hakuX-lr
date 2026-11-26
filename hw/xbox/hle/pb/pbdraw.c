@@ -291,6 +291,7 @@ static struct {
     uint64_t vb_place, vb_copied;       /* vertex ranges read in place, copied */
     uint64_t seq_draws;                 /* DRAW_ARRAYS of one run in order, drawn without indices */
     uint64_t bnd_kicks;                 /* submissions closed for a barrier's waiter */
+    uint32_t recopies;                  /* hle_pbd_take_recopies */
     uint64_t sent[SENT_SLOTS];              /* program hashes the back end has (a set; 0 free) */
     unsigned nsent;
     uint32_t pgen;                          /* bumped by program memory writes */
@@ -549,6 +550,13 @@ uint64_t hle_pbd_const_reuses(void)
 uint64_t hle_pbd_writebacks(void)
 {
     return g_pd.writebacks;
+}
+
+uint32_t hle_pbd_take_recopies(void)
+{
+    const uint32_t n = g_pd.recopies;
+    g_pd.recopies = 0;
+    return n;
 }
 
 void hle_pbd_vb_counts(uint64_t *in_place, uint64_t *copied, uint64_t *bnd_kicks, uint64_t *unindexed)
@@ -4742,6 +4750,16 @@ static bool recopied(uint32_t from, uint32_t len)
     return t->again;
 }
 
+static void arm_recopied(uint32_t from, uint32_t len)
+{
+    if (recopied(from, len)) {
+        g_pd.recopies++;
+        if (!hle_pb_puts_wait()) {
+            hle_barrier_arm_copied(from, len);
+        }
+    }
+}
+
 /* The bytes of an attribute's component as the back end fetches it, which
  * its address must be a multiple of (vk/draw.c vat_format: CMP as 16-bit
  * halves). */
@@ -4801,9 +4819,7 @@ static bool vb_realign(HleCmdDraw *d, unsigned b, const uint8_t *src, uint32_t f
     if (off == HLE_ARENA_FULL) {
         return false;
     }
-    if (recopied(from, len)) {
-        hle_barrier_arm_copied(from, len);
-    }
+    arm_recopied(from, len);
     for (uint32_t v = 0; v < (st ? n : 1); v++) {
         for (unsigned i = 0; i < na; i++) {
             memcpy(dst + v * ns + at[i].to, src + v * st + at[i].off, at[i].size);
@@ -4901,9 +4917,7 @@ static void draw_arrays(void)
             skip(SK_DRAW_ARRAYS_ARENA);
             return;
         }
-        if (recopied(from, len)) {
-            hle_barrier_arm_copied(from, len);
-        }
+        arm_recopied(from, len);
         memcpy(dst, src, len);
         d.bind_off[b] = off;
         g_pd.vb_copied++;
