@@ -36,6 +36,8 @@ void hle_pb_boundary_request(uint64_t value);
 void hle_pb_put(void);
 /* PUT writes wait for the decoder to reach them: no store then meets a draw pushed and not read. */
 bool hle_pb_puts_wait(void);
+/* The guest is writing CACHE1's PUT itself, a PUT that doesn't wait (before the register holds it). */
+void hle_pb_put_direct(void);
 /* The guest is writing DMA_PUT = put (its vCPU thread), before the register
  * holds it: the report scout reads what it pushed (mem/barrier.h
  * hle_barrier_report_pushed) before the decoder can. */

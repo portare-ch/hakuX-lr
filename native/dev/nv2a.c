@@ -532,6 +532,8 @@ static void nv2a_write(void *opaque, uint32_t off, uint64_t value, unsigned size
         }
         if (off == NV_PFIFO_CACHE1_DMA_GET) {
             hle_pb_get();                       /* a channel set-up: the scout syncs again */
+        } else {
+            hle_pb_put_direct();
         }
     }
     if (g_pbmode && size == 4 && (off == NV_USER_DMA_PUT || off == NV_USER_DMA_GET ||

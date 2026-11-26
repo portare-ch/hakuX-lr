@@ -84,7 +84,7 @@ static struct {
     HleSem kick;
     uint32_t kicks;                     /* hle_pb_kick calls */
     uint32_t frame_kicks;               /* ... at the last flip */
-    bool puts_wait;                     /* hle_pb_puts_wait (atomic) */
+    int puts_wait;                      /* PW_* (atomic) */
     HlePusher p;
     bool synced;                        /* the pusher's DMA object and GET are the GPU's */
     uint32_t inst;
@@ -297,6 +297,8 @@ static bool flip_done(void)
 }
 
 static void puts_wait_frame(void);
+/* g_pb.puts_wait: the decoder asks at a flip, the guest's thread turns it on at a PUT caught up with */
+enum { PW_OFF, PW_ASKED, PW_ON };
 
 /* The Kelvin methods kelvin() acts on (its cases, by method / 4): every
  * other one is only its two register shadows' (hle_kelvin_method,
@@ -1196,15 +1198,15 @@ static void consume(void)
     catch_up_check();
 }
 
-/* the guest's thread, at its store (barrier.c) or its PUT write (hle_pb_put) */
-static void catch_up(void)
+/* the guest's thread, at its PUT write (hle_pb_put): true if the decoder reached the PUT */
+static bool catch_up_put(void)
 {
     if (!g_pb.on || t_decoder) {
-        return;
+        return false;
     }
     const uint32_t put = hle_host_gpu_reg(NV_PFIFO_CACHE1_DMA_PUT);
     if (__atomic_load_n(&g_pb.p.get, __ATOMIC_RELAXED) == put) {
-        return;
+        return true;
     }
     const int64_t t0 = hle_now_ns();
     while (hle_sem_trywait(&g_cu.sem)) {
@@ -1228,7 +1230,7 @@ static void catch_up(void)
         __atomic_store_n(&g_cu.state, 0, __ATOMIC_RELEASE);
         g_cu.ns += (uint64_t)(hle_now_ns() - t0);
         __atomic_fetch_add(&g_cu.waits, 1, __ATOMIC_RELAXED);
-        return;
+        return __atomic_load_n(&g_pb.p.get, __ATOMIC_RELAXED) == put;
     }
     hle_host_guest_hold(true);              /* the guest's time stands still meanwhile */
     /* in 2 ms slices: a decoder out of arena room waits for the GPU to finish
@@ -1236,7 +1238,8 @@ static void catch_up(void)
      * doesn't wait for the GPU */
     bool posted = false;
     for (int ms = 0, arena = 0; ms < 50 && !posted; ms += 2) {
-        posted = hle_sem_timedwait(&g_cu.sem, 2);
+        /* a post alone may be an earlier wait's, late */
+        posted = hle_sem_timedwait(&g_cu.sem, 2) && __atomic_load_n(&g_cu.state, __ATOMIC_ACQUIRE) == 2;
         const char *ph = hle_pbd_phase();
         arena = ph && *ph == 'a' ? arena + 1 : 0;   /* twice: a wait, not an allocation */
         if (!posted && arena == 2) {
@@ -1265,6 +1268,13 @@ static void catch_up(void)
     hle_host_guest_hold(false);
     g_cu.ns += (uint64_t)(hle_now_ns() - t0);
     __atomic_fetch_add(&g_cu.waits, 1, __ATOMIC_RELAXED);
+    return __atomic_load_n(&g_pb.p.get, __ATOMIC_RELAXED) == put;
+}
+
+/* the guest's thread, at its store (barrier.c) */
+static void catch_up(void)
+{
+    catch_up_put();
 }
 
 /* The report scout uses a second DMA pusher on the guest thread at PUT writes and protected
@@ -1492,17 +1502,28 @@ static uint32_t scout(void)
  * guest itself (the catch-up's reasons to give up) */
 bool hle_pb_puts_wait(void)
 {
-    return __atomic_load_n(&g_pb.puts_wait, __ATOMIC_RELAXED);
+    return __atomic_load_n(&g_pb.puts_wait, __ATOMIC_ACQUIRE) == PW_ON;
+}
+
+void hle_pb_put_direct(void)
+{
+    int on = PW_ON;
+    __atomic_compare_exchange_n(&g_pb.puts_wait, &on, PW_ASKED, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
 }
 
 /* At a flip: the next frame's PUT writes wait if this one copied the same
  * vertex ranges hundreds of times, about a kick each (a store fault a draw). */
 static void puts_wait_frame(void)
 {
-    const uint32_t kicks = g_pb.kicks - g_pb.frame_kicks, recopies = hle_pbd_take_recopies();
-    g_pb.frame_kicks = g_pb.kicks;
-    __atomic_store_n(&g_pb.puts_wait, recopies >= 256 && kicks >= recopies / 2 &&
-                                      g_catch_up_on, __ATOMIC_RELAXED);
+    const uint32_t now = __atomic_load_n(&g_pb.kicks, __ATOMIC_ACQUIRE);
+    const uint32_t kicks = now - g_pb.frame_kicks, recopies = hle_pbd_take_recopies();
+    g_pb.frame_kicks = now;
+    if (recopies >= 256 && kicks >= recopies / 2 && g_catch_up_on) {
+        int off = PW_OFF;
+        __atomic_compare_exchange_n(&g_pb.puts_wait, &off, PW_ASKED, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+    } else {
+        __atomic_store_n(&g_pb.puts_wait, PW_OFF, __ATOMIC_RELEASE);
+    }
 }
 
 static bool decoder_held(void)
@@ -1788,8 +1809,13 @@ void hle_pb_put(void)
     }
     hle_barrier_rearm_texels();
     hle_pb_kick();
-    if (hle_pb_puts_wait()) {
-        catch_up();
+    /* on only from a PUT the decoder reached: every draw it reads after that is one waited for */
+    int pw = __atomic_load_n(&g_pb.puts_wait, __ATOMIC_ACQUIRE);
+    if (pw != PW_OFF) {
+        const int to = catch_up_put() ? PW_ON : PW_ASKED;
+        if (to != pw) {
+            __atomic_compare_exchange_n(&g_pb.puts_wait, &pw, to, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+        }
     }
 }
 
