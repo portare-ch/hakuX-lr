@@ -37,6 +37,7 @@ void nc_mmio_register(const NcMmioDev *dev);
  * register on the page whose writes the device has nothing to do for, which
  * the backend may drop without telling it. FEX's backend ignores all this:
  * its accesses are calls, not exits. */
+#define NC_MMIO_DIRECT_MAX 32
 typedef struct NcMmioDirect {
     uint32_t addr;
     uint8_t *host;
